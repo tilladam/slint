@@ -1,0 +1,295 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for NodeEditorBackground and NodeEditorOverlay components
+
+TestCase := Window {
+    width: 800phx;
+    height: 600phx;
+
+    // Shared state
+    property <length> pan-x: 0phx;
+    property <length> pan-y: 0phx;
+    property <float> zoom: 1.0;
+
+    // Callback tracking (count only since callbacks are now void)
+    property <int> link-created-count: 0;
+    property <int> link-dropped-count: 0;
+    property <int> context-menu-count: 0;
+
+    background := NodeEditorBackground {
+        width: 100%;
+        height: 100%;
+        pan-x <=> root.pan-x;
+        pan-y <=> root.pan-y;
+        zoom: root.zoom;
+        grid-spacing: 24px;
+        grid-color: #333333;
+        background-color: #1a1a1a;
+    }
+
+    overlay := NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+        pan-x <=> root.pan-x;
+        pan-y <=> root.pan-y;
+        zoom <=> root.zoom;
+        min-zoom: 0.25;
+        max-zoom: 4.0;
+        selection-box-color: #4488ff40;
+        active-link-color: #ffffff;
+
+        link-created => {
+            root.link-created-count += 1;
+        }
+
+        link-dropped => {
+            root.link-dropped-count += 1;
+        }
+
+        context-menu-requested => {
+            root.context-menu-count += 1;
+        }
+    }
+
+    // Expose properties for testing (in-out to allow setting from tests)
+    in-out property <length> test-pan-x <=> pan-x;
+    in-out property <length> test-pan-y <=> pan-y;
+    in-out property <float> test-zoom <=> zoom;
+    out property <length> bg-grid-spacing: background.grid-spacing;
+    out property <color> bg-grid-color: background.grid-color;
+}
+
+/*
+
+```rust
+// Test: NodeEditorBackground default properties
+let instance = TestCase::new().unwrap();
+
+// Check default values
+assert_eq!(instance.get_test_pan_x(), 0.0);
+assert_eq!(instance.get_test_pan_y(), 0.0);
+assert_eq!(instance.get_test_zoom(), 1.0);
+assert_eq!(instance.get_bg_grid_spacing(), 24.0);
+```
+
+```rust
+// Test: Middle mouse button panning
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Initial state
+assert_eq!(instance.get_test_pan_x(), 0.0);
+assert_eq!(instance.get_test_pan_y(), 0.0);
+
+// Start panning with middle mouse button
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(400.0, 300.0) });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(400.0, 300.0), button: PointerEventButton::Middle });
+
+// Pan should not change yet (just pressed)
+assert_eq!(instance.get_test_pan_x(), 0.0);
+assert_eq!(instance.get_test_pan_y(), 0.0);
+
+// Move mouse while middle button is pressed
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(500.0, 350.0) });
+
+// Pan should update
+assert_eq!(instance.get_test_pan_x(), 100.0);
+assert_eq!(instance.get_test_pan_y(), 50.0);
+
+// Continue moving
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(450.0, 400.0) });
+assert_eq!(instance.get_test_pan_x(), 50.0);
+assert_eq!(instance.get_test_pan_y(), 100.0);
+
+// Release middle button
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(450.0, 400.0), button: PointerEventButton::Middle });
+
+// Pan should stay at last position
+assert_eq!(instance.get_test_pan_x(), 50.0);
+assert_eq!(instance.get_test_pan_y(), 100.0);
+
+// Moving after release should not change pan
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(200.0, 200.0) });
+assert_eq!(instance.get_test_pan_x(), 50.0);
+assert_eq!(instance.get_test_pan_y(), 100.0);
+```
+
+```rust
+// Test: Scroll wheel zooming
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Initial zoom
+assert_eq!(instance.get_test_zoom(), 1.0);
+
+// Scroll up to zoom in
+instance.window().dispatch_event(WindowEvent::PointerScrolled {
+    position: LogicalPosition::new(400.0, 300.0),
+    delta_x: 0.0,
+    delta_y: 1.0  // Positive = zoom in
+});
+
+// Zoom should increase (1.0 * 1.1 = 1.1)
+let zoom_after_in = instance.get_test_zoom();
+assert!(zoom_after_in > 1.0, "Zoom should increase: {}", zoom_after_in);
+assert!((zoom_after_in - 1.1).abs() < 0.01, "Zoom should be ~1.1: {}", zoom_after_in);
+
+// Scroll down to zoom out
+instance.window().dispatch_event(WindowEvent::PointerScrolled {
+    position: LogicalPosition::new(400.0, 300.0),
+    delta_x: 0.0,
+    delta_y: -1.0  // Negative = zoom out
+});
+
+// Zoom should decrease (1.1 * 0.9 ≈ 0.99)
+let zoom_after_out = instance.get_test_zoom();
+assert!(zoom_after_out < zoom_after_in, "Zoom should decrease");
+assert!((zoom_after_out - 0.99).abs() < 0.02, "Zoom should be ~0.99: {}", zoom_after_out);
+```
+
+```rust
+// Test: Zoom clamping to min/max
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Zoom in repeatedly to hit max (4.0)
+for _ in 0..50 {
+    instance.window().dispatch_event(WindowEvent::PointerScrolled {
+        position: LogicalPosition::new(400.0, 300.0),
+        delta_x: 0.0,
+        delta_y: 1.0
+    });
+}
+
+let max_zoom = instance.get_test_zoom();
+assert!(max_zoom <= 4.0, "Zoom should not exceed max: {}", max_zoom);
+assert!(max_zoom >= 3.9, "Zoom should be near max: {}", max_zoom);
+
+// Reset zoom
+instance.set_test_zoom(1.0);
+
+// Zoom out repeatedly to hit min (0.25)
+for _ in 0..50 {
+    instance.window().dispatch_event(WindowEvent::PointerScrolled {
+        position: LogicalPosition::new(400.0, 300.0),
+        delta_x: 0.0,
+        delta_y: -1.0
+    });
+}
+
+let min_zoom = instance.get_test_zoom();
+assert!(min_zoom >= 0.25, "Zoom should not go below min: {}", min_zoom);
+assert!(min_zoom <= 0.26, "Zoom should be near min: {}", min_zoom);
+```
+
+```rust
+// Test: Right-click context menu callback
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Initial state
+assert_eq!(instance.get_context_menu_count(), 0);
+
+// Right-click to request context menu
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(250.0, 150.0) });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(250.0, 150.0), button: PointerEventButton::Right });
+
+// Context menu callback should have been called
+assert_eq!(instance.get_context_menu_count(), 1);
+
+// Release right button
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(250.0, 150.0), button: PointerEventButton::Right });
+
+// Another right-click at different position
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(500.0, 400.0), button: PointerEventButton::Right });
+assert_eq!(instance.get_context_menu_count(), 2);
+```
+
+```rust
+// Test: Left-click starts box selection (current behavior)
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Left-click on background should start box selection
+// (In current implementation, this grabs the mouse)
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 100.0) });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(100.0, 100.0), button: PointerEventButton::Left });
+
+// Move to create selection box
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(300.0, 250.0) });
+
+// Release to complete selection
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(300.0, 250.0), button: PointerEventButton::Left });
+
+// Pan should not have changed (left click is for selection, not panning)
+assert_eq!(instance.get_test_pan_x(), 0.0);
+assert_eq!(instance.get_test_pan_y(), 0.0);
+```
+
+```rust
+// Test: Zoom preserves position under mouse cursor
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Set initial pan
+instance.set_test_pan_x(100.0);
+instance.set_test_pan_y(50.0);
+
+let initial_pan_x = instance.get_test_pan_x();
+let initial_pan_y = instance.get_test_pan_y();
+let initial_zoom = instance.get_test_zoom();
+
+// Zoom at center of window
+let mouse_x = 400.0;
+let mouse_y = 300.0;
+
+// Calculate the graph point under the mouse before zoom
+let graph_x_before = (mouse_x - initial_pan_x as f32) / initial_zoom;
+let graph_y_before = (mouse_y - initial_pan_y as f32) / initial_zoom;
+
+// Zoom in
+instance.window().dispatch_event(WindowEvent::PointerScrolled {
+    position: LogicalPosition::new(mouse_x, mouse_y),
+    delta_x: 0.0,
+    delta_y: 1.0
+});
+
+let new_pan_x = instance.get_test_pan_x();
+let new_pan_y = instance.get_test_pan_y();
+let new_zoom = instance.get_test_zoom();
+
+// Calculate the graph point under the mouse after zoom
+let graph_x_after = (mouse_x - new_pan_x as f32) / new_zoom;
+let graph_y_after = (mouse_y - new_pan_y as f32) / new_zoom;
+
+// The point under the mouse should be the same (within floating point tolerance)
+assert!((graph_x_before - graph_x_after).abs() < 1.0,
+    "Graph X should be preserved: before={}, after={}", graph_x_before, graph_x_after);
+assert!((graph_y_before - graph_y_after).abs() < 1.0,
+    "Graph Y should be preserved: before={}, after={}", graph_y_before, graph_y_after);
+```
+
+```rust
+// Test: Multiple pan operations accumulate correctly
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// First pan operation
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(400.0, 300.0), button: PointerEventButton::Middle });
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(450.0, 350.0) });
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(450.0, 350.0), button: PointerEventButton::Middle });
+
+assert_eq!(instance.get_test_pan_x(), 50.0);
+assert_eq!(instance.get_test_pan_y(), 50.0);
+
+// Second pan operation should add to existing pan
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(200.0, 200.0), button: PointerEventButton::Middle });
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(300.0, 250.0) });
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(300.0, 250.0), button: PointerEventButton::Middle });
+
+assert_eq!(instance.get_test_pan_x(), 150.0);
+assert_eq!(instance.get_test_pan_y(), 100.0);
+```
+
+*/
