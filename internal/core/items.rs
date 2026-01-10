@@ -63,6 +63,10 @@ pub use drag_n_drop::*;
 mod path;
 #[cfg(feature = "std")]
 pub use path::*;
+#[cfg(feature = "std")]
+mod node_editor;
+#[cfg(feature = "std")]
+pub use node_editor::*;
 
 /// Alias for `&mut dyn ItemRenderer`. Required so cbindgen generates the ItemVTable
 /// despite the presence of trait object
@@ -1752,6 +1756,16 @@ declare_item_vtable! {
 #[cfg(feature = "std")]
 declare_item_vtable! {
     fn slint_get_PathVTable() -> PathVTable for Path
+}
+
+#[cfg(feature = "std")]
+declare_item_vtable! {
+    fn slint_get_NodeEditorBackgroundVTable() -> NodeEditorBackgroundVTable for NodeEditorBackground
+}
+
+#[cfg(feature = "std")]
+declare_item_vtable! {
+    fn slint_get_NodeEditorOverlayVTable() -> NodeEditorOverlayVTable for NodeEditorOverlay
 }
 
 declare_item_vtable! {

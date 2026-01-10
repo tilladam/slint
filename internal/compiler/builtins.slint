@@ -751,6 +751,60 @@ export component NativeTabWidget {
     //-is_internal
 }
 
+// ============================================================================
+// Node Editor Components
+// ============================================================================
+
+/// Background layer for node editors. Renders grid and static links.
+export component NodeEditorBackground inherits Empty {
+    /// Spacing between grid lines
+    in property <length> grid-spacing: 24px;
+    /// Color of the grid lines
+    in property <color> grid-color: #404040;
+    /// Background color of the canvas
+    in property <brush> background-color: #1a1a1a;
+    /// Current pan offset X
+    in-out property <length> pan-x;
+    /// Current pan offset Y
+    in-out property <length> pan-y;
+    /// Current zoom level
+    in property <float> zoom: 1.0;
+    //-default_size_binding:expands_to_parent_geometry
+}
+
+/// Overlay layer for node editors. Renders selection box, active link preview, handles input.
+export component NodeEditorOverlay inherits Empty {
+    /// Current pan offset X (should be bound to NodeEditorBackground.pan-x)
+    in-out property <length> pan-x;
+    /// Current pan offset Y (should be bound to NodeEditorBackground.pan-y)
+    in-out property <length> pan-y;
+    /// Current zoom level
+    in-out property <float> zoom: 1.0;
+    /// Minimum zoom level
+    in property <float> min-zoom: 0.1;
+    /// Maximum zoom level
+    in property <float> max-zoom: 3.0;
+
+    /// Selection box color
+    in property <color> selection-box-color: #4488ff40;
+    /// Active link color during creation
+    in property <color> active-link-color: #ffffff;
+
+    /// Enable minimap
+    in property <bool> minimap-enabled: false;
+
+    /// Callback when a link is created between two pins
+    callback link-created(start-pin: int, end-pin: int);
+    /// Callback when a link is dropped on empty space (can be used to create nodes)
+    callback link-dropped(start-pin: int, x: length, y: length);
+    /// Callback when link creation is cancelled
+    callback link-cancelled(start-pin: int);
+    /// Callback for context menu
+    callback context-menu-requested(x: length, y: length);
+
+    //-default_size_binding:expands_to_parent_geometry
+}
+
 export component NativeTab {
     in property <string> title;
     in property <image> icon;
