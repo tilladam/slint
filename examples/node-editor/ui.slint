@@ -1,0 +1,176 @@
+// Simple Node Editor Example
+
+// A basic node component
+component Node inherits Rectangle {
+    in property <string> title: "Node";
+    in property <int> node-id;
+    in-out property <length> node-x;
+    in-out property <length> node-y;
+
+    x: node-x;
+    y: node-y;
+    width: 150px;
+    height: 80px;
+    background: #2d2d2d;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #555;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 4px;
+
+        // Title bar
+        Rectangle {
+            height: 24px;
+            background: #3d3d3d;
+            border-radius: 4px;
+
+            Text {
+                text: title;
+                color: white;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Content area with pins
+        HorizontalLayout {
+            // Input pin
+            Rectangle {
+                width: 12px;
+                height: 12px;
+                background: #4CAF50;
+                border-radius: 6px;
+            }
+
+            Rectangle { }  // Spacer
+
+            // Output pin
+            Rectangle {
+                width: 12px;
+                height: 12px;
+                background: #2196F3;
+                border-radius: 6px;
+            }
+        }
+    }
+
+    // Drag handling
+    TouchArea {
+        moved => {
+            if self.pressed {
+                node-x += self.mouse-x - self.pressed-x;
+                node-y += self.mouse-y - self.pressed-y;
+            }
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "Node Editor Example";
+    width: 1200px;
+    height: 800px;
+    background: #1a1a1a;
+
+    // Shared pan state
+    property <length> pan-x: 0px;
+    property <length> pan-y: 0px;
+    property <float> zoom: 1.0;
+
+    // The three-layer node editor structure
+    NodeEditorBackground {
+        width: 100%;
+        height: 100%;
+        pan-x <=> pan-x;
+        pan-y <=> pan-y;
+        zoom: zoom;
+        grid-spacing: 24px;
+        grid-color: #333333;
+        background-color: #1a1a1a;
+    }
+
+    // Nodes layer (in the middle)
+    Node {
+        title: "Input";
+        node-id: 1;
+        node-x: 100px + pan-x;
+        node-y: 200px + pan-y;
+    }
+
+    Node {
+        title: "Process";
+        node-id: 2;
+        node-x: 350px + pan-x;
+        node-y: 150px + pan-y;
+    }
+
+    Node {
+        title: "Output";
+        node-id: 3;
+        node-x: 600px + pan-x;
+        node-y: 200px + pan-y;
+    }
+
+    // Overlay layer (on top)
+    NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+        pan-x <=> pan-x;
+        pan-y <=> pan-y;
+        zoom <=> zoom;
+        min-zoom: 0.25;
+        max-zoom: 4.0;
+        selection-box-color: #4488ff40;
+        active-link-color: #ffffff;
+
+        link-created(start, end) => {
+            debug("Link created from pin " + start + " to pin " + end);
+        }
+
+        link-dropped(start, x, y) => {
+            debug("Link dropped from pin " + start);
+        }
+
+        context-menu-requested(x, y) => {
+            debug("Context menu requested");
+        }
+    }
+
+    // Instructions overlay
+    Rectangle {
+        x: 10px;
+        y: 10px;
+        width: 280px;
+        height: 100px;
+        background: #00000080;
+        border-radius: 8px;
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 4px;
+
+            Text { text: "Node Editor Controls:"; color: #fff; font-size: 14px; font-weight: 600; }
+            Text { text: "Middle mouse: Pan"; color: #ccc; font-size: 12px; }
+            Text { text: "Scroll wheel: Zoom"; color: #ccc; font-size: 12px; }
+            Text { text: "Drag nodes to move them"; color: #ccc; font-size: 12px; }
+        }
+    }
+
+    // Zoom indicator
+    Rectangle {
+        x: parent.width - 110px;
+        y: 10px;
+        width: 100px;
+        height: 30px;
+        background: #00000080;
+        border-radius: 4px;
+
+        Text {
+            text: "Zoom: " + round(zoom * 100) + "%";
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
