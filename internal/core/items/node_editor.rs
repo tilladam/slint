@@ -615,6 +615,16 @@ impl NodeEditorOverlay {
         if state.is_box_selecting {
             state.is_box_selecting = false;
         }
+        if state.is_creating_link {
+            let pin_id = state.link_start_pin;
+            state.is_creating_link = false;
+            state.link_start_pin = -1;
+            drop(state);
+            // TODO: Store pin_id in a property for retrieval
+            let _ = pin_id;
+            self.link_cancelled.call(&());
+            return InputEventResult::EventAccepted;
+        }
 
         InputEventResult::EventIgnored
     }
