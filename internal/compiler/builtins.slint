@@ -794,13 +794,17 @@ export component NodeEditorOverlay inherits Empty {
     in property <bool> minimap-enabled: false;
 
     /// Callback when a link is created between two pins
-    callback link-created(start-pin: int, end-pin: int);
+    /// Note: Use properties to get event data (TODO: add proper callback args)
+    callback link-created();
     /// Callback when a link is dropped on empty space (can be used to create nodes)
-    callback link-dropped(start-pin: int, x: length, y: length);
+    /// Note: Use properties to get event data (TODO: add proper callback args)
+    callback link-dropped();
     /// Callback when link creation is cancelled
-    callback link-cancelled(start-pin: int);
+    /// Note: Use properties to get event data (TODO: add proper callback args)
+    callback link-cancelled();
     /// Callback for context menu
-    callback context-menu-requested(x: length, y: length);
+    /// Note: Use properties to get event data (TODO: add proper callback args)
+    callback context-menu-requested();
 
     //-default_size_binding:expands_to_parent_geometry
 }

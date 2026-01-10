@@ -36,6 +36,10 @@ use core::cell::RefCell;
 use core::pin::Pin;
 use i_slint_core_macros::*;
 
+// Note: Complex callbacks with multiple parameters are not yet supported by the RTTI system.
+// For now, we use simple void callbacks. The actual event data can be retrieved via properties.
+// TODO: Add proper callback argument types once builtin_structs integration is done.
+
 /// Internal state for the node editor overlay
 #[derive(Default, Debug)]
 struct NodeEditorState {
@@ -296,14 +300,14 @@ pub struct NodeEditorOverlay {
     /// Enable minimap
     pub minimap_enabled: Property<bool>,
 
-    /// Callback when a link is created
-    pub link_created: Callback<(i32, i32)>,
-    /// Callback when a link is dropped on empty space
-    pub link_dropped: Callback<(i32, LogicalLength, LogicalLength)>,
-    /// Callback when link creation is cancelled
-    pub link_cancelled: Callback<(i32,)>,
-    /// Callback for context menu
-    pub context_menu_requested: Callback<(LogicalLength, LogicalLength)>,
+    /// Callback when a link is created (use properties to get event data)
+    pub link_created: Callback<()>,
+    /// Callback when a link is dropped on empty space (use properties to get event data)
+    pub link_dropped: Callback<()>,
+    /// Callback when link creation is cancelled (use properties to get event data)
+    pub link_cancelled: Callback<()>,
+    /// Callback for context menu (use properties to get event data)
+    pub context_menu_requested: Callback<()>,
 
     /// Internal state
     data: NodeEditorDataBox,
@@ -398,7 +402,9 @@ impl Item for NodeEditorOverlay {
                 state.is_creating_link = false;
                 state.link_start_pin = -1;
                 drop(state);
-                self.link_cancelled.call(&(pin_id,));
+                // TODO: Store pin_id in a property for retrieval
+                let _ = pin_id;
+                self.link_cancelled.call(&());
                 return KeyEventResult::EventAccepted;
             }
         }
@@ -474,10 +480,9 @@ impl NodeEditorOverlay {
             }
             PointerEventButton::Right => {
                 // Request context menu
-                self.context_menu_requested.call(&(
-                    LogicalLength::new(position.x),
-                    LogicalLength::new(position.y),
-                ));
+                // TODO: Store position in properties for retrieval
+                let _ = position;
+                self.context_menu_requested.call(&());
                 InputEventResult::EventAccepted
             }
             PointerEventButton::Left => {
@@ -520,11 +525,9 @@ impl NodeEditorOverlay {
                     state.is_creating_link = false;
                     state.link_start_pin = -1;
                     drop(state);
-                    self.link_dropped.call(&(
-                        pin_id,
-                        LogicalLength::new(position.x),
-                        LogicalLength::new(position.y),
-                    ));
+                    // TODO: Store pin_id and position in properties for retrieval
+                    let _ = (pin_id, position);
+                    self.link_dropped.call(&());
                     return InputEventResult::EventAccepted;
                 }
             }

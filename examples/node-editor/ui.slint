@@ -124,15 +124,15 @@ export component MainWindow inherits Window {
         selection-box-color: #4488ff40;
         active-link-color: #ffffff;
 
-        link-created(start, end) => {
-            debug("Link created from pin " + start + " to pin " + end);
+        link-created => {
+            debug("Link created");
         }
 
-        link-dropped(start, x, y) => {
-            debug("Link dropped from pin " + start);
+        link-dropped => {
+            debug("Link dropped");
         }
 
-        context-menu-requested(x, y) => {
+        context-menu-requested => {
             debug("Context menu requested");
         }
     }
