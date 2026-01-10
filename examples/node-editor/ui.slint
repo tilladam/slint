@@ -1,11 +1,49 @@
 // Simple Node Editor Example
 
+// A bezier link between two pins
+component Link inherits Path {
+    in property <length> start-x;
+    in property <length> start-y;
+    in property <length> end-x;
+    in property <length> end-y;
+    in property <color> link-color: #888888;
+    in property <length> line-width: 2px;
+
+    // Calculate control point offset (horizontal bezier)
+    property <length> dx: abs(end-x - start-x);
+    property <length> offset: max(dx * 0.5, 50px);
+
+    // Control points
+    property <length> ctrl1-x: start-x + offset;
+    property <length> ctrl1-y: start-y;
+    property <length> ctrl2-x: end-x - offset;
+    property <length> ctrl2-y: end-y;
+
+    width: 100%;
+    height: 100%;
+    stroke: link-color;
+    stroke-width: line-width;
+    fill: transparent;
+
+    // SVG path command: M (move to), C (cubic bezier)
+    commands: "M " + start-x / 1px + " " + start-y / 1px +
+              " C " + ctrl1-x / 1px + " " + ctrl1-y / 1px +
+              " " + ctrl2-x / 1px + " " + ctrl2-y / 1px +
+              " " + end-x / 1px + " " + end-y / 1px;
+}
+
 // A basic node component
 component Node inherits Rectangle {
     in property <string> title: "Node";
     in property <int> node-id;
     in-out property <length> node-x;
     in-out property <length> node-y;
+
+    // Expose pin positions (center of pin circles, in parent coordinates)
+    out property <length> input-pin-x: node-x + 8px + 6px;  // padding + half pin width
+    out property <length> input-pin-y: node-y + 8px + 24px + 4px + 6px;  // padding + title + spacing + half pin height
+    out property <length> output-pin-x: node-x + 150px - 8px - 6px;  // width - padding - half pin width
+    out property <length> output-pin-y: node-y + 8px + 24px + 4px + 6px;
 
     x: node-x;
     y: node-y;
@@ -36,7 +74,7 @@ component Node inherits Rectangle {
 
         // Content area with pins
         HorizontalLayout {
-            // Input pin
+            // Input pin (green)
             Rectangle {
                 width: 12px;
                 height: 12px;
@@ -46,7 +84,7 @@ component Node inherits Rectangle {
 
             Rectangle { }  // Spacer
 
-            // Output pin
+            // Output pin (blue)
             Rectangle {
                 width: 12px;
                 height: 12px;
@@ -91,25 +129,46 @@ export component MainWindow inherits Window {
     }
 
     // Nodes layer (in the middle)
-    Node {
+    input-node := Node {
         title: "Input";
         node-id: 1;
         node-x: 100px + pan-x;
         node-y: 200px + pan-y;
     }
 
-    Node {
+    process-node := Node {
         title: "Process";
         node-id: 2;
         node-x: 350px + pan-x;
         node-y: 150px + pan-y;
     }
 
-    Node {
+    output-node := Node {
         title: "Output";
         node-id: 3;
         node-x: 600px + pan-x;
         node-y: 200px + pan-y;
+    }
+
+    // Links layer (between nodes and overlay)
+    // Link from Input's output to Process's input
+    Link {
+        start-x: input-node.output-pin-x;
+        start-y: input-node.output-pin-y;
+        end-x: process-node.input-pin-x;
+        end-y: process-node.input-pin-y;
+        link-color: #ff9800;
+        line-width: 3px;
+    }
+
+    // Link from Process's output to Output's input
+    Link {
+        start-x: process-node.output-pin-x;
+        start-y: process-node.output-pin-y;
+        end-x: output-node.input-pin-x;
+        end-y: output-node.input-pin-y;
+        link-color: #2196f3;
+        line-width: 3px;
     }
 
     // Overlay layer (on top)

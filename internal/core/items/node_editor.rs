@@ -36,6 +36,33 @@ use core::cell::RefCell;
 use core::pin::Pin;
 use i_slint_core_macros::*;
 
+// ============================================================================
+// Bezier Curve Math
+// ============================================================================
+
+/// Calculate control points for a horizontal bezier curve between two points.
+/// This creates the characteristic "S-curve" shape used in node editors.
+/// Used by NodeEditorOverlay for rendering active link preview during drag.
+#[allow(dead_code)]
+fn calculate_link_bezier(
+    start_x: f32,
+    start_y: f32,
+    end_x: f32,
+    end_y: f32,
+) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
+    // Calculate horizontal offset based on distance
+    let dx = (end_x - start_x).abs();
+    let offset = (dx * 0.5).max(50.0);
+
+    // Control points extend horizontally from start/end
+    let ctrl1_x = start_x + offset;
+    let ctrl1_y = start_y;
+    let ctrl2_x = end_x - offset;
+    let ctrl2_y = end_y;
+
+    (start_x, start_y, ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, end_x, end_y)
+}
+
 // Note: Complex callbacks with multiple parameters are not yet supported by the RTTI system.
 // For now, we use simple void callbacks. The actual event data can be retrieved via properties.
 // TODO: Add proper callback argument types once builtin_structs integration is done.
@@ -198,6 +225,9 @@ impl Item for NodeEditorBackground {
 
         // Draw grid
         self.render_grid(backend, size);
+
+        // Note: Links are rendered using Path components in Slint,
+        // placed between the background and overlay layers.
 
         RenderingResult::ContinueRenderingChildren
     }
