@@ -15,6 +15,7 @@ TestCase := Window {
     // Callback tracking (count only since callbacks are now void)
     property <int> link-created-count: 0;
     property <int> link-dropped-count: 0;
+    property <int> link-cancelled-count: 0;
     property <int> context-menu-count: 0;
 
     background := NodeEditorBackground {
@@ -47,6 +48,10 @@ TestCase := Window {
             root.link-dropped-count += 1;
         }
 
+        link-cancelled => {
+            root.link-cancelled-count += 1;
+        }
+
         context-menu-requested => {
             root.context-menu-count += 1;
         }
@@ -58,6 +63,7 @@ TestCase := Window {
     in-out property <float> test-zoom <=> zoom;
     out property <length> bg-grid-spacing: background.grid-spacing;
     out property <color> bg-grid-color: background.grid-color;
+    out property <int> test-link-cancelled-count: link-cancelled-count;
 }
 
 /*
@@ -290,6 +296,53 @@ instance.window().dispatch_event(WindowEvent::PointerReleased { position: Logica
 
 assert_eq!(instance.get_test_pan_x(), 150.0);
 assert_eq!(instance.get_test_pan_y(), 100.0);
+```
+
+```rust
+// Test: Mouse exit during panning cancels pan
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Start panning
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(400.0, 300.0) });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(400.0, 300.0), button: PointerEventButton::Middle });
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(450.0, 350.0) });
+
+// Pan should be updated
+assert_eq!(instance.get_test_pan_x(), 50.0);
+assert_eq!(instance.get_test_pan_y(), 50.0);
+
+// Mouse exits the window during panning
+instance.window().dispatch_event(WindowEvent::PointerExited);
+
+// Pan value should be preserved at last position
+assert_eq!(instance.get_test_pan_x(), 50.0);
+assert_eq!(instance.get_test_pan_y(), 50.0);
+
+// After mouse re-enters and moves, panning should NOT continue (was cancelled)
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(500.0, 400.0) });
+assert_eq!(instance.get_test_pan_x(), 50.0);
+assert_eq!(instance.get_test_pan_y(), 50.0);
+```
+
+```rust
+// Test: Escape key when no interaction is happening (should be ignored gracefully)
+use slint::{SharedString, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// Initial state - no link creation in progress
+assert_eq!(instance.get_test_link_cancelled_count(), 0);
+
+// Press Escape when nothing is happening
+slint_testing::send_keyboard_string_sequence(&instance, &SharedString::from(Key::Escape));
+
+// Should not crash, and link-cancelled should NOT be called (no link was being created)
+assert_eq!(instance.get_test_link_cancelled_count(), 0);
+
+// Verify other state is unaffected
+assert_eq!(instance.get_test_pan_x(), 0.0);
+assert_eq!(instance.get_test_pan_y(), 0.0);
+assert_eq!(instance.get_test_zoom(), 1.0);
 ```
 
 */
