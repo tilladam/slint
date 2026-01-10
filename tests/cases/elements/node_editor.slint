@@ -213,12 +213,34 @@ assert_eq!(instance.get_context_menu_count(), 2);
 ```
 
 ```rust
-// Test: Left-click starts box selection (current behavior)
+// Test: Left-click passes through (allows node interaction)
 use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
 let instance = TestCase::new().unwrap();
 
-// Left-click on background should start box selection
-// (In current implementation, this grabs the mouse)
+// Left-click without Shift should pass through to nodes (not start box selection)
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 100.0) });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(100.0, 100.0), button: PointerEventButton::Left });
+
+// Move mouse
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(300.0, 250.0) });
+
+// Release
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(300.0, 250.0), button: PointerEventButton::Left });
+
+// Pan should not have changed (left click passes through)
+assert_eq!(instance.get_test_pan_x(), 0.0);
+assert_eq!(instance.get_test_pan_y(), 0.0);
+```
+
+```rust
+// Test: Shift+Left-click starts box selection
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// Hold Shift
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), true);
+
+// Shift+Left-click should start box selection
 instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 100.0) });
 instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(100.0, 100.0), button: PointerEventButton::Left });
 
@@ -228,7 +250,10 @@ instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPo
 // Release to complete selection
 instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(300.0, 250.0), button: PointerEventButton::Left });
 
-// Pan should not have changed (left click is for selection, not panning)
+// Release Shift
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), false);
+
+// Pan should not have changed
 assert_eq!(instance.get_test_pan_x(), 0.0);
 assert_eq!(instance.get_test_pan_y(), 0.0);
 ```

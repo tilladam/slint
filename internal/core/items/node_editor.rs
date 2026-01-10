@@ -349,12 +349,12 @@ impl Item for NodeEditorOverlay {
     fn input_event(
         self: Pin<&Self>,
         event: &MouseEvent,
-        _window_adapter: &Rc<dyn WindowAdapter>,
+        window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
     ) -> InputEventResult {
         match event {
             MouseEvent::Pressed { position, button, .. } => {
-                self.handle_mouse_pressed(*position, *button)
+                self.handle_mouse_pressed(*position, *button, window_adapter)
             }
             MouseEvent::Released { position, button, .. } => {
                 self.handle_mouse_released(*position, *button)
@@ -465,6 +465,7 @@ impl NodeEditorOverlay {
         self: Pin<&Self>,
         position: LogicalPoint,
         button: PointerEventButton,
+        window_adapter: &Rc<dyn WindowAdapter>,
     ) -> InputEventResult {
         match button {
             PointerEventButton::Middle => {
@@ -486,13 +487,21 @@ impl NodeEditorOverlay {
                 InputEventResult::EventAccepted
             }
             PointerEventButton::Left => {
-                // Check if we're clicking on a pin (TODO: implement pin hit testing)
-                // For now, start box selection on background click
-                let mut state = self.data.state.borrow_mut();
-                state.is_box_selecting = true;
-                state.box_select_start = position;
-                state.box_select_current = position;
-                InputEventResult::GrabMouse
+                // Check if Shift is held for box selection
+                let modifiers = window_adapter.window().0.modifiers.get();
+                if modifiers.shift() {
+                    // Shift+Left click starts box selection
+                    let mut state = self.data.state.borrow_mut();
+                    state.is_box_selecting = true;
+                    state.box_select_start = position;
+                    state.box_select_current = position;
+                    InputEventResult::GrabMouse
+                } else {
+                    // TODO: Implement proper hit testing for pins and nodes
+                    // For now, pass through left clicks to allow node interaction.
+                    // Without node registration, we can't distinguish background from node clicks.
+                    InputEventResult::EventIgnored
+                }
             }
             _ => InputEventResult::EventIgnored,
         }
