@@ -118,15 +118,23 @@ component Node inherits Rectangle {
         property <bool> shift-held: false;
         property <bool> was-dragged: false;
         property <length> drag-threshold: 5px;
-        property <length> last-mouse-x;
-        property <length> last-mouse-y;
+        // Store absolute screen position of mouse at press time
+        property <length> press-abs-x;
+        property <length> press-abs-y;
+        // Store original world position when drag starts
+        property <length> drag-start-world-x;
+        property <length> drag-start-world-y;
 
         pointer-event(event) => {
             if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                 shift-held = event.modifiers.shift;
                 was-dragged = false;
-                last-mouse-x = self.mouse-x;
-                last-mouse-y = self.mouse-y;
+                // Capture absolute screen position of mouse (node position + relative mouse pos)
+                press-abs-x = screen-x + self.mouse-x;
+                press-abs-y = screen-y + self.mouse-y;
+                // Remember where the node was when we started
+                drag-start-world-x = world-x;
+                drag-start-world-y = world-y;
             }
             if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
                 // Only trigger click if we didn't drag
@@ -137,7 +145,12 @@ component Node inherits Rectangle {
         }
         moved => {
             if self.pressed {
-                // Check if moved beyond threshold from press position
+                // Calculate current absolute mouse position
+                // (node screen pos + relative mouse pos = absolute screen pos)
+                // Note: screen-x/y change as we drag, but screen-x + mouse-x stays constant
+                // for a given screen mouse position
+
+                // Check threshold using relative coords (these don't have feedback issues)
                 if !was-dragged {
                     if self.mouse-x - self.pressed-x > drag-threshold ||
                        self.pressed-x - self.mouse-x > drag-threshold ||
@@ -147,13 +160,13 @@ component Node inherits Rectangle {
                     }
                 }
 
-                // If dragging, update node position using incremental delta
+                // If dragging, compute delta using absolute screen coordinates
                 if was-dragged {
-                    world-x += (self.mouse-x - last-mouse-x) / zoom;
-                    world-y += (self.mouse-y - last-mouse-y) / zoom;
+                    // Current absolute mouse position
+                    // screen-x + mouse-x gives absolute position regardless of node movement
+                    world-x = drag-start-world-x + (screen-x + self.mouse-x - press-abs-x) / zoom;
+                    world-y = drag-start-world-y + (screen-y + self.mouse-y - press-abs-y) / zoom;
                 }
-                last-mouse-x = self.mouse-x;
-                last-mouse-y = self.mouse-y;
             }
         }
     }
