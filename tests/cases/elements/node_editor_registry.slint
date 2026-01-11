@@ -1,0 +1,79 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for NodeEditor registry (pin and node reporting)
+
+TestCase := Window {
+    width: 800phx;
+    height: 600phx;
+
+    overlay := NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+    }
+
+    // Expose properties for testing
+    out property <int> test-reporting-pin-id: overlay.reporting-pin-id;
+    out property <int> test-reporting-node-id: overlay.reporting-node-id;
+    
+    // Setters
+    public function report-pin(id: int, x: length, y: length) {
+        overlay.reporting-pin-id = id;
+        overlay.reporting-pin-x = x;
+        overlay.reporting-pin-y = y;
+    }
+
+    public function report-node(id: int, x: length, y: length, w: length, h: length) {
+        overlay.reporting-node-id = id;
+        overlay.reporting-node-x = x;
+        overlay.reporting-node-y = y;
+        overlay.reporting-node-width = w;
+        overlay.reporting-node-height = h;
+    }
+}
+
+/*
+
+```rust
+// Test: Pin reporting is acknowledged
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Initially zero
+assert_eq!(instance.get_test_reporting_pin_id(), 0);
+
+// Report a pin
+instance.invoke_report_pin(101, 100.0.into(), 150.0.into());
+assert_eq!(instance.get_test_reporting_pin_id(), 101);
+
+// Trigger an input event to process the report
+instance.window().dispatch_event(WindowEvent::PointerMoved { 
+    position: LogicalPosition::new(0.0, 0.0) 
+});
+
+// Should be reset to 0
+assert_eq!(instance.get_test_reporting_pin_id(), 0, "reporting-pin-id should be reset after processing");
+```
+
+```rust
+// Test: Node reporting is acknowledged
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Initially zero
+assert_eq!(instance.get_test_reporting_node_id(), 0);
+
+// Report a node
+instance.invoke_report_node(1, 50.0.into(), 60.0.into(), 150.0.into(), 100.0.into());
+assert_eq!(instance.get_test_reporting_node_id(), 1);
+
+// Trigger an input event to process the report
+instance.window().dispatch_event(WindowEvent::PointerMoved { 
+    position: LogicalPosition::new(0.0, 0.0) 
+});
+
+// Should be reset to 0
+assert_eq!(instance.get_test_reporting_node_id(), 0, "reporting-node-id should be reset after processing");
+```
+
+*/

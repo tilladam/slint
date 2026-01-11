@@ -1,0 +1,151 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for NodeEditor link creation state machine
+
+TestCase := Window {
+    width: 800phx;
+    height: 600phx;
+
+    property <int> link-created-count: 0;
+    property <int> link-dropped-count: 0;
+    property <int> link-cancelled-count: 0;
+
+    overlay := NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+
+        link-created => {
+            root.link-created-count += 1;
+        }
+
+        link-dropped => {
+            root.link-dropped-count += 1;
+        }
+
+        link-cancelled => {
+            root.link-cancelled-count += 1;
+        }
+    }
+
+    // Expose properties for testing
+    out property <bool> test-is-creating-link: overlay.is-creating-link;
+    out property <int> test-link-start-pin-id: overlay.link-start-pin-id;
+    out property <length> test-link-end-x: overlay.link-end-x;
+    out property <length> test-link-end-y: overlay.link-end-y;
+    
+    out property <int> test-link-created-count: link-created-count;
+    out property <int> test-link-dropped-count: link-dropped-count;
+    out property <int> test-link-cancelled-count: link-cancelled-count;
+
+    // Getters for result
+    out property <int> test-created-start: overlay.created-link-start-pin;
+    out property <int> test-created-end: overlay.created-link-end-pin;
+
+    // Setters/Triggers
+    public function start-link(id: int, x: length, y: length) {
+        overlay.pending-link-pin-id = id;
+        overlay.pending-link-x = x;
+        overlay.pending-link-y = y;
+        // The check happens in input_event_filter_before_children
+    }
+
+    public function complete-link(target-id: int) {
+        overlay.target-pin-id = target-id;
+        overlay.complete-link-creation = true;
+    }
+
+    public function focus-overlay() {
+        overlay.focus();
+    }
+}
+
+/*
+
+```rust
+// Test: Triggering link creation
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+assert_eq!(instance.get_test_is_creating_link(), false);
+
+// Try to start a link
+instance.invoke_start_link(12, 100.0.into(), 150.0.into());
+
+// Need an input event to process the trigger
+instance.window().dispatch_event(WindowEvent::PointerMoved { 
+    position: LogicalPosition::new(100.0, 150.0) 
+});
+
+assert_eq!(instance.get_test_is_creating_link(), true);
+assert_eq!(instance.get_test_link_start_pin_id(), 12);
+assert_eq!(instance.get_test_link_end_x(), 100.0);
+assert_eq!(instance.get_test_link_end_y(), 150.0);
+
+// Move mouse should update link-end
+instance.window().dispatch_event(WindowEvent::PointerMoved { 
+    position: LogicalPosition::new(300.0, 250.0) 
+});
+assert_eq!(instance.get_test_link_end_x(), 300.0);
+assert_eq!(instance.get_test_link_end_y(), 250.0);
+```
+
+```rust
+// Test: Completing a link
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Start link
+instance.invoke_start_link(12, 100.0.into(), 150.0.into());
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 150.0) });
+
+// Complete link
+instance.invoke_complete_link(21);
+// Processing trigger
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(200.0, 200.0) });
+
+assert_eq!(instance.get_test_is_creating_link(), false);
+assert_eq!(instance.get_test_link_created_count(), 1);
+assert_eq!(instance.get_test_created_start(), 12);
+assert_eq!(instance.get_test_created_end(), 21);
+```
+
+```rust
+// Test: Dropping a link on empty space
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Start link
+instance.invoke_start_link(12, 100.0.into(), 150.0.into());
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 150.0) });
+
+// Drop on empty space (target-id = 0)
+instance.invoke_complete_link(0);
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(200.0, 200.0) });
+
+assert_eq!(instance.get_test_is_creating_link(), false);
+assert_eq!(instance.get_test_link_dropped_count(), 1);
+```
+
+```rust
+// Test: Cancelling link creation with Escape
+use slint::{platform::WindowEvent, LogicalPosition, SharedString, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// Start link
+instance.invoke_start_link(12, 100.0.into(), 150.0.into());
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 150.0) });
+
+assert_eq!(instance.get_test_is_creating_link(), true);
+
+// Focus the overlay so it receives key events
+instance.invoke_focus_overlay();
+
+// Send Escape key
+slint_testing::send_keyboard_string_sequence(&instance, &SharedString::from(Key::Escape));
+
+assert_eq!(instance.get_test_is_creating_link(), false);
+assert_eq!(instance.get_test_link_cancelled_count(), 1);
+```
+
+*/

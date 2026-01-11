@@ -1,0 +1,73 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for NodeEditor keyboard shortcuts
+
+TestCase := Window {
+    width: 800phx;
+    height: 600phx;
+
+    property <int> delete-count: 0;
+    property <int> add-node-count: 0;
+
+    overlay := NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+
+        delete-selected => {
+            root.delete-count += 1;
+        }
+
+        add-node-requested => {
+            root.add-node-count += 1;
+        }
+    }
+
+    // Expose properties for testing
+    out property <int> test-delete-count: delete-count;
+    out property <int> test-add-node-count: add-node-count;
+
+    public function focus-overlay() {
+        overlay.focus();
+    }
+}
+
+/*
+
+```rust
+// Test: Delete and Backspace shortcuts
+use slint::{SharedString, platform::Key};
+let instance = TestCase::new().unwrap();
+
+instance.invoke_focus_overlay();
+
+// Press Delete
+slint_testing::send_keyboard_string_sequence(&instance, &SharedString::from(Key::Delete));
+assert_eq!(instance.get_test_delete_count(), 1);
+
+// Press Backspace
+slint_testing::send_keyboard_string_sequence(&instance, &SharedString::from(Key::Backspace));
+assert_eq!(instance.get_test_delete_count(), 2);
+```
+
+```rust
+// Test: Ctrl+N shortcut
+use slint::platform::Key;
+let instance = TestCase::new().unwrap();
+
+instance.invoke_focus_overlay();
+
+// Hold Ctrl
+slint_testing::send_keyboard_char(&instance, Key::Control.into(), true);
+
+// Press 'n'
+slint_testing::send_keyboard_char(&instance, 'n', true);
+slint_testing::send_keyboard_char(&instance, 'n', false);
+
+// Release Ctrl
+slint_testing::send_keyboard_char(&instance, Key::Control.into(), false);
+
+assert_eq!(instance.get_test_add_node_count(), 1);
+```
+
+*/

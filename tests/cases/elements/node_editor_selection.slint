@@ -1,0 +1,121 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for NodeEditor selection and intersection logic
+
+TestCase := Window {
+    width: 800phx;
+    height: 600phx;
+
+    property <int> selection-changed-count: 0;
+    property <int> node-clicked-count: 0;
+
+    overlay := NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+
+        selection-changed => {
+            root.selection-changed-count += 1;
+        }
+
+        node-clicked => {
+            root.node-clicked-count += 1;
+        }
+    }
+
+    // Expose properties for testing
+    out property <string> test-selected-node-ids-str: overlay.selected-node-ids-str;
+    out property <string> test-current-selected-ids: overlay.current-selected-ids;
+    out property <int> test-selection-changed-count: selection-changed-count;
+    out property <int> test-node-clicked-count: node-clicked-count;
+
+    // Triggers/Setters
+    public function report-node(id: int, x: length, y: length, w: length, h: length) {
+        overlay.reporting-node-id = id;
+        overlay.reporting-node-x = x;
+        overlay.reporting-node-y = y;
+        overlay.reporting-node-width = w;
+        overlay.reporting-node-height = h;
+        // Needs an input event to process trigger (we use a helper below)
+    }
+
+    public function click-node(id: int, shift: bool) {
+        overlay.clicked-node-id = id;
+        overlay.clicked-shift-held = shift;
+        overlay.node-clicked();
+    }
+}
+
+/*
+
+```rust
+// Test: Box selection intersections
+use slint::{platform::WindowEvent, LogicalPosition, platform::PointerEventButton, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// 1. Register some nodes
+// Node 1: (10, 10) -> (110, 60)
+instance.invoke_report_node(1, 10.0.into(), 10.0.into(), 100.0.into(), 50.0.into());
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+
+// Node 2: (150, 10) -> (250, 60)
+instance.invoke_report_node(2, 150.0.into(), 10.0.into(), 100.0.into(), 50.0.into());
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+
+// Node 3: (10, 100) -> (110, 150)
+instance.invoke_report_node(3, 10.0.into(), 100.0.into(), 100.0.into(), 50.0.into());
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+
+// 2. Perform box selection covering Node 1 and Node 2, but not Node 3
+// Start box selection at (0, 0)
+slint_testing::send_keyboard_char(&instance, Key::Control.into(), true);
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(0.0, 0.0), button: PointerEventButton::Left });
+
+// Drag to (300, 80)
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(300.0, 80.0) });
+
+// Release
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(300.0, 80.0), button: PointerEventButton::Left });
+slint_testing::send_keyboard_char(&instance, Key::Control.into(), false);
+
+// 3. Verify results
+assert_eq!(instance.get_test_selection_changed_count(), 1);
+let selected_ids = instance.get_test_selected_node_ids_str();
+// Should contain "1,2" (order might depend on BTreeMap, so "1,2" is expected)
+assert!(selected_ids.to_string().contains("1"), "Should select node 1");
+assert!(selected_ids.to_string().contains("2"), "Should select node 2");
+assert!(!selected_ids.to_string().contains("3"), "Should NOT select node 3");
+```
+
+```rust
+// Test: Native selection management (clicking)
+use slint::{platform::WindowEvent, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Initial state
+assert_eq!(instance.get_test_current_selected_ids().to_string(), "");
+
+// Click node 1
+instance.invoke_click_node(1, false);
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+assert_eq!(instance.get_test_current_selected_ids().to_string(), "1");
+
+// Click node 2 (should replace selection)
+instance.invoke_click_node(2, false);
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+assert_eq!(instance.get_test_current_selected_ids().to_string(), "2");
+
+// Shift+click node 1 (should extend)
+instance.invoke_click_node(1, true);
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+let selected = instance.get_test_current_selected_ids().to_string();
+assert!(selected.contains("1") && selected.contains("2"), "Selection should contain 1 and 2: {}", selected);
+
+// Shift+click node 2 again (should toggle off)
+instance.invoke_click_node(2, true);
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(0.0, 0.0) });
+assert_eq!(instance.get_test_current_selected_ids().to_string(), "1");
+```
+
+*/

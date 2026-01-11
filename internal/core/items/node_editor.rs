@@ -323,7 +323,7 @@ impl Item for NodeEditorBackground {
         _window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
     ) -> FocusEventResult {
-        FocusEventResult::FocusIgnored
+        FocusEventResult::FocusAccepted
     }
 
     fn render(
@@ -787,9 +787,16 @@ impl Item for NodeEditorOverlay {
         }
 
         // Handle Escape to cancel link creation
-        let state = self.data.state.borrow();
-        if state.is_creating_link {
-            if event.text.starts_with(crate::input::key_codes::Escape) {
+        if event.text.starts_with(crate::input::key_codes::Escape) {
+            let mut state = self.data.state.borrow_mut();
+            if state.is_creating_link {
+                state.is_creating_link = false;
+                state.link_start_pin = -1;
+                drop(state);
+
+                // Clear link creation properties
+                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
+                self.link_cancelled.call(&());
                 return KeyEventResult::EventAccepted;
             }
         }
