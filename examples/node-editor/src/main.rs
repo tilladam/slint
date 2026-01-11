@@ -13,6 +13,12 @@ slint::include_modules!();
 const NODE_BASE_WIDTH: f32 = 150.0;
 const BASE_PIN_SIZE: f32 = 12.0;
 const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
+const GRID_SPACING: f32 = 24.0;
+
+/// Snap a value to the nearest grid position
+fn snap_to_grid(value: f32) -> f32 {
+    (value / GRID_SPACING).round() * GRID_SPACING
+}
 
 /// Compute screen position for a pin given node position, zoom, and pan
 fn compute_pin_position(
@@ -128,22 +134,22 @@ fn main() {
         NodeData {
             id: 1,
             title: SharedString::from("Input"),
-            world_x: 100.0,
-            world_y: 200.0,
+            world_x: 96.0,  // Grid-aligned (4 * 24)
+            world_y: 192.0, // Grid-aligned (8 * 24)
             selected: false,
         },
         NodeData {
             id: 2,
             title: SharedString::from("Process"),
-            world_x: 350.0,
-            world_y: 150.0,
+            world_x: 360.0, // Grid-aligned (15 * 24)
+            world_y: 144.0, // Grid-aligned (6 * 24)
             selected: false,
         },
         NodeData {
             id: 3,
             title: SharedString::from("Output"),
-            world_x: 600.0,
-            world_y: 200.0,
+            world_x: 600.0, // Grid-aligned (25 * 24)
+            world_y: 192.0, // Grid-aligned (8 * 24)
             selected: false,
         },
     ]));
@@ -265,12 +271,12 @@ fn main() {
     let links_for_drag = links.clone();
     let window_for_drag = window.as_weak();
     window.on_commit_drag(move |delta_x, delta_y| {
-        // Apply delta to all selected nodes
+        // Apply delta to all selected nodes and snap to grid
         for i in 0..nodes_for_drag.row_count() {
             if let Some(mut node) = nodes_for_drag.row_data(i) {
                 if node.selected {
-                    node.world_x += delta_x;
-                    node.world_y += delta_y;
+                    node.world_x = snap_to_grid(node.world_x + delta_x);
+                    node.world_y = snap_to_grid(node.world_y + delta_y);
                     nodes_for_drag.set_row_data(i, node);
                 }
             }
@@ -335,13 +341,13 @@ fn main() {
         let id = *next_node_id_for_add.borrow();
         *next_node_id_for_add.borrow_mut() += 1;
 
-        // Add new node at a default position
-        // In a real app, you might place it at the center of the viewport
+        // Add new node at a grid-snapped position
+        // Offset each new node slightly to avoid stacking
         nodes_for_add.push(NodeData {
             id,
             title: SharedString::from(format!("Node {}", id)),
-            world_x: 200.0 + (id as f32 * 50.0) % 400.0,
-            world_y: 200.0 + (id as f32 * 30.0) % 300.0,
+            world_x: snap_to_grid(192.0 + (id as f32 * 48.0) % 384.0),
+            world_y: snap_to_grid(192.0 + (id as f32 * 24.0) % 288.0),
             selected: false,
         });
     });
