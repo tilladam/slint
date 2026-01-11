@@ -860,6 +860,24 @@ export component NodeEditorOverlay inherits Empty {
     /// End pin ID of the created link (input pin)
     out property <int> created-link-end-pin;
 
+    // === Node rectangle reporting (for hit-testing and box selection) ===
+    /// Node ID being reported (set before triggering node-rect-changed)
+    in property <int> reporting-node-id;
+    /// X position of node being reported (in screen coordinates)
+    in property <length> reporting-node-x;
+    /// Y position of node being reported (in screen coordinates)
+    in property <length> reporting-node-y;
+    /// Width of node being reported
+    in property <length> reporting-node-width;
+    /// Height of node being reported
+    in property <length> reporting-node-height;
+    /// Callback when a node reports its rectangle - set reporting-node-* properties first
+    callback node-rect-changed();
+
+    // === Box selection result (output when selection-changed fires) ===
+    /// Comma-separated list of node IDs that intersect with the selection box
+    out property <string> selected-node-ids-str;
+
     /// Callback when a link is created between two pins (read created-link-start-pin and created-link-end-pin)
     callback link-created();
     /// Callback when a link is dropped on empty space (can be used to create nodes)
@@ -868,7 +886,7 @@ export component NodeEditorOverlay inherits Empty {
     callback link-cancelled();
     /// Callback for context menu
     callback context-menu-requested();
-    /// Callback when box selection completes
+    /// Callback when box selection completes (read selected-node-ids-str for intersecting nodes)
     callback selection-changed();
     /// Callback when viewport changes (pan or zoom)
     callback viewport-changed();

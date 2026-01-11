@@ -140,6 +140,34 @@ fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y:
     commands
 }
 
+/// Node rectangle info for hit-testing and box selection
+#[derive(Clone, Copy, Debug, Default)]
+struct NodeRect {
+    /// Screen X position
+    x: f32,
+    /// Screen Y position
+    y: f32,
+    /// Width
+    width: f32,
+    /// Height
+    height: f32,
+}
+
+impl NodeRect {
+    /// Check if this rect intersects with the given selection box
+    fn intersects(&self, sel_x: f32, sel_y: f32, sel_width: f32, sel_height: f32) -> bool {
+        self.x < sel_x + sel_width
+            && self.x + self.width > sel_x
+            && self.y < sel_y + sel_height
+            && self.y + self.height > sel_y
+    }
+
+    /// Check if a point is inside this rect
+    fn contains_point(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x <= self.x + self.width && y >= self.y && y <= self.y + self.height
+    }
+}
+
 /// Internal state for the node editor overlay
 #[derive(Default, Debug)]
 struct NodeEditorState {
@@ -163,6 +191,8 @@ struct NodeEditorState {
     box_select_current: LogicalPoint,
     /// Known pin positions for hit-testing (pin_id -> screen position)
     pin_positions: BTreeMap<i32, LogicalPoint>,
+    /// Known node rectangles for hit-testing and box selection (node_id -> screen rect)
+    node_rects: BTreeMap<i32, NodeRect>,
 }
 
 /// Wraps the internal state properly with RefCell
@@ -476,6 +506,25 @@ pub struct NodeEditorOverlay {
     /// End pin ID of the created link (input pin)
     pub created_link_end_pin: Property<i32>,
 
+    // === Node rectangle reporting (for hit-testing and box selection) ===
+    /// Node ID being reported (set before triggering node_rect_changed)
+    pub reporting_node_id: Property<i32>,
+    /// X position of node being reported (in screen coordinates)
+    pub reporting_node_x: Property<LogicalLength>,
+    /// Y position of node being reported (in screen coordinates)
+    pub reporting_node_y: Property<LogicalLength>,
+    /// Width of node being reported
+    pub reporting_node_width: Property<LogicalLength>,
+    /// Height of node being reported
+    pub reporting_node_height: Property<LogicalLength>,
+    /// Callback when a node reports its rectangle
+    pub node_rect_changed: Callback<()>,
+
+    // === Box selection result (output when selection_changed fires) ===
+    /// Comma-separated list of node IDs that intersect with the selection box
+    /// Format: "1,2,3" or empty string if none
+    pub selected_node_ids_str: Property<SharedString>,
+
     /// Internal state
     data: NodeEditorDataBox,
 
@@ -541,6 +590,31 @@ impl Item for NodeEditorOverlay {
 
             // Clear the reporting trigger
             Self::FIELD_OFFSETS.reporting_pin_id.apply_pin(self).set(0);
+        }
+
+        // Check if a Node component is reporting its rectangle
+        let reporting_node = self.reporting_node_id();
+        if reporting_node > 0 {
+            let node_x = self.reporting_node_x().get();
+            let node_y = self.reporting_node_y().get();
+            let node_width = self.reporting_node_width().get();
+            let node_height = self.reporting_node_height().get();
+
+            // Store the node rectangle for hit-testing and box selection
+            let mut state = self.data.state.borrow_mut();
+            state.node_rects.insert(
+                reporting_node,
+                NodeRect {
+                    x: node_x,
+                    y: node_y,
+                    width: node_width,
+                    height: node_height,
+                },
+            );
+            drop(state);
+
+            // Clear the reporting trigger
+            Self::FIELD_OFFSETS.reporting_node_id.apply_pin(self).set(0);
         }
 
         // Check if a Pin component is requesting link completion (pin has mouse capture)
@@ -840,8 +914,36 @@ impl NodeEditorOverlay {
             }
             PointerEventButton::Left => {
                 if state.is_box_selecting {
+                    // Get selection box bounds
+                    let sel_start = state.box_select_start;
+                    let sel_current = state.box_select_current;
+                    let sel_x = sel_start.x.min(sel_current.x);
+                    let sel_y = sel_start.y.min(sel_current.y);
+                    let sel_width = (sel_current.x - sel_start.x).abs();
+                    let sel_height = (sel_current.y - sel_start.y).abs();
+
+                    // Find all nodes that intersect with the selection box
+                    let mut selected_ids: alloc::vec::Vec<i32> = state
+                        .node_rects
+                        .iter()
+                        .filter(|(_, rect)| rect.intersects(sel_x, sel_y, sel_width, sel_height))
+                        .map(|(id, _)| *id)
+                        .collect();
+                    selected_ids.sort();
+
                     state.is_box_selecting = false;
                     drop(state);
+
+                    // Set the selected node IDs as a comma-separated string
+                    let ids_str = selected_ids
+                        .iter()
+                        .map(|id| alloc::format!("{}", id))
+                        .collect::<alloc::vec::Vec<_>>()
+                        .join(",");
+                    Self::FIELD_OFFSETS
+                        .selected_node_ids_str
+                        .apply_pin(self)
+                        .set(SharedString::from(&ids_str));
 
                     // Clear selection visual and emit callback
                     Self::FIELD_OFFSETS.is_selecting.apply_pin(self).set(false);

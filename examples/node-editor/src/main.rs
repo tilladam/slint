@@ -306,35 +306,21 @@ fn main() {
         });
     });
 
-    // Handle box selection
+    // Handle box selection - overlay computes intersecting node IDs
     let nodes_for_box = nodes.clone();
-    window.on_box_select(move |sel_x, sel_y, sel_width, sel_height, zoom, pan_x, pan_y| {
-        // Node dimensions (must match ui.slint)
-        let node_base_width = 150.0 * zoom;
-        let node_base_height = 80.0 * zoom;
+    window.on_box_select_nodes(move |selected_ids_str| {
+        // Parse comma-separated node IDs from overlay
+        let selected_ids: std::collections::HashSet<i32> = selected_ids_str
+            .split(',')
+            .filter_map(|s| s.trim().parse::<i32>().ok())
+            .collect();
 
-        // Convert selection box to f32 for comparison
-        let sel_x = sel_x as f32;
-        let sel_y = sel_y as f32;
-        let sel_width = sel_width as f32;
-        let sel_height = sel_height as f32;
-        let pan_x = pan_x as f32;
-        let pan_y = pan_y as f32;
-
+        // Update selection state for all nodes
         for i in 0..nodes_for_box.row_count() {
             if let Some(mut node) = nodes_for_box.row_data(i) {
-                // Compute node screen position
-                let node_screen_x = node.world_x * zoom + pan_x;
-                let node_screen_y = node.world_y * zoom + pan_y;
-
-                // Check if node intersects with selection box
-                let intersects = node_screen_x < sel_x + sel_width
-                    && node_screen_x + node_base_width > sel_x
-                    && node_screen_y < sel_y + sel_height
-                    && node_screen_y + node_base_height > sel_y;
-
-                if node.selected != intersects {
-                    node.selected = intersects;
+                let should_select = selected_ids.contains(&node.id);
+                if node.selected != should_select {
+                    node.selected = should_select;
                     nodes_for_box.set_row_data(i, node);
                 }
             }

@@ -120,6 +120,15 @@ component Node inherits Rectangle {
     callback drag-moved(int, length, length);  // node-id, offset-x, offset-y
     callback drag-ended(int, length, length);  // node-id, delta-x, delta-y
 
+    // Callback to report node rectangle (for overlay hit-testing and box selection)
+    // Parameters: node-id, x, y, width, height (all in screen coordinates)
+    callback report-rect(int, length, length, length, length);
+
+    // Report rect on init
+    init => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+
     // Pin dimensions (scaled by zoom)
     property <length> base-pin-size: 12px;
     property <length> pin-size: base-pin-size * zoom;
@@ -474,9 +483,9 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Callback for box selection - Rust handles the actual selection
-    // Parameters: sel-x, sel-y, sel-width, sel-height, zoom, pan-x, pan-y
-    callback box-select(length, length, length, length, float, length, length);
+    // Callback for box selection - overlay computes intersecting node IDs
+    // Parameter: comma-separated list of node IDs (e.g., "1,2,3")
+    callback box-select-nodes(string);
 
     // Link creation state managed directly in Slint
     property <bool> link-active: false;
@@ -746,6 +755,15 @@ export component MainWindow inherits Window {
             }
             link-pin-id = 0;
         }
+        report-rect(id, x, y, w, h) => {
+            // Report node rectangle to overlay for hit-testing and box selection
+            overlay.reporting-node-id = id;
+            overlay.reporting-node-x = x;
+            overlay.reporting-node-y = y;
+            overlay.reporting-node-width = w;
+            overlay.reporting-node-height = h;
+            // Trigger the callback (overlay will store the rect and clear reporting-node-id)
+        }
     }
 
     // Links layer (between nodes and overlay) - iterates over Rust-owned model
@@ -784,11 +802,9 @@ export component MainWindow inherits Window {
         }
 
         selection-changed => {
-            // Send box selection info to Rust for processing
+            // Overlay has computed intersecting node IDs - pass to Rust
             if overlay.selection-width > 5px && overlay.selection-height > 5px {
-                root.box-select(overlay.selection-x, overlay.selection-y,
-                               overlay.selection-width, overlay.selection-height,
-                               zoom, pan-x, pan-y);
+                root.box-select-nodes(overlay.selected-node-ids-str);
             }
         }
 
