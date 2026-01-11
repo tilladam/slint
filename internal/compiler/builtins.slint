@@ -756,8 +756,8 @@ export component NativeTabWidget {
 // ============================================================================
 
 /// Background layer for node editors.
-/// Provides viewport properties (pan, zoom). Grid and links are NOT rendered
-/// natively - use Path components in Slint bound to callbacks that generate SVG data.
+/// Provides viewport properties (pan, zoom) and generates grid path commands.
+/// Use a Path component bound to grid-commands to render the grid.
 export component NodeEditorBackground inherits Empty {
     /// Spacing between grid lines
     in property <length> grid-spacing: 24px;
@@ -771,6 +771,10 @@ export component NodeEditorBackground inherits Empty {
     in-out property <length> pan-y;
     /// Current zoom level
     in property <float> zoom: 1.0;
+
+    /// Generated SVG path commands for grid lines (output, updated by native code)
+    out property <string> grid-commands;
+
     //-default_size_binding:expands_to_parent_geometry
 }
 

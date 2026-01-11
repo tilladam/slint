@@ -7,7 +7,8 @@
 //!
 //! 1. **NodeEditorBackground** (bottom layer)
 //!    - Provides properties for viewport state (pan, zoom)
-//!    - Grid rendering is the application's responsibility via Slint Path component
+//!    - Generates grid path commands based on pan/zoom/size
+//!    - Contains a child Path component that renders the grid
 //!    - Links are rendered using Slint Path components placed in this layer
 //!
 //! 2. **Node children** (middle layer, Slint components)
@@ -21,9 +22,9 @@
 //!      - Link preview: `is-creating-link`, `link-start-x/y`, `link-end-x/y`
 //!    - Fires callbacks: `viewport-changed`, `selection-changed`, `delete-selected`, etc.
 //!
-//! **Rendering Philosophy**: The native items handle input and state management.
-//! Visual rendering (grid, links, selection box, link preview) is done using
-//! Slint components (Rectangle, Path) that bind to the overlay's properties.
+//! **Rendering Philosophy**: The background generates grid commands that a child Path
+//! component renders. The overlay handles input and state management. Selection box
+//! and link preview are rendered by Slint components bound to overlay properties.
 
 use super::{
     Item, ItemConsts, ItemRc, ItemRendererRef, KeyEventResult, RenderingResult,
@@ -41,10 +42,11 @@ use crate::lengths::{
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
 use crate::window::{WindowAdapter, WindowInner};
-use crate::{Callback, Coord, Property};
+use crate::{Callback, Coord, Property, SharedString};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
+use alloc::string::String;
 use const_field_offset::FieldOffsets;
 use core::cell::RefCell;
 use core::pin::Pin;
@@ -53,6 +55,90 @@ use i_slint_core_macros::*;
 // Note: Complex callbacks with multiple parameters are not yet supported by the RTTI system.
 // For now, we use simple void callbacks. The actual event data can be retrieved via properties.
 // TODO: Add proper callback argument types once builtin_structs integration is done.
+
+/// Internal state for the node editor background (grid caching)
+#[derive(Default)]
+struct BackgroundState {
+    /// Cached grid parameters to detect changes
+    last_width: f32,
+    last_height: f32,
+    last_pan_x: f32,
+    last_pan_y: f32,
+    last_zoom: f32,
+    last_spacing: f32,
+}
+
+/// Wraps the background internal state properly with RefCell
+#[repr(C)]
+pub struct BackgroundData {
+    state: RefCell<BackgroundState>,
+}
+
+impl Default for BackgroundData {
+    fn default() -> Self {
+        Self {
+            state: RefCell::new(BackgroundState::default()),
+        }
+    }
+}
+
+#[repr(C)]
+pub struct BackgroundDataBox(core::ptr::NonNull<BackgroundData>);
+
+impl Default for BackgroundDataBox {
+    fn default() -> Self {
+        BackgroundDataBox(Box::leak(Box::<BackgroundData>::default()).into())
+    }
+}
+
+impl Drop for BackgroundDataBox {
+    fn drop(&mut self) {
+        drop(unsafe { Box::from_raw(self.0.as_ptr()) });
+    }
+}
+
+impl core::ops::Deref for BackgroundDataBox {
+    type Target = BackgroundData;
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+/// Generate SVG path commands for grid lines
+fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y: f32, spacing: f32) -> String {
+    let effective_spacing = spacing * zoom;
+
+    // Skip if spacing is too small to be visible
+    if effective_spacing < 4.0 {
+        return String::new();
+    }
+
+    // Calculate grid offset based on pan (modulo spacing for infinite grid effect)
+    let offset_x = pan_x.rem_euclid(effective_spacing);
+    let offset_y = pan_y.rem_euclid(effective_spacing);
+
+    let mut commands = String::with_capacity(10000);
+
+    // Generate vertical lines
+    let mut x = offset_x;
+    while x < width + effective_spacing {
+        if !commands.is_empty() {
+            commands.push(' ');
+        }
+        commands.push_str(&alloc::format!("M {} 0 L {} {}", x, x, height));
+        x += effective_spacing;
+    }
+
+    // Generate horizontal lines
+    let mut y = offset_y;
+    while y < height + effective_spacing {
+        commands.push(' ');
+        commands.push_str(&alloc::format!("M 0 {} L {} {}", y, width, y));
+        y += effective_spacing;
+    }
+
+    commands
+}
 
 /// Internal state for the node editor overlay
 #[derive(Default, Debug)]
@@ -121,10 +207,9 @@ impl core::ops::Deref for NodeEditorDataBox {
 
 /// The background layer of a node editor.
 ///
-/// This provides viewport properties (pan, zoom) and serves as the container
-/// for grid and link rendering via Slint Path components. The grid and links
-/// are NOT rendered natively - applications should use Path components bound
-/// to callbacks that generate SVG path data (see example's `generate_grid_commands`).
+/// This provides viewport properties (pan, zoom) and generates grid path commands
+/// that a child Path component can render. The grid commands are automatically
+/// regenerated when pan, zoom, or size changes.
 #[repr(C)]
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
@@ -141,6 +226,12 @@ pub struct NodeEditorBackground {
     pub pan_y: Property<LogicalLength>,
     /// Current zoom level
     pub zoom: Property<f32>,
+
+    /// Generated SVG path commands for grid lines (output, bind Path.commands to this)
+    pub grid_commands: Property<SharedString>,
+
+    /// Internal state for grid caching
+    data: BackgroundDataBox,
 
     pub cached_rendering_data: CachedRenderingData,
 }
@@ -207,14 +298,45 @@ impl Item for NodeEditorBackground {
         self: Pin<&Self>,
         _backend: &mut ItemRendererRef,
         _self_rc: &ItemRc,
-        _size: LogicalSize,
+        size: LogicalSize,
     ) -> RenderingResult {
-        // Grid rendering is the application's responsibility.
-        // Use a Path component in Slint bound to grid commands generated
-        // in Rust (see example's generate_grid_commands function).
-        //
-        // Links are also rendered using Path components in Slint,
-        // placed between the background and overlay layers.
+        // Get current values
+        let width = size.width;
+        let height = size.height;
+        let pan_x = self.pan_x().get();
+        let pan_y = self.pan_y().get();
+        let zoom = self.zoom();
+        let spacing = self.grid_spacing().get();
+
+        // Check if we need to regenerate grid commands
+        let mut state = self.data.state.borrow_mut();
+        let needs_update = state.last_width != width
+            || state.last_height != height
+            || state.last_pan_x != pan_x
+            || state.last_pan_y != pan_y
+            || state.last_zoom != zoom
+            || state.last_spacing != spacing;
+
+        if needs_update {
+            // Update cached values
+            state.last_width = width;
+            state.last_height = height;
+            state.last_pan_x = pan_x;
+            state.last_pan_y = pan_y;
+            state.last_zoom = zoom;
+            state.last_spacing = spacing;
+
+            // Generate new grid commands
+            let commands = generate_grid_commands(width, height, zoom, pan_x, pan_y, spacing);
+
+            // Drop the borrow before setting the property to avoid potential issues
+            drop(state);
+
+            // Update the grid_commands property
+            Self::FIELD_OFFSETS.grid_commands.apply_pin(self).set(SharedString::from(&commands));
+        }
+
+        // Continue rendering children (which includes the grid Path)
         RenderingResult::ContinueRenderingChildren
     }
 
