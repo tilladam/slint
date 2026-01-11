@@ -14,9 +14,84 @@ const NODE_BASE_WIDTH: f32 = 150.0;
 const NODE_BASE_HEIGHT: f32 = 80.0;
 const GRID_SPACING: f32 = 24.0;
 
+// Pin dimensions for computing pin positions (must match ui.slint and core)
+const BASE_PIN_SIZE: f32 = 12.0;
+const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
+const PIN_MARGIN: f32 = 8.0;
+
 /// Snap a value to the nearest grid position
 fn snap_to_grid(value: f32) -> f32 {
     (value / GRID_SPACING).round() * GRID_SPACING
+}
+
+/// Compute screen position for a pin given node world position and viewport
+/// Pin ID format: node_id * 10 + pin_type (1 = input, 2 = output)
+fn compute_pin_position(
+    pin_id: i32,
+    node_world_x: f32,
+    node_world_y: f32,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+) -> (f32, f32) {
+    let pin_type = pin_id % 10;
+    let pin_size = BASE_PIN_SIZE * zoom;
+    let pin_radius = pin_size / 2.0;
+
+    // Node screen position
+    let node_x = node_world_x * zoom + pan_x;
+    let node_y = node_world_y * zoom + pan_y;
+    let node_width = NODE_BASE_WIDTH * zoom;
+
+    if pin_type == 1 {
+        // Input pin: left side
+        let x = node_x + PIN_MARGIN * zoom + pin_radius;
+        let y = node_y + PIN_Y_OFFSET * zoom + pin_radius;
+        (x, y)
+    } else {
+        // Output pin: right side
+        let x = node_x + node_width - PIN_MARGIN * zoom - pin_size + pin_radius;
+        let y = node_y + PIN_Y_OFFSET * zoom + pin_radius;
+        (x, y)
+    }
+}
+
+/// Compute link positions from node data
+fn compute_link_positions(
+    links: &VecModel<LinkData>,
+    nodes: &VecModel<NodeData>,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+) {
+    // Build a map of node_id -> (world_x, world_y)
+    let node_positions: std::collections::HashMap<i32, (f32, f32)> = (0..nodes.row_count())
+        .filter_map(|i| nodes.row_data(i))
+        .map(|n| (n.id, (n.world_x, n.world_y)))
+        .collect();
+
+    // Update each link's positions
+    for i in 0..links.row_count() {
+        if let Some(mut link) = links.row_data(i) {
+            let start_node_id = link.start_pin_id / 10;
+            let end_node_id = link.end_pin_id / 10;
+
+            if let (Some(&(start_wx, start_wy)), Some(&(end_wx, end_wy))) =
+                (node_positions.get(&start_node_id), node_positions.get(&end_node_id))
+            {
+                let (start_x, start_y) =
+                    compute_pin_position(link.start_pin_id, start_wx, start_wy, zoom, pan_x, pan_y);
+                let (end_x, end_y) =
+                    compute_pin_position(link.end_pin_id, end_wx, end_wy, zoom, pan_x, pan_y);
+
+                link.start_x = start_x;
+                link.start_y = start_y;
+                link.end_x = end_x;
+                link.end_y = end_y;
+                links.set_row_data(i, link);
+            }
+        }
+    }
 }
 
 /// Build node rects batch string from model data and current viewport
@@ -101,6 +176,10 @@ fn main() {
         },
     ]));
     window.set_links(ModelRc::from(links.clone()));
+
+    // Compute initial link positions so they're visible immediately
+    // (don't wait for the callback chain which doesn't work on the first frame)
+    compute_link_positions(&links, &nodes, 1.0, 0.0, 0.0);
 
     // Report links to overlay for core-based position computation (using batch)
     // Format: "id,start_pin,end_pin,color_argb;..."
