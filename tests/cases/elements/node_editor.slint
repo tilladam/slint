@@ -17,6 +17,7 @@ TestCase := Window {
     property <int> link-dropped-count: 0;
     property <int> link-cancelled-count: 0;
     property <int> context-menu-count: 0;
+    property <int> selection-changed-count: 0;
 
     background := NodeEditorBackground {
         width: 100%;
@@ -55,6 +56,10 @@ TestCase := Window {
         context-menu-requested => {
             root.context-menu-count += 1;
         }
+
+        selection-changed => {
+            root.selection-changed-count += 1;
+        }
     }
 
     // Expose properties for testing (in-out to allow setting from tests)
@@ -64,6 +69,18 @@ TestCase := Window {
     out property <length> bg-grid-spacing: background.grid-spacing;
     out property <color> bg-grid-color: background.grid-color;
     out property <int> test-link-cancelled-count: link-cancelled-count;
+    out property <int> test-selection-changed-count: selection-changed-count;
+
+    // Selection box properties
+    out property <bool> test-is-selecting: overlay.is-selecting;
+    out property <length> test-selection-x: overlay.selection-x;
+    out property <length> test-selection-y: overlay.selection-y;
+    out property <length> test-selection-width: overlay.selection-width;
+    out property <length> test-selection-height: overlay.selection-height;
+
+    // Context menu properties
+    out property <length> test-context-menu-x: overlay.context-menu-x;
+    out property <length> test-context-menu-y: overlay.context-menu-y;
 }
 
 /*
@@ -368,6 +385,92 @@ assert_eq!(instance.get_test_link_cancelled_count(), 0);
 assert_eq!(instance.get_test_pan_x(), 0.0);
 assert_eq!(instance.get_test_pan_y(), 0.0);
 assert_eq!(instance.get_test_zoom(), 1.0);
+```
+
+```rust
+// Test: Selection box properties during Shift+drag
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// Initial state
+assert_eq!(instance.get_test_is_selecting(), false);
+assert_eq!(instance.get_test_selection_changed_count(), 0);
+
+// Hold Shift and start selection
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), true);
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 100.0) });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(100.0, 100.0), button: PointerEventButton::Left });
+
+// Should now be selecting
+assert_eq!(instance.get_test_is_selecting(), true);
+assert_eq!(instance.get_test_selection_x(), 100.0);
+assert_eq!(instance.get_test_selection_y(), 100.0);
+assert_eq!(instance.get_test_selection_width(), 0.0);
+assert_eq!(instance.get_test_selection_height(), 0.0);
+
+// Drag to expand selection box
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(300.0, 250.0) });
+
+// Selection box should be updated
+assert_eq!(instance.get_test_is_selecting(), true);
+assert_eq!(instance.get_test_selection_x(), 100.0);
+assert_eq!(instance.get_test_selection_y(), 100.0);
+assert_eq!(instance.get_test_selection_width(), 200.0);
+assert_eq!(instance.get_test_selection_height(), 150.0);
+
+// Release to complete selection
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(300.0, 250.0), button: PointerEventButton::Left });
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), false);
+
+// Selection should be complete
+assert_eq!(instance.get_test_is_selecting(), false);
+assert_eq!(instance.get_test_selection_changed_count(), 1);
+```
+
+```rust
+// Test: Selection box handles reverse drag direction
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// Hold Shift and start selection from bottom-right
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), true);
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(400.0, 300.0), button: PointerEventButton::Left });
+
+// Drag to top-left (reverse direction)
+instance.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(100.0, 100.0) });
+
+// Selection box should have correct bounds (min/max calculated)
+assert_eq!(instance.get_test_selection_x(), 100.0);  // min x
+assert_eq!(instance.get_test_selection_y(), 100.0);  // min y
+assert_eq!(instance.get_test_selection_width(), 300.0);  // max_x - min_x
+assert_eq!(instance.get_test_selection_height(), 200.0);  // max_y - min_y
+
+// Release
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(100.0, 100.0), button: PointerEventButton::Left });
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), false);
+```
+
+```rust
+// Test: Context menu position is stored
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Right-click at specific position
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(250.0, 175.0), button: PointerEventButton::Right });
+
+// Context menu position should be stored
+assert_eq!(instance.get_test_context_menu_x(), 250.0);
+assert_eq!(instance.get_test_context_menu_y(), 175.0);
+assert_eq!(instance.get_context_menu_count(), 1);
+
+// Right-click at different position
+instance.window().dispatch_event(WindowEvent::PointerReleased { position: LogicalPosition::new(250.0, 175.0), button: PointerEventButton::Right });
+instance.window().dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(500.0, 400.0), button: PointerEventButton::Right });
+
+// Position should be updated
+assert_eq!(instance.get_test_context_menu_x(), 500.0);
+assert_eq!(instance.get_test_context_menu_y(), 400.0);
+assert_eq!(instance.get_context_menu_count(), 2);
 ```
 
 */

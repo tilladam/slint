@@ -772,7 +772,7 @@ export component NodeEditorBackground inherits Empty {
     //-default_size_binding:expands_to_parent_geometry
 }
 
-/// Overlay layer for node editors. Renders selection box, active link preview, handles input.
+/// Overlay layer for node editors. Handles input and exposes state for Slint-rendered overlays.
 export component NodeEditorOverlay inherits Empty {
     /// Current pan offset X (should be bound to NodeEditorBackground.pan-x)
     in-out property <length> pan-x;
@@ -785,13 +785,31 @@ export component NodeEditorOverlay inherits Empty {
     /// Maximum zoom level
     in property <float> max-zoom: 3.0;
 
-    /// Selection box color
+    /// Selection box color (deprecated - use is-selecting and selection-* properties with a Rectangle)
     in property <color> selection-box-color: #4488ff40;
-    /// Active link color during creation
+    /// Active link color during creation (deprecated - use Slint Path instead)
     in property <color> active-link-color: #ffffff;
 
     /// Enable minimap
     in property <bool> minimap-enabled: false;
+
+    // === Selection box state (for Slint rendering) ===
+    /// Whether a box selection is currently active
+    out property <bool> is-selecting: false;
+    /// Selection box X coordinate (min of start and current)
+    out property <length> selection-x;
+    /// Selection box Y coordinate (min of start and current)
+    out property <length> selection-y;
+    /// Selection box width
+    out property <length> selection-width;
+    /// Selection box height
+    out property <length> selection-height;
+
+    // === Context menu state ===
+    /// X coordinate where context menu was requested
+    out property <length> context-menu-x;
+    /// Y coordinate where context menu was requested
+    out property <length> context-menu-y;
 
     /// Callback when a link is created between two pins
     /// Note: Use properties to get event data (TODO: add proper callback args)
@@ -803,8 +821,9 @@ export component NodeEditorOverlay inherits Empty {
     /// Note: Use properties to get event data (TODO: add proper callback args)
     callback link-cancelled();
     /// Callback for context menu
-    /// Note: Use properties to get event data (TODO: add proper callback args)
     callback context-menu-requested();
+    /// Callback when box selection completes
+    callback selection-changed();
 
     //-default_size_binding:expands_to_parent_geometry
 }

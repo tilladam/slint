@@ -279,7 +279,7 @@ impl ItemConsts for NodeEditorBackground {
 // ============================================================================
 
 /// The overlay layer of a node editor.
-/// Renders selection box, active link preview, minimap, and handles input.
+/// Handles input and exposes state for Slint-rendered overlays (selection box, etc.).
 #[repr(C)]
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
@@ -295,13 +295,31 @@ pub struct NodeEditorOverlay {
     /// Maximum zoom level
     pub max_zoom: Property<f32>,
 
-    /// Selection box color
+    /// Selection box color (deprecated - use Slint Rectangle instead)
     pub selection_box_color: Property<Color>,
-    /// Active link color during creation
+    /// Active link color during creation (deprecated - use Slint Path instead)
     pub active_link_color: Property<Color>,
 
     /// Enable minimap
     pub minimap_enabled: Property<bool>,
+
+    // === Selection box state (for Slint rendering) ===
+    /// Whether a box selection is currently active
+    pub is_selecting: Property<bool>,
+    /// Selection box X coordinate (min of start and current)
+    pub selection_x: Property<LogicalLength>,
+    /// Selection box Y coordinate (min of start and current)
+    pub selection_y: Property<LogicalLength>,
+    /// Selection box width
+    pub selection_width: Property<LogicalLength>,
+    /// Selection box height
+    pub selection_height: Property<LogicalLength>,
+
+    // === Context menu state ===
+    /// X coordinate where context menu was requested
+    pub context_menu_x: Property<LogicalLength>,
+    /// Y coordinate where context menu was requested
+    pub context_menu_y: Property<LogicalLength>,
 
     /// Callback when a link is created (use properties to get event data)
     pub link_created: Callback<()>,
@@ -311,6 +329,8 @@ pub struct NodeEditorOverlay {
     pub link_cancelled: Callback<()>,
     /// Callback for context menu (use properties to get event data)
     pub context_menu_requested: Callback<()>,
+    /// Callback when box selection completes
+    pub selection_changed: Callback<()>,
 
     /// Internal state
     data: NodeEditorDataBox,
@@ -480,9 +500,9 @@ impl NodeEditorOverlay {
                 InputEventResult::GrabMouse
             }
             PointerEventButton::Right => {
-                // Request context menu
-                // TODO: Store position in properties for retrieval
-                let _ = position;
+                // Request context menu - store position in properties
+                Self::FIELD_OFFSETS.context_menu_x.apply_pin(self).set(LogicalLength::new(position.x));
+                Self::FIELD_OFFSETS.context_menu_y.apply_pin(self).set(LogicalLength::new(position.y));
                 self.context_menu_requested.call(&());
                 InputEventResult::EventAccepted
             }
@@ -495,6 +515,15 @@ impl NodeEditorOverlay {
                     state.is_box_selecting = true;
                     state.box_select_start = position;
                     state.box_select_current = position;
+                    drop(state);
+
+                    // Update selection properties for Slint rendering
+                    Self::FIELD_OFFSETS.is_selecting.apply_pin(self).set(true);
+                    Self::FIELD_OFFSETS.selection_x.apply_pin(self).set(LogicalLength::new(position.x));
+                    Self::FIELD_OFFSETS.selection_y.apply_pin(self).set(LogicalLength::new(position.y));
+                    Self::FIELD_OFFSETS.selection_width.apply_pin(self).set(LogicalLength::new(0.0));
+                    Self::FIELD_OFFSETS.selection_height.apply_pin(self).set(LogicalLength::new(0.0));
+
                     InputEventResult::GrabMouse
                 } else {
                     // TODO: Implement proper hit testing for pins and nodes
@@ -524,7 +553,11 @@ impl NodeEditorOverlay {
             PointerEventButton::Left => {
                 if state.is_box_selecting {
                     state.is_box_selecting = false;
-                    // TODO: Emit selection changed event
+                    drop(state);
+
+                    // Clear selection visual and emit callback
+                    Self::FIELD_OFFSETS.is_selecting.apply_pin(self).set(false);
+                    self.selection_changed.call(&());
                     return InputEventResult::EventAccepted;
                 }
                 if state.is_creating_link {
@@ -561,7 +594,22 @@ impl NodeEditorOverlay {
         }
 
         if state.is_box_selecting {
+            let start = state.box_select_start;
             state.box_select_current = position;
+            drop(state);
+
+            // Calculate selection box bounds (handle any drag direction)
+            let min_x = start.x.min(position.x);
+            let min_y = start.y.min(position.y);
+            let max_x = start.x.max(position.x);
+            let max_y = start.y.max(position.y);
+
+            // Update selection properties for Slint rendering
+            Self::FIELD_OFFSETS.selection_x.apply_pin(self).set(LogicalLength::new(min_x));
+            Self::FIELD_OFFSETS.selection_y.apply_pin(self).set(LogicalLength::new(min_y));
+            Self::FIELD_OFFSETS.selection_width.apply_pin(self).set(LogicalLength::new(max_x - min_x));
+            Self::FIELD_OFFSETS.selection_height.apply_pin(self).set(LogicalLength::new(max_y - min_y));
+
             return InputEventResult::GrabMouse;
         }
 
@@ -615,16 +663,28 @@ impl NodeEditorOverlay {
         let mut state = self.data.state.borrow_mut();
 
         // Cancel any ongoing interactions
-        if state.is_panning {
+        let was_panning = state.is_panning;
+        let was_box_selecting = state.is_box_selecting;
+        let was_creating_link = state.is_creating_link;
+
+        if was_panning {
             state.is_panning = false;
         }
-        if state.is_box_selecting {
+        if was_box_selecting {
             state.is_box_selecting = false;
         }
-        if state.is_creating_link {
+        if was_creating_link {
             state.is_creating_link = false;
             state.link_start_pin = -1;
-            drop(state);
+        }
+        drop(state);
+
+        // Update properties and call callbacks after releasing the borrow
+        if was_box_selecting {
+            Self::FIELD_OFFSETS.is_selecting.apply_pin(self).set(false);
+            return InputEventResult::EventAccepted;
+        }
+        if was_creating_link {
             self.link_cancelled.call(&());
             return InputEventResult::EventAccepted;
         }

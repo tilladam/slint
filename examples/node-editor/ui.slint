@@ -180,7 +180,7 @@ export component MainWindow inherits Window {
     }
 
     // Overlay layer (on top)
-    NodeEditorOverlay {
+    overlay := NodeEditorOverlay {
         width: 100%;
         height: 100%;
         pan-x <=> pan-x;
@@ -200,8 +200,24 @@ export component MainWindow inherits Window {
         }
 
         context-menu-requested => {
-            debug("Context menu requested");
+            debug("Context menu at: " + overlay.context-menu-x / 1px + ", " + overlay.context-menu-y / 1px);
         }
+
+        selection-changed => {
+            debug("Selection changed");
+        }
+    }
+
+    // Selection box (rendered based on overlay state)
+    Rectangle {
+        visible: overlay.is-selecting;
+        x: overlay.selection-x;
+        y: overlay.selection-y;
+        width: overlay.selection-width;
+        height: overlay.selection-height;
+        background: #4488ff20;
+        border-color: #4488ff;
+        border-width: 1px;
     }
 
     // Instructions overlay
