@@ -36,33 +36,6 @@ use core::cell::RefCell;
 use core::pin::Pin;
 use i_slint_core_macros::*;
 
-// ============================================================================
-// Bezier Curve Math
-// ============================================================================
-
-/// Calculate control points for a horizontal bezier curve between two points.
-/// This creates the characteristic "S-curve" shape used in node editors.
-/// Used by NodeEditorOverlay for rendering active link preview during drag.
-#[allow(dead_code)]
-fn calculate_link_bezier(
-    start_x: f32,
-    start_y: f32,
-    end_x: f32,
-    end_y: f32,
-) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
-    // Calculate horizontal offset based on distance
-    let dx = (end_x - start_x).abs();
-    let offset = (dx * 0.5).max(50.0);
-
-    // Control points extend horizontally from start/end
-    let ctrl1_x = start_x + offset;
-    let ctrl1_y = start_y;
-    let ctrl2_x = end_x - offset;
-    let ctrl2_y = end_y;
-
-    (start_x, start_y, ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, end_x, end_y)
-}
-
 // Note: Complex callbacks with multiple parameters are not yet supported by the RTTI system.
 // For now, we use simple void callbacks. The actual event data can be retrieved via properties.
 // TODO: Add proper callback argument types once builtin_structs integration is done.
@@ -428,12 +401,9 @@ impl Item for NodeEditorOverlay {
         if event.text.starts_with(crate::input::key_codes::Escape) {
             let mut state = self.data.state.borrow_mut();
             if state.is_creating_link {
-                let pin_id = state.link_start_pin;
                 state.is_creating_link = false;
                 state.link_start_pin = -1;
                 drop(state);
-                // TODO: Store pin_id in a property for retrieval
-                let _ = pin_id;
                 self.link_cancelled.call(&());
                 return KeyEventResult::EventAccepted;
             }
@@ -539,7 +509,7 @@ impl NodeEditorOverlay {
 
     fn handle_mouse_released(
         self: Pin<&Self>,
-        position: LogicalPoint,
+        _position: LogicalPoint, // TODO: Use for pin hit testing
         button: PointerEventButton,
     ) -> InputEventResult {
         let mut state = self.data.state.borrow_mut();
@@ -560,12 +530,9 @@ impl NodeEditorOverlay {
                 if state.is_creating_link {
                     // TODO: Check if we're over a valid pin
                     // For now, emit link_dropped
-                    let pin_id = state.link_start_pin;
                     state.is_creating_link = false;
                     state.link_start_pin = -1;
                     drop(state);
-                    // TODO: Store pin_id and position in properties for retrieval
-                    let _ = (pin_id, position);
                     self.link_dropped.call(&());
                     return InputEventResult::EventAccepted;
                 }
@@ -655,12 +622,9 @@ impl NodeEditorOverlay {
             state.is_box_selecting = false;
         }
         if state.is_creating_link {
-            let pin_id = state.link_start_pin;
             state.is_creating_link = false;
             state.link_start_pin = -1;
             drop(state);
-            // TODO: Store pin_id in a property for retrieval
-            let _ = pin_id;
             self.link_cancelled.call(&());
             return InputEventResult::EventAccepted;
         }
