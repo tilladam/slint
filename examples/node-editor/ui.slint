@@ -6,22 +6,20 @@
 // Architecture (three-layer approach):
 // 1. NodeEditorBackground - provides viewport properties (pan, zoom)
 // 2. Node children - application-defined components (Node)
-// 3. NodeEditorOverlay - handles input (pan, zoom, box selection, link creation)
+// 3. NodeEditorOverlay - handles input (pan, zoom, box selection)
 //
 // Rendering is done in Slint (not natively):
 // - Grid: Path component with Rust-generated SVG commands
 // - Links: Path components with bezier curves
 // - Selection box: Rectangle bound to overlay's is-selecting/selection-* properties
-// - Link preview: Path bound to overlay's is-creating-link/link-start-*/link-end-*
+// - Link preview: Path bound to local link-active/link-start-*/link-end-* properties
 //
-// Link creation flow:
-// 1. Pin TouchArea starts drag -> sets overlay.pending-link-* properties
-// 2. Overlay starts link creation (is-creating-link becomes true)
-// 3. Pin TouchArea moves -> updates overlay.link-end-x/y
-// 4. Pin TouchArea releases -> computes target-pin-id via find-pin-at(),
-//    sets overlay.target-pin-id and overlay.complete-link-creation
-// 5. Overlay validates compatibility, emits link-created or link-dropped
-// 6. Rust's on_create_link callback adds the link to the model
+// Link creation flow (handled in Slint, not overlay):
+// 1. Pin TouchArea starts drag -> sets local link-active, link-start-*, link-end-*
+// 2. Link preview becomes visible (bound to link-active)
+// 3. Pin TouchArea moves -> updates local link-end-x/y
+// 4. Pin TouchArea releases -> computes target via find-pin-at(), validates, calls create-link
+// 5. Rust's on_create_link callback adds the link to the model
 
 // Data structure for nodes - exported to Rust
 export struct NodeData {
@@ -737,21 +735,37 @@ export component MainWindow inherits Window {
             visual-drag-offset-y = 0px;
         }
         pin-drag-started(pin-id, x, y) => {
-            // Start link creation via overlay's pending-link mechanism
-            overlay.pending-link-pin-id = pin-id;
-            overlay.pending-link-x = x;
-            overlay.pending-link-y = y;
+            // Start link preview using local state (overlay doesn't receive events during pin drag)
+            link-active = true;
+            link-pin-id = pin-id;
+            link-start-x = x;
+            link-start-y = y;
+            link-end-x = x;
+            link-end-y = y;
         }
         pin-drag-moved(pin-id, x, y) => {
-            // Update overlay's link end position during drag
-            overlay.link-end-x = x;
-            overlay.link-end-y = y;
+            // Update link preview end position
+            link-end-x = x;
+            link-end-y = y;
         }
         pin-drag-ended(pin-id, x, y) => {
-            // Trigger link completion via the overlay (since pin has mouse capture)
-            // Use Slint's find-pin-at to compute target pin (bypasses overlay's internal mechanism)
-            overlay.target-pin-id = find-pin-at(x, y);
-            overlay.complete-link-creation = true;
+            // End link preview
+            link-active = false;
+            // Check if dropped on a valid target pin and create link
+            drop-target-pin = find-pin-at(x, y);
+            if drop-target-pin != 0 && drop-target-pin != link-pin-id {
+                // Validate: output should connect to input (or vice versa)
+                if (is-output-pin(link-pin-id) && is-input-pin(drop-target-pin)) ||
+                   (is-input-pin(link-pin-id) && is-output-pin(drop-target-pin)) {
+                    // Normalize: always store output -> input
+                    if is-output-pin(link-pin-id) {
+                        root.create-link(link-pin-id, drop-target-pin);
+                    } else {
+                        root.create-link(drop-target-pin, link-pin-id);
+                    }
+                }
+            }
+            link-pin-id = 0;
         }
     }
 
@@ -827,13 +841,13 @@ export component MainWindow inherits Window {
         border-width: 1px;
     }
 
-    // Active link preview (rendered during link creation, using overlay state)
+    // Active link preview (rendered during link creation, using local state)
     Link {
-        visible: overlay.is-creating-link;
-        start-x: overlay.link-start-x;
-        start-y: overlay.link-start-y;
-        end-x: overlay.link-end-x;
-        end-y: overlay.link-end-y;
+        visible: link-active;
+        start-x: link-start-x;
+        start-y: link-start-y;
+        end-x: link-end-x;
+        end-y: link-end-y;
         link-color: #ffffff80;
         line-width: 2px * zoom;
         zoom: zoom;
