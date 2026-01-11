@@ -849,6 +849,8 @@ export component NodeEditorOverlay inherits Empty {
     callback viewport-changed();
     /// Callback when delete key is pressed (Delete or Backspace)
     callback delete-selected();
+    /// Callback when add node shortcut is pressed (Ctrl+N)
+    callback add-node-requested();
 
     //-default_size_binding:expands_to_parent_geometry
 }

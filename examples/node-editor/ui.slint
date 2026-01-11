@@ -10,11 +10,17 @@ export struct NodeData {
 }
 
 // Data structure for links - exported to Rust
+// Positions are computed by Rust and updated when nodes move or viewport changes
 export struct LinkData {
     id: int,
     start-pin-id: int,
     end-pin-id: int,
     color: color,
+    // Pre-computed screen positions (set by Rust)
+    start-x: float,
+    start-y: float,
+    end-x: float,
+    end-y: float,
 }
 
 // Grid component for the node editor background
@@ -294,6 +300,7 @@ export component MainWindow inherits Window {
     callback update-grid(float, float, float, float, float);  // width, height, zoom, pan-x, pan-y
     callback create-link(int, int);  // start-pin-id, end-pin-id
     callback delete-selected-nodes();  // delete all selected nodes
+    callback add-node();  // add a new node
 
     // Grid SVG commands (set by Rust)
     in property <string> grid-commands: "";
@@ -303,10 +310,10 @@ export component MainWindow inherits Window {
     property <length> visual-drag-offset-x: 0px;
     property <length> visual-drag-offset-y: 0px;
 
-    // Shared pan state
-    property <length> pan-x: 0px;
-    property <length> pan-y: 0px;
-    property <float> zoom: 1.0;
+    // Shared pan state (in-out so Rust can read them)
+    in-out property <length> pan-x: 0px;
+    in-out property <length> pan-y: 0px;
+    in-out property <float> zoom: 1.0;
 
     // Node dimensions (must match Node component)
     property <length> node-base-width: 150px;
@@ -332,29 +339,108 @@ export component MainWindow inherits Window {
     }
 
     // Get node world position from model by ID (includes visual drag offset if dragging)
+    // Note: Slint doesn't support computed array indexing or loops in pure functions,
+    // so we check each index explicitly and return when we find a match.
+    // This supports up to 16 nodes.
     pure function get-node-world-x(node-id: int) -> float {
-        // Note: Slint doesn't support array indexing by computed index,
-        // so we use fixed positions for the 3-node example
-        if node-id == 1 && nodes.length > 0 {
+        if nodes.length > 0 && nodes[0].id == node-id {
             return nodes[0].world-x + (nodes[0].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
         }
-        if node-id == 2 && nodes.length > 1 {
+        if nodes.length > 1 && nodes[1].id == node-id {
             return nodes[1].world-x + (nodes[1].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
         }
-        if node-id == 3 && nodes.length > 2 {
+        if nodes.length > 2 && nodes[2].id == node-id {
             return nodes[2].world-x + (nodes[2].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 3 && nodes[3].id == node-id {
+            return nodes[3].world-x + (nodes[3].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 4 && nodes[4].id == node-id {
+            return nodes[4].world-x + (nodes[4].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 5 && nodes[5].id == node-id {
+            return nodes[5].world-x + (nodes[5].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 6 && nodes[6].id == node-id {
+            return nodes[6].world-x + (nodes[6].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 7 && nodes[7].id == node-id {
+            return nodes[7].world-x + (nodes[7].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 8 && nodes[8].id == node-id {
+            return nodes[8].world-x + (nodes[8].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 9 && nodes[9].id == node-id {
+            return nodes[9].world-x + (nodes[9].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 10 && nodes[10].id == node-id {
+            return nodes[10].world-x + (nodes[10].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 11 && nodes[11].id == node-id {
+            return nodes[11].world-x + (nodes[11].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 12 && nodes[12].id == node-id {
+            return nodes[12].world-x + (nodes[12].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 13 && nodes[13].id == node-id {
+            return nodes[13].world-x + (nodes[13].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 14 && nodes[14].id == node-id {
+            return nodes[14].world-x + (nodes[14].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if nodes.length > 15 && nodes[15].id == node-id {
+            return nodes[15].world-x + (nodes[15].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
         }
         return 0;
     }
     pure function get-node-world-y(node-id: int) -> float {
-        if node-id == 1 && nodes.length > 0 {
+        if nodes.length > 0 && nodes[0].id == node-id {
             return nodes[0].world-y + (nodes[0].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
         }
-        if node-id == 2 && nodes.length > 1 {
+        if nodes.length > 1 && nodes[1].id == node-id {
             return nodes[1].world-y + (nodes[1].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
         }
-        if node-id == 3 && nodes.length > 2 {
+        if nodes.length > 2 && nodes[2].id == node-id {
             return nodes[2].world-y + (nodes[2].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 3 && nodes[3].id == node-id {
+            return nodes[3].world-y + (nodes[3].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 4 && nodes[4].id == node-id {
+            return nodes[4].world-y + (nodes[4].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 5 && nodes[5].id == node-id {
+            return nodes[5].world-y + (nodes[5].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 6 && nodes[6].id == node-id {
+            return nodes[6].world-y + (nodes[6].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 7 && nodes[7].id == node-id {
+            return nodes[7].world-y + (nodes[7].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 8 && nodes[8].id == node-id {
+            return nodes[8].world-y + (nodes[8].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 9 && nodes[9].id == node-id {
+            return nodes[9].world-y + (nodes[9].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 10 && nodes[10].id == node-id {
+            return nodes[10].world-y + (nodes[10].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 11 && nodes[11].id == node-id {
+            return nodes[11].world-y + (nodes[11].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 12 && nodes[12].id == node-id {
+            return nodes[12].world-y + (nodes[12].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 13 && nodes[13].id == node-id {
+            return nodes[13].world-y + (nodes[13].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 14 && nodes[14].id == node-id {
+            return nodes[14].world-y + (nodes[14].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if nodes.length > 15 && nodes[15].id == node-id {
+            return nodes[15].world-y + (nodes[15].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
         }
         return 0;
     }
@@ -417,48 +503,129 @@ export component MainWindow inherits Window {
         return mod(pin-id, 10) == 2;
     }
 
+    // Helper: check if a node (given its ID) is selected
+    pure function is-node-selected(node-id: int) -> bool {
+        if nodes.length > 0 && nodes[0].id == node-id { return nodes[0].selected; }
+        if nodes.length > 1 && nodes[1].id == node-id { return nodes[1].selected; }
+        if nodes.length > 2 && nodes[2].id == node-id { return nodes[2].selected; }
+        if nodes.length > 3 && nodes[3].id == node-id { return nodes[3].selected; }
+        if nodes.length > 4 && nodes[4].id == node-id { return nodes[4].selected; }
+        if nodes.length > 5 && nodes[5].id == node-id { return nodes[5].selected; }
+        if nodes.length > 6 && nodes[6].id == node-id { return nodes[6].selected; }
+        if nodes.length > 7 && nodes[7].id == node-id { return nodes[7].selected; }
+        if nodes.length > 8 && nodes[8].id == node-id { return nodes[8].selected; }
+        if nodes.length > 9 && nodes[9].id == node-id { return nodes[9].selected; }
+        if nodes.length > 10 && nodes[10].id == node-id { return nodes[10].selected; }
+        if nodes.length > 11 && nodes[11].id == node-id { return nodes[11].selected; }
+        if nodes.length > 12 && nodes[12].id == node-id { return nodes[12].selected; }
+        if nodes.length > 13 && nodes[13].id == node-id { return nodes[13].selected; }
+        if nodes.length > 14 && nodes[14].id == node-id { return nodes[14].selected; }
+        if nodes.length > 15 && nodes[15].id == node-id { return nodes[15].selected; }
+        return false;
+    }
+
+    // Helper: get drag offset for a link endpoint during dragging
+    // Returns the visual drag offset if the pin's node is selected and being dragged
+    pure function get-link-drag-offset-x(pin-id: int) -> length {
+        if !is-dragging { return 0px; }
+        return is-node-selected(floor(pin-id / 10)) ? visual-drag-offset-x : 0px;
+    }
+    pure function get-link-drag-offset-y(pin-id: int) -> length {
+        if !is-dragging { return 0px; }
+        return is-node-selected(floor(pin-id / 10)) ? visual-drag-offset-y : 0px;
+    }
+
     // Helper: get pin position by id (computed from model data)
+    // Pin ID format: node_id * 10 + pin_type (1=input, 2=output)
     pure function get-pin-x(pin-id: int) -> length {
-        // Pin ID format: node_id * 10 + pin_type (1=input, 2=output)
-        // Extract node-id and pin type
+        // Extract node-id: pin-id / 10
         if mod(pin-id, 10) == 1 {
             // Input pin
-            if pin-id == 11 { return compute-input-pin-x(get-node-world-x(1)); }
-            if pin-id == 21 { return compute-input-pin-x(get-node-world-x(2)); }
-            if pin-id == 31 { return compute-input-pin-x(get-node-world-x(3)); }
+            return compute-input-pin-x(get-node-world-x(floor(pin-id / 10)));
         } else {
             // Output pin
-            if pin-id == 12 { return compute-output-pin-x(get-node-world-x(1)); }
-            if pin-id == 22 { return compute-output-pin-x(get-node-world-x(2)); }
-            if pin-id == 32 { return compute-output-pin-x(get-node-world-x(3)); }
+            return compute-output-pin-x(get-node-world-x(floor(pin-id / 10)));
         }
-        return 0px;
     }
 
     pure function get-pin-y(pin-id: int) -> length {
         if mod(pin-id, 10) == 1 {
             // Input pin
-            if pin-id == 11 { return compute-input-pin-y(get-node-world-y(1)); }
-            if pin-id == 21 { return compute-input-pin-y(get-node-world-y(2)); }
-            if pin-id == 31 { return compute-input-pin-y(get-node-world-y(3)); }
+            return compute-input-pin-y(get-node-world-y(floor(pin-id / 10)));
         } else {
             // Output pin
-            if pin-id == 12 { return compute-output-pin-y(get-node-world-y(1)); }
-            if pin-id == 22 { return compute-output-pin-y(get-node-world-y(2)); }
-            if pin-id == 32 { return compute-output-pin-y(get-node-world-y(3)); }
+            return compute-output-pin-y(get-node-world-y(floor(pin-id / 10)));
         }
-        return 0px;
     }
 
     // Find which pin (if any) is at position (uses computed positions from model)
+    // Checks both input and output pins for each node in the model
     pure function find-pin-at(x: length, y: length) -> int {
-        // Check all pins using computed positions
-        if point-near-pin(x, y, get-pin-x(11), get-pin-y(11), 11) != 0 { return 11; }
-        if point-near-pin(x, y, get-pin-x(12), get-pin-y(12), 12) != 0 { return 12; }
-        if point-near-pin(x, y, get-pin-x(21), get-pin-y(21), 21) != 0 { return 21; }
-        if point-near-pin(x, y, get-pin-x(22), get-pin-y(22), 22) != 0 { return 22; }
-        if point-near-pin(x, y, get-pin-x(31), get-pin-y(31), 31) != 0 { return 31; }
-        if point-near-pin(x, y, get-pin-x(32), get-pin-y(32), 32) != 0 { return 32; }
+        // Check pins for each node - input pin = node_id * 10 + 1, output pin = node_id * 10 + 2
+        if nodes.length > 0 {
+            if point-near-pin(x, y, get-pin-x(nodes[0].id * 10 + 1), get-pin-y(nodes[0].id * 10 + 1), nodes[0].id * 10 + 1) != 0 { return nodes[0].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[0].id * 10 + 2), get-pin-y(nodes[0].id * 10 + 2), nodes[0].id * 10 + 2) != 0 { return nodes[0].id * 10 + 2; }
+        }
+        if nodes.length > 1 {
+            if point-near-pin(x, y, get-pin-x(nodes[1].id * 10 + 1), get-pin-y(nodes[1].id * 10 + 1), nodes[1].id * 10 + 1) != 0 { return nodes[1].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[1].id * 10 + 2), get-pin-y(nodes[1].id * 10 + 2), nodes[1].id * 10 + 2) != 0 { return nodes[1].id * 10 + 2; }
+        }
+        if nodes.length > 2 {
+            if point-near-pin(x, y, get-pin-x(nodes[2].id * 10 + 1), get-pin-y(nodes[2].id * 10 + 1), nodes[2].id * 10 + 1) != 0 { return nodes[2].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[2].id * 10 + 2), get-pin-y(nodes[2].id * 10 + 2), nodes[2].id * 10 + 2) != 0 { return nodes[2].id * 10 + 2; }
+        }
+        if nodes.length > 3 {
+            if point-near-pin(x, y, get-pin-x(nodes[3].id * 10 + 1), get-pin-y(nodes[3].id * 10 + 1), nodes[3].id * 10 + 1) != 0 { return nodes[3].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[3].id * 10 + 2), get-pin-y(nodes[3].id * 10 + 2), nodes[3].id * 10 + 2) != 0 { return nodes[3].id * 10 + 2; }
+        }
+        if nodes.length > 4 {
+            if point-near-pin(x, y, get-pin-x(nodes[4].id * 10 + 1), get-pin-y(nodes[4].id * 10 + 1), nodes[4].id * 10 + 1) != 0 { return nodes[4].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[4].id * 10 + 2), get-pin-y(nodes[4].id * 10 + 2), nodes[4].id * 10 + 2) != 0 { return nodes[4].id * 10 + 2; }
+        }
+        if nodes.length > 5 {
+            if point-near-pin(x, y, get-pin-x(nodes[5].id * 10 + 1), get-pin-y(nodes[5].id * 10 + 1), nodes[5].id * 10 + 1) != 0 { return nodes[5].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[5].id * 10 + 2), get-pin-y(nodes[5].id * 10 + 2), nodes[5].id * 10 + 2) != 0 { return nodes[5].id * 10 + 2; }
+        }
+        if nodes.length > 6 {
+            if point-near-pin(x, y, get-pin-x(nodes[6].id * 10 + 1), get-pin-y(nodes[6].id * 10 + 1), nodes[6].id * 10 + 1) != 0 { return nodes[6].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[6].id * 10 + 2), get-pin-y(nodes[6].id * 10 + 2), nodes[6].id * 10 + 2) != 0 { return nodes[6].id * 10 + 2; }
+        }
+        if nodes.length > 7 {
+            if point-near-pin(x, y, get-pin-x(nodes[7].id * 10 + 1), get-pin-y(nodes[7].id * 10 + 1), nodes[7].id * 10 + 1) != 0 { return nodes[7].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[7].id * 10 + 2), get-pin-y(nodes[7].id * 10 + 2), nodes[7].id * 10 + 2) != 0 { return nodes[7].id * 10 + 2; }
+        }
+        if nodes.length > 8 {
+            if point-near-pin(x, y, get-pin-x(nodes[8].id * 10 + 1), get-pin-y(nodes[8].id * 10 + 1), nodes[8].id * 10 + 1) != 0 { return nodes[8].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[8].id * 10 + 2), get-pin-y(nodes[8].id * 10 + 2), nodes[8].id * 10 + 2) != 0 { return nodes[8].id * 10 + 2; }
+        }
+        if nodes.length > 9 {
+            if point-near-pin(x, y, get-pin-x(nodes[9].id * 10 + 1), get-pin-y(nodes[9].id * 10 + 1), nodes[9].id * 10 + 1) != 0 { return nodes[9].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[9].id * 10 + 2), get-pin-y(nodes[9].id * 10 + 2), nodes[9].id * 10 + 2) != 0 { return nodes[9].id * 10 + 2; }
+        }
+        if nodes.length > 10 {
+            if point-near-pin(x, y, get-pin-x(nodes[10].id * 10 + 1), get-pin-y(nodes[10].id * 10 + 1), nodes[10].id * 10 + 1) != 0 { return nodes[10].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[10].id * 10 + 2), get-pin-y(nodes[10].id * 10 + 2), nodes[10].id * 10 + 2) != 0 { return nodes[10].id * 10 + 2; }
+        }
+        if nodes.length > 11 {
+            if point-near-pin(x, y, get-pin-x(nodes[11].id * 10 + 1), get-pin-y(nodes[11].id * 10 + 1), nodes[11].id * 10 + 1) != 0 { return nodes[11].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[11].id * 10 + 2), get-pin-y(nodes[11].id * 10 + 2), nodes[11].id * 10 + 2) != 0 { return nodes[11].id * 10 + 2; }
+        }
+        if nodes.length > 12 {
+            if point-near-pin(x, y, get-pin-x(nodes[12].id * 10 + 1), get-pin-y(nodes[12].id * 10 + 1), nodes[12].id * 10 + 1) != 0 { return nodes[12].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[12].id * 10 + 2), get-pin-y(nodes[12].id * 10 + 2), nodes[12].id * 10 + 2) != 0 { return nodes[12].id * 10 + 2; }
+        }
+        if nodes.length > 13 {
+            if point-near-pin(x, y, get-pin-x(nodes[13].id * 10 + 1), get-pin-y(nodes[13].id * 10 + 1), nodes[13].id * 10 + 1) != 0 { return nodes[13].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[13].id * 10 + 2), get-pin-y(nodes[13].id * 10 + 2), nodes[13].id * 10 + 2) != 0 { return nodes[13].id * 10 + 2; }
+        }
+        if nodes.length > 14 {
+            if point-near-pin(x, y, get-pin-x(nodes[14].id * 10 + 1), get-pin-y(nodes[14].id * 10 + 1), nodes[14].id * 10 + 1) != 0 { return nodes[14].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[14].id * 10 + 2), get-pin-y(nodes[14].id * 10 + 2), nodes[14].id * 10 + 2) != 0 { return nodes[14].id * 10 + 2; }
+        }
+        if nodes.length > 15 {
+            if point-near-pin(x, y, get-pin-x(nodes[15].id * 10 + 1), get-pin-y(nodes[15].id * 10 + 1), nodes[15].id * 10 + 1) != 0 { return nodes[15].id * 10 + 1; }
+            if point-near-pin(x, y, get-pin-x(nodes[15].id * 10 + 2), get-pin-y(nodes[15].id * 10 + 2), nodes[15].id * 10 + 2) != 0 { return nodes[15].id * 10 + 2; }
+        }
         return 0;
     }
 
@@ -549,10 +716,11 @@ export component MainWindow inherits Window {
 
     // Links layer (between nodes and overlay) - iterates over Rust-owned model
     for link-data in links: Link {
-        start-x: get-pin-x(link-data.start-pin-id);
-        start-y: get-pin-y(link-data.start-pin-id);
-        end-x: get-pin-x(link-data.end-pin-id);
-        end-y: get-pin-y(link-data.end-pin-id);
+        // Use pre-computed positions from Rust, applying visual drag offset during dragging
+        start-x: link-data.start-x * 1px + get-link-drag-offset-x(link-data.start-pin-id);
+        start-y: link-data.start-y * 1px + get-link-drag-offset-y(link-data.start-pin-id);
+        end-x: link-data.end-x * 1px + get-link-drag-offset-x(link-data.end-pin-id);
+        end-y: link-data.end-y * 1px + get-link-drag-offset-y(link-data.end-pin-id);
         link-color: link-data.color;
         line-width: 3px * zoom;
         zoom: zoom;
@@ -599,6 +767,11 @@ export component MainWindow inherits Window {
         delete-selected => {
             // Delete selected nodes
             root.delete-selected-nodes();
+        }
+
+        add-node-requested => {
+            // Add a new node
+            root.add-node();
         }
     }
 

@@ -349,6 +349,8 @@ pub struct NodeEditorOverlay {
     pub viewport_changed: Callback<()>,
     /// Callback when delete key is pressed (Delete or Backspace)
     pub delete_selected: Callback<()>,
+    /// Callback when add node shortcut is pressed (Ctrl+N)
+    pub add_node_requested: Callback<()>,
 
     // === Link creation trigger (set properties then call callback) ===
     /// Pin ID to start link from (set by Pin component before calling start-link)
@@ -501,6 +503,12 @@ impl Item for NodeEditorOverlay {
             || event.text.starts_with(crate::input::key_codes::Backspace)
         {
             self.delete_selected.call(&());
+            return KeyEventResult::EventAccepted;
+        }
+
+        // Handle Ctrl+N for adding a new node
+        if event.modifiers.control && event.text.eq_ignore_ascii_case("n") {
+            self.add_node_requested.call(&());
             return KeyEventResult::EventAccepted;
         }
 
