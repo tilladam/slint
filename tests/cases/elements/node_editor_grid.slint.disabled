@@ -1,0 +1,78 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for NodeEditor grid generation
+
+TestCase := Window {
+    width: 800phx;
+    height: 600phx;
+
+    background := NodeEditorBackground {
+        width: 100%;
+        height: 100%;
+        grid-spacing: 50px;
+    }
+
+    // Expose properties for testing
+    out property <string> test-grid-commands: background.grid-commands;
+    in-out property <length> test-pan-x <=> background.pan-x;
+    in-out property <length> test-pan-y <=> background.pan-y;
+    in-out property <float> test-zoom <=> background.zoom;
+    in-out property <length> test-grid-spacing <=> background.grid-spacing;
+}
+
+/*
+
+```rust
+// Test: Grid commands react to pan and zoom
+let instance = TestCase::new().unwrap();
+
+// Trigger render to generate commands
+slint_testing::render_window_to_image(&instance);
+
+// Initial commands should not be empty
+let initial_commands = instance.get_test_grid_commands().to_string();
+assert!(!initial_commands.is_empty(), "Grid commands should not be empty initially");
+
+// Change pan
+instance.set_test_pan_x(25.0);
+slint_testing::render_window_to_image(&instance);
+let panned_commands = instance.get_test_grid_commands().to_string();
+assert_ne!(initial_commands, panned_commands, "Grid commands should change when panned");
+
+// Change zoom
+instance.set_test_zoom(2.0);
+slint_testing::render_window_to_image(&instance);
+let zoomed_commands = instance.get_test_grid_commands().to_string();
+assert_ne!(panned_commands, zoomed_commands, "Grid commands should change when zoomed");
+
+// Set spacing to 0 -> commands should be empty
+instance.set_test_grid_spacing(0.0);
+slint_testing::render_window_to_image(&instance);
+assert_eq!(instance.get_test_grid_commands().to_string(), "", "Grid commands should be empty when spacing is 0");
+```
+
+```rust
+// Test: Infinite grid effect (rem_euclid)
+let instance = TestCase::new().unwrap();
+
+instance.set_test_pan_x(0.0);
+slint_testing::render_window_to_image(&instance);
+let commands_0 = instance.get_test_grid_commands().to_string();
+
+// Set pan to exactly one grid spacing (50.0)
+instance.set_test_pan_x(50.0);
+slint_testing::render_window_to_image(&instance);
+let commands_50 = instance.get_test_grid_commands().to_string();
+
+// Commands should be identical because of rem_euclid
+assert_eq!(commands_0, commands_50, "Grid should be identical after panning by exact spacing amount");
+
+// Panning by half spacing should be different
+instance.set_test_pan_x(25.0);
+slint_testing::render_window_to_image(&instance);
+let commands_25 = instance.get_test_grid_commands().to_string();
+assert_ne!(commands_0, commands_25);
+```
+
+*/

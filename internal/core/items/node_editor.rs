@@ -140,6 +140,55 @@ fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y:
     commands
 }
 
+// Node and pin dimensions (must match ui.slint)
+const NODE_BASE_WIDTH: f32 = 150.0;
+const BASE_PIN_SIZE: f32 = 12.0;
+const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
+const PIN_MARGIN: f32 = 8.0; // Horizontal margin from node edge
+
+/// Compute screen position for a pin given its ID, node rect, and zoom
+/// Pin ID format: node_id * 10 + pin_type (1 = input, 2 = output)
+/// Returns (x, y) in screen coordinates (center of pin circle)
+fn compute_pin_screen_position(pin_id: i32, node_rect: &NodeRect, zoom: f32) -> (f32, f32) {
+    let pin_type = pin_id % 10; // 1 = input, 2 = output
+    let pin_size = BASE_PIN_SIZE * zoom;
+    let pin_radius = pin_size / 2.0;
+
+    let (x, y) = if pin_type == 1 {
+        // Input pin: left side
+        let x = node_rect.x + PIN_MARGIN * zoom + pin_radius;
+        let y = node_rect.y + PIN_Y_OFFSET * zoom + pin_radius;
+        (x, y)
+    } else {
+        // Output pin: right side
+        let x = node_rect.x + node_rect.width - PIN_MARGIN * zoom - pin_size + pin_radius;
+        let y = node_rect.y + PIN_Y_OFFSET * zoom + pin_radius;
+        (x, y)
+    };
+
+    (x, y)
+}
+
+/// Generate SVG path command for a Bezier curve link
+/// Returns path command string: "M x1 y1 C cx1 cy1, cx2 cy2, x2 y2"
+fn generate_link_path(start_x: f32, start_y: f32, end_x: f32, end_y: f32, zoom: f32) -> String {
+    // Calculate control point offset (horizontal bezier)
+    let dx = (end_x - start_x).abs();
+    let offset = dx.max(50.0 * zoom) * 0.5;
+
+    // Control points
+    let ctrl1_x = start_x + offset;
+    let ctrl1_y = start_y;
+    let ctrl2_x = end_x - offset;
+    let ctrl2_y = end_y;
+
+    // Generate SVG path command
+    alloc::format!(
+        "M {} {} C {} {}, {} {}, {} {}",
+        start_x, start_y, ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, end_x, end_y
+    )
+}
+
 /// Node rectangle info for hit-testing and box selection
 #[derive(Clone, Copy, Debug, Default)]
 struct NodeRect {
@@ -166,6 +215,15 @@ impl NodeRect {
     fn contains_point(&self, x: f32, y: f32) -> bool {
         x >= self.x && x <= self.x + self.width && y >= self.y && y <= self.y + self.height
     }
+}
+
+/// A link between two pins
+#[derive(Clone, Copy, Debug)]
+struct LinkRecord {
+    id: i32,
+    start_pin_id: i32,
+    end_pin_id: i32,
+    color: Color,
 }
 
 /// Internal state for the node editor overlay
@@ -195,6 +253,8 @@ struct NodeEditorState {
     node_rects: BTreeMap<i32, NodeRect>,
     /// Set of selected node IDs (owned by core)
     selected_node_ids: BTreeSet<i32>,
+    /// Known links (link_id -> link record)
+    links: BTreeMap<i32, LinkRecord>,
 }
 
 /// Wraps the internal state properly with RefCell
@@ -522,6 +582,24 @@ pub struct NodeEditorOverlay {
     /// Callback when a node reports its rectangle
     pub node_rect_changed: Callback<()>,
 
+    // === Link reporting (for core-based link rendering) ===
+    /// Link ID being reported (set before calling link_reported)
+    pub reporting_link_id: Property<i32>,
+    /// Start pin ID of link being reported
+    pub reporting_link_start_pin_id: Property<i32>,
+    /// End pin ID of link being reported
+    pub reporting_link_end_pin_id: Property<i32>,
+    /// Color of link being reported (ARGB format)
+    pub reporting_link_color: Property<Color>,
+    /// Callback when a link is reported
+    pub link_reported: Callback<()>,
+
+    // === Link position data (output - regenerated when viewport/nodes change) ===
+    /// Formatted string containing link position data for all registered links
+    /// Format: "id,start_x,start_y,end_x,end_y,color_argb;id,start_x,start_y,end_x,end_y,color_argb;..."
+    /// Empty string if no links
+    pub link_positions_data: Property<SharedString>,
+
     // === Box selection result (output when selection_changed fires) ===
     /// Comma-separated list of node IDs that intersect with the selection box
     /// Format: "1,2,3" or empty string if none
@@ -629,6 +707,36 @@ impl Item for NodeEditorOverlay {
 
             // Clear the reporting trigger
             Self::FIELD_OFFSETS.reporting_node_id.apply_pin(self).set(0);
+
+            // Regenerate link positions since node moved
+            self.regenerate_link_positions();
+        }
+
+        // Check if a Link is being reported
+        let reporting_link = self.reporting_link_id();
+        if reporting_link > 0 {
+            let start_pin_id = self.reporting_link_start_pin_id();
+            let end_pin_id = self.reporting_link_end_pin_id();
+            let color = self.reporting_link_color();
+
+            // Store the link in the registry
+            let mut state = self.data.state.borrow_mut();
+            state.links.insert(
+                reporting_link,
+                LinkRecord {
+                    id: reporting_link,
+                    start_pin_id,
+                    end_pin_id,
+                    color,
+                },
+            );
+            drop(state);
+
+            // Clear the reporting trigger
+            Self::FIELD_OFFSETS.reporting_link_id.apply_pin(self).set(0);
+
+            // Regenerate all link positions now that we have a new link
+            self.regenerate_link_positions();
         }
 
         // Check if a node is being clicked (for selection)
@@ -894,6 +1002,45 @@ impl Item for NodeEditorOverlay {
 }
 
 impl NodeEditorOverlay {
+    /// Regenerate all link positions based on current node rects and viewport state
+    /// Updates the link_positions_data property with formatted position data
+    fn regenerate_link_positions(self: Pin<&Self>) {
+        let state = self.data.state.borrow();
+        let zoom = self.zoom();
+
+        // Build formatted string: "id,start_x,start_y,end_x,end_y,color_argb;..."
+        let mut result = alloc::vec::Vec::new();
+
+        for (link_id, link) in state.links.iter() {
+            // Get node IDs from pin IDs
+            let start_node_id = link.start_pin_id / 10;
+            let end_node_id = link.end_pin_id / 10;
+
+            // Find node rects
+            let start_node_rect = state.node_rects.get(&start_node_id);
+            let end_node_rect = state.node_rects.get(&end_node_id);
+
+            if let (Some(start_rect), Some(end_rect)) = (start_node_rect, end_node_rect) {
+                // Compute pin positions
+                let (start_x, start_y) = compute_pin_screen_position(link.start_pin_id, start_rect, zoom);
+                let (end_x, end_y) = compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
+
+                // Format: id,start_x,start_y,end_x,end_y,color_argb
+                let color_argb = link.color.as_argb_encoded();
+                result.push(alloc::format!(
+                    "{},{},{},{},{},{}",
+                    link_id, start_x, start_y, end_x, end_y, color_argb
+                ));
+            }
+        }
+
+        drop(state);
+
+        // Join with semicolon separator
+        let data_str = result.join(";");
+        Self::FIELD_OFFSETS.link_positions_data.apply_pin(self).set(SharedString::from(&data_str));
+    }
+
     fn handle_mouse_pressed(
         self: Pin<&Self>,
         position: LogicalPoint,
@@ -1071,6 +1218,9 @@ impl NodeEditorOverlay {
             Self::FIELD_OFFSETS.pan_x.apply_pin(self).set(LogicalLength::new(new_pan.x));
             Self::FIELD_OFFSETS.pan_y.apply_pin(self).set(LogicalLength::new(new_pan.y));
 
+            // Regenerate link positions with new pan
+            self.regenerate_link_positions();
+
             // Notify viewport change
             self.viewport_changed.call(&());
 
@@ -1142,6 +1292,9 @@ impl NodeEditorOverlay {
             Self::FIELD_OFFSETS.zoom.apply_pin(self).set(new_zoom);
             Self::FIELD_OFFSETS.pan_x.apply_pin(self).set(LogicalLength::new(new_pan_x));
             Self::FIELD_OFFSETS.pan_y.apply_pin(self).set(LogicalLength::new(new_pan_y));
+
+            // Regenerate link positions with new zoom/pan
+            self.regenerate_link_positions();
 
             // Notify viewport change
             self.viewport_changed.call(&());

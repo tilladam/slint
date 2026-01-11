@@ -20,71 +20,6 @@ fn snap_to_grid(value: f32) -> f32 {
     (value / GRID_SPACING).round() * GRID_SPACING
 }
 
-/// Compute screen position for a pin given node position, zoom, and pan
-fn compute_pin_position(
-    pin_id: i32,
-    nodes: &Rc<VecModel<NodeData>>,
-    zoom: f32,
-    pan_x: f32,
-    pan_y: f32,
-) -> (f32, f32) {
-    let node_id = pin_id / 10;
-    let pin_type = pin_id % 10; // 1 = input, 2 = output
-
-    // Pin dimensions scaled by zoom (must match ui.slint)
-    let pin_size = BASE_PIN_SIZE * zoom;
-    let pin_radius = pin_size / 2.0;
-
-    // Find the node
-    let mut world_x = 0.0;
-    let mut world_y = 0.0;
-    for i in 0..nodes.row_count() {
-        if let Some(node) = nodes.row_data(i) {
-            if node.id == node_id {
-                world_x = node.world_x;
-                world_y = node.world_y;
-                break;
-            }
-        }
-    }
-
-    // Compute screen position based on pin type
-    let (x, y) = if pin_type == 1 {
-        // Input pin: left side
-        let x = world_x * zoom + pan_x + 8.0 * zoom + pin_radius;
-        let y = world_y * zoom + pan_y + PIN_Y_OFFSET * zoom + pin_radius;
-        (x, y)
-    } else {
-        // Output pin: right side
-        let x = world_x * zoom + pan_x + NODE_BASE_WIDTH * zoom - 8.0 * zoom - pin_size + pin_radius;
-        let y = world_y * zoom + pan_y + PIN_Y_OFFSET * zoom + pin_radius;
-        (x, y)
-    };
-
-    (x, y)
-}
-
-/// Update positions for all links in the model
-fn update_all_link_positions(
-    links: &Rc<VecModel<LinkData>>,
-    nodes: &Rc<VecModel<NodeData>>,
-    zoom: f32,
-    pan_x: f32,
-    pan_y: f32,
-) {
-    for i in 0..links.row_count() {
-        if let Some(mut link) = links.row_data(i) {
-            let (start_x, start_y) = compute_pin_position(link.start_pin_id, nodes, zoom, pan_x, pan_y);
-            let (end_x, end_y) = compute_pin_position(link.end_pin_id, nodes, zoom, pan_x, pan_y);
-            link.start_x = start_x;
-            link.start_y = start_y;
-            link.end_x = end_x;
-            link.end_y = end_y;
-            links.set_row_data(i, link);
-        }
-    }
-}
-
 fn main() {
     let window = MainWindow::new().unwrap();
 
@@ -151,8 +86,12 @@ fn main() {
     ]));
     window.set_links(ModelRc::from(links.clone()));
 
-    // Compute initial link positions (zoom=1.0, pan=0,0)
-    update_all_link_positions(&links, &nodes, 1.0, 0.0, 0.0);
+    // Report links to overlay for core-based position computation
+    for i in 0..links.row_count() {
+        if let Some(link) = links.row_data(i) {
+            window.invoke_report_link(link.id, link.start_pin_id, link.end_pin_id, link.color);
+        }
+    }
 
     // Handle selection changes - sync overlay's selection state to NodeData model
     let nodes_for_selection = nodes.clone();
@@ -175,16 +114,49 @@ fn main() {
     });
 
     // Handle link position updates when viewport changes
-    // (Grid rendering is now handled internally by NodeEditorBackground)
+    // Core computes positions, we just read and update the model
     let links_for_viewport = links.clone();
-    let nodes_for_viewport = nodes.clone();
-    window.on_update_viewport(move |zoom, pan_x, pan_y| {
-        update_all_link_positions(&links_for_viewport, &nodes_for_viewport, zoom, pan_x, pan_y);
+    let window_for_viewport = window.as_weak();
+    window.on_update_viewport(move |_zoom, _pan_x, _pan_y| {
+        if let Some(window) = window_for_viewport.upgrade() {
+            let link_data_str = window.get_link_positions_data();
+
+            // Parse format: "id,start_x,start_y,end_x,end_y,color_argb;..."
+            for link_str in link_data_str.split(';') {
+                if link_str.is_empty() {
+                    continue;
+                }
+
+                let parts: Vec<&str> = link_str.split(',').collect();
+                if parts.len() >= 5 {
+                    if let (Ok(id), Ok(start_x), Ok(start_y), Ok(end_x), Ok(end_y)) = (
+                        parts[0].parse::<i32>(),
+                        parts[1].parse::<f32>(),
+                        parts[2].parse::<f32>(),
+                        parts[3].parse::<f32>(),
+                        parts[4].parse::<f32>(),
+                    ) {
+                        // Find and update the link in the model
+                        for i in 0..links_for_viewport.row_count() {
+                            if let Some(mut link) = links_for_viewport.row_data(i) {
+                                if link.id == id {
+                                    link.start_x = start_x;
+                                    link.start_y = start_y;
+                                    link.end_x = end_x;
+                                    link.end_y = end_y;
+                                    links_for_viewport.set_row_data(i, link);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     });
 
     // Handle link creation
     let links_for_create = links.clone();
-    let nodes_for_create = nodes.clone();
     let next_link_id_for_create = next_link_id.clone();
     let color_index_for_create = color_index.clone();
     let window_for_create = window.as_weak();
@@ -195,31 +167,30 @@ fn main() {
         let idx = *color_index_for_create.borrow();
         *color_index_for_create.borrow_mut() = (idx + 1) % link_colors.len();
 
-        // Get current viewport values
-        let (zoom, pan_x, pan_y) = if let Some(window) = window_for_create.upgrade() {
-            (window.get_zoom(), window.get_pan_x() / 1.0, window.get_pan_y() / 1.0)
-        } else {
-            (1.0, 0.0, 0.0)
-        };
+        let color = link_colors[idx];
 
-        // Compute positions for the new link
-        let (start_x, start_y) = compute_pin_position(start_pin, &nodes_for_create, zoom, pan_x, pan_y);
-        let (end_x, end_y) = compute_pin_position(end_pin, &nodes_for_create, zoom, pan_x, pan_y);
-
+        // Add link to model (positions will be computed by core)
         links_for_create.push(LinkData {
             id,
             start_pin_id: start_pin,
             end_pin_id: end_pin,
-            color: link_colors[idx],
-            start_x, start_y, end_x, end_y,
+            color,
+            start_x: 0.0,
+            start_y: 0.0,
+            end_x: 0.0,
+            end_y: 0.0,
         });
+
+        // Report link to overlay for position computation
+        if let Some(window) = window_for_create.upgrade() {
+            window.invoke_report_link(id, start_pin, end_pin, color);
+        }
     });
 
     // Node selection is now handled by the overlay (overlay.clicked-node-id)
 
     // Handle drag commit - apply delta to all selected nodes when drag ends
     let nodes_for_drag = nodes.clone();
-    let links_for_drag = links.clone();
     let window_for_drag = window.as_weak();
     window.on_commit_drag(move |delta_x, delta_y, snap_enabled| {
         // Get selected node IDs from overlay
@@ -245,13 +216,7 @@ fn main() {
             }
         }
 
-        // Update link positions after nodes have moved
-        if let Some(window) = window_for_drag.upgrade() {
-            let zoom = window.get_zoom();
-            let pan_x = window.get_pan_x() / 1.0;
-            let pan_y = window.get_pan_y() / 1.0;
-            update_all_link_positions(&links_for_drag, &nodes_for_drag, zoom, pan_x, pan_y);
-        }
+        // Link positions will be automatically updated by core when nodes move
     });
 
     // Handle deleting selected nodes

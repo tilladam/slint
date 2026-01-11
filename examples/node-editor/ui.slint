@@ -322,6 +322,20 @@ export component MainWindow inherits Window {
     // Selection state (managed by overlay)
     out property <string> current-selected-ids <=> overlay.current-selected-ids;
 
+    // Link position data (managed by overlay, updated when viewport/nodes change)
+    out property <string> link-positions-data <=> overlay.link-positions-data;
+
+    // Callback to report a link to the overlay (called from Rust on init)
+    callback report-link(int, int, int, color);  // id, start-pin-id, end-pin-id, color
+
+    // Implement report-link to forward to overlay
+    report-link(id, start-pin, end-pin, col) => {
+        overlay.reporting-link-id = id;
+        overlay.reporting-link-start-pin-id = start-pin;
+        overlay.reporting-link-end-pin-id = end-pin;
+        overlay.reporting-link-color = col;
+    }
+
     // Node dimensions (must match Node component)
     property <length> node-base-width: 150px;
     property <length> node-base-height: 80px;
