@@ -25,6 +25,12 @@ component Link inherits Path {
     stroke-width: line-width;
     fill: transparent;
 
+    // Set viewbox to match actual size so SVG coordinates map 1:1
+    viewbox-x: 0;
+    viewbox-y: 0;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+
     // SVG path command: M (move to), C (cubic bezier)
     commands: "M " + start-x / 1px + " " + start-y / 1px +
               " C " + ctrl1-x / 1px + " " + ctrl1-y / 1px +
@@ -40,10 +46,10 @@ component Node inherits Rectangle {
     in-out property <length> node-y;
 
     // Expose pin positions (center of pin circles, in parent coordinates)
-    out property <length> input-pin-x: node-x + 8px + 6px;  // padding + half pin width
-    out property <length> input-pin-y: node-y + 8px + 24px + 4px + 6px;  // padding + title + spacing + half pin height
-    out property <length> output-pin-x: node-x + 150px - 8px - 6px;  // width - padding - half pin width
-    out property <length> output-pin-y: node-y + 8px + 24px + 4px + 6px;
+    out property <length> input-pin-x: node-x + input-pin.x + 6px;
+    out property <length> input-pin-y: node-y + input-pin.y + 6px;
+    out property <length> output-pin-x: node-x + output-pin.x + 6px;
+    out property <length> output-pin-y: node-y + output-pin.y + 6px;
 
     x: node-x;
     y: node-y;
@@ -54,44 +60,41 @@ component Node inherits Rectangle {
     border-width: 1px;
     border-color: #555;
 
-    VerticalLayout {
-        padding: 8px;
-        spacing: 4px;
+    // Title bar
+    Rectangle {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: 24px;
+        background: #3d3d3d;
+        border-radius: 4px;
 
-        // Title bar
-        Rectangle {
-            height: 24px;
-            background: #3d3d3d;
-            border-radius: 4px;
-
-            Text {
-                text: title;
-                color: white;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
+        Text {
+            text: title;
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
+    }
 
-        // Content area with pins
-        HorizontalLayout {
-            // Input pin (green)
-            Rectangle {
-                width: 12px;
-                height: 12px;
-                background: #4CAF50;
-                border-radius: 6px;
-            }
+    // Input pin (green) - positioned explicitly
+    input-pin := Rectangle {
+        x: 8px;
+        y: 8px + 24px + 8px;  // below title bar
+        width: 12px;
+        height: 12px;
+        background: #4CAF50;
+        border-radius: 6px;
+    }
 
-            Rectangle { }  // Spacer
-
-            // Output pin (blue)
-            Rectangle {
-                width: 12px;
-                height: 12px;
-                background: #2196F3;
-                border-radius: 6px;
-            }
-        }
+    // Output pin (blue) - positioned explicitly
+    output-pin := Rectangle {
+        x: parent.width - 8px - 12px;
+        y: 8px + 24px + 8px;  // below title bar
+        width: 12px;
+        height: 12px;
+        background: #2196F3;
+        border-radius: 6px;
     }
 
     // Drag handling
