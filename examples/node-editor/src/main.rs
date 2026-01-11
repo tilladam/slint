@@ -11,8 +11,7 @@ slint::include_modules!();
 
 // Node dimensions (must match ui.slint)
 const NODE_BASE_WIDTH: f32 = 150.0;
-const PIN_RADIUS: f32 = 6.0;
-const PIN_SIZE: f32 = 12.0;
+const BASE_PIN_SIZE: f32 = 12.0;
 const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
 
 /// Compute screen position for a pin given node position, zoom, and pan
@@ -25,6 +24,10 @@ fn compute_pin_position(
 ) -> (f32, f32) {
     let node_id = pin_id / 10;
     let pin_type = pin_id % 10; // 1 = input, 2 = output
+
+    // Pin dimensions scaled by zoom (must match ui.slint)
+    let pin_size = BASE_PIN_SIZE * zoom;
+    let pin_radius = pin_size / 2.0;
 
     // Find the node
     let mut world_x = 0.0;
@@ -42,13 +45,13 @@ fn compute_pin_position(
     // Compute screen position based on pin type
     let (x, y) = if pin_type == 1 {
         // Input pin: left side
-        let x = world_x * zoom + pan_x + 8.0 * zoom + PIN_RADIUS;
-        let y = world_y * zoom + pan_y + PIN_Y_OFFSET * zoom + PIN_RADIUS;
+        let x = world_x * zoom + pan_x + 8.0 * zoom + pin_radius;
+        let y = world_y * zoom + pan_y + PIN_Y_OFFSET * zoom + pin_radius;
         (x, y)
     } else {
         // Output pin: right side
-        let x = world_x * zoom + pan_x + NODE_BASE_WIDTH * zoom - 8.0 * zoom - PIN_SIZE + PIN_RADIUS;
-        let y = world_y * zoom + pan_y + PIN_Y_OFFSET * zoom + PIN_RADIUS;
+        let x = world_x * zoom + pan_x + NODE_BASE_WIDTH * zoom - 8.0 * zoom - pin_size + pin_radius;
+        let y = world_y * zoom + pan_y + PIN_Y_OFFSET * zoom + pin_radius;
         (x, y)
     };
 
