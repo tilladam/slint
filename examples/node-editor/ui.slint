@@ -296,7 +296,7 @@ export component MainWindow inherits Window {
 
     // Callbacks to Rust for state changes
     callback select-node(int, bool);  // node-id, shift-held
-    callback commit-drag(float, float);  // delta-world-x, delta-world-y - called on drag end
+    callback commit-drag(float, float, bool);  // delta-world-x, delta-world-y, snap-to-grid
     callback update-grid(float, float, float, float, float);  // width, height, zoom, pan-x, pan-y
     callback create-link(int, int);  // start-pin-id, end-pin-id
     callback delete-selected-nodes();  // delete all selected nodes
@@ -304,6 +304,9 @@ export component MainWindow inherits Window {
 
     // Grid SVG commands (set by Rust)
     in property <string> grid-commands: "";
+
+    // Grid snap setting
+    in-out property <bool> grid-snap-enabled: true;
 
     // Visual drag offset (tracked in Slint, not affecting model until drag ends)
     property <bool> is-dragging: false;
@@ -704,7 +707,7 @@ export component MainWindow inherits Window {
         }
         drag-ended(id, delta-x, delta-y) => {
             // Commit to model
-            root.commit-drag(delta-x / 1px, delta-y / 1px);
+            root.commit-drag(delta-x / 1px, delta-y / 1px, grid-snap-enabled);
             is-dragging = false;
             visual-drag-offset-x = 0px;
             visual-drag-offset-y = 0px;
@@ -804,7 +807,7 @@ export component MainWindow inherits Window {
         x: 10px;
         y: 10px;
         width: 280px;
-        height: 155px;
+        height: 200px;
         background: #00000080;
         border-radius: 8px;
 
@@ -819,6 +822,44 @@ export component MainWindow inherits Window {
             Text { text: "Drag from pin: Create link"; color: #ccc; font-size: 12px; }
             Text { text: "Ctrl+drag: Box select"; color: #ccc; font-size: 12px; }
             Text { text: "Shift+click: Extend selection"; color: #ccc; font-size: 12px; }
+
+            Rectangle { height: 8px; } // Spacer
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+
+                // Custom checkbox
+                Rectangle {
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: #888;
+                    background: grid-snap-enabled ? #4a9eff : #333;
+
+                    // Checkmark
+                    Text {
+                        text: grid-snap-enabled ? "✓" : "";
+                        color: white;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            grid-snap-enabled = !grid-snap-enabled;
+                        }
+                    }
+                }
+                Text {
+                    text: "Snap to grid";
+                    color: #ccc;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
         }
     }
 

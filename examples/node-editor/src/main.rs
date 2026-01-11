@@ -270,13 +270,15 @@ fn main() {
     let nodes_for_drag = nodes.clone();
     let links_for_drag = links.clone();
     let window_for_drag = window.as_weak();
-    window.on_commit_drag(move |delta_x, delta_y| {
-        // Apply delta to all selected nodes and snap to grid
+    window.on_commit_drag(move |delta_x, delta_y, snap_enabled| {
+        // Apply delta to all selected nodes, optionally snapping to grid
         for i in 0..nodes_for_drag.row_count() {
             if let Some(mut node) = nodes_for_drag.row_data(i) {
                 if node.selected {
-                    node.world_x = snap_to_grid(node.world_x + delta_x);
-                    node.world_y = snap_to_grid(node.world_y + delta_y);
+                    let new_x = node.world_x + delta_x;
+                    let new_y = node.world_y + delta_y;
+                    node.world_x = if snap_enabled { snap_to_grid(new_x) } else { new_x };
+                    node.world_y = if snap_enabled { snap_to_grid(new_y) } else { new_y };
                     nodes_for_drag.set_row_data(i, node);
                 }
             }
