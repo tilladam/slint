@@ -873,6 +873,9 @@ export component NodeEditorOverlay inherits Empty {
     in property <length> reporting-node-height;
     /// Callback when a node reports its rectangle - set reporting-node-* properties first
     callback node-rect-changed();
+    /// Batch of pending node rects to register (format: "id,x,y,w,h;...")
+    /// Used when multiple nodes report rects at once (e.g., during init)
+    in-out property <string> pending-node-rects-batch;
 
     // === Link reporting (for core-based link rendering) ===
     /// Link ID being reported (set before calling link-reported)
@@ -885,11 +888,16 @@ export component NodeEditorOverlay inherits Empty {
     in property <color> reporting-link-color;
     /// Callback when a link is reported - set reporting-link-* properties first
     callback link-reported();
+    /// Batch of pending links to register (format: "id,start_pin,end_pin,color_argb;...")
+    /// Used when multiple links need to be reported at once (e.g., during init)
+    in-out property <string> pending-links-batch;
 
     // === Link position data (output - regenerated when viewport/nodes change) ===
     /// Formatted string containing link position data for all registered links
     /// Format: "id,start_x,start_y,end_x,end_y,color_argb;id,start_x,start_y,end_x,end_y,color_argb;..."
     out property <string> link-positions-data;
+    /// Callback when link positions have been updated (fired after regenerate)
+    callback link-positions-changed();
 
     // === Box selection result (output when selection-changed fires) ===
     /// Comma-separated list of node IDs that intersect with the selection box

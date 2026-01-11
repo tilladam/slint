@@ -140,8 +140,7 @@ fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y:
     commands
 }
 
-// Node and pin dimensions (must match ui.slint)
-const NODE_BASE_WIDTH: f32 = 150.0;
+// Pin dimensions for computing pin positions (must match ui.slint)
 const BASE_PIN_SIZE: f32 = 12.0;
 const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
 const PIN_MARGIN: f32 = 8.0; // Horizontal margin from node edge
@@ -169,26 +168,6 @@ fn compute_pin_screen_position(pin_id: i32, node_rect: &NodeRect, zoom: f32) -> 
     (x, y)
 }
 
-/// Generate SVG path command for a Bezier curve link
-/// Returns path command string: "M x1 y1 C cx1 cy1, cx2 cy2, x2 y2"
-fn generate_link_path(start_x: f32, start_y: f32, end_x: f32, end_y: f32, zoom: f32) -> String {
-    // Calculate control point offset (horizontal bezier)
-    let dx = (end_x - start_x).abs();
-    let offset = dx.max(50.0 * zoom) * 0.5;
-
-    // Control points
-    let ctrl1_x = start_x + offset;
-    let ctrl1_y = start_y;
-    let ctrl2_x = end_x - offset;
-    let ctrl2_y = end_y;
-
-    // Generate SVG path command
-    alloc::format!(
-        "M {} {} C {} {}, {} {}, {} {}",
-        start_x, start_y, ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, end_x, end_y
-    )
-}
-
 /// Node rectangle info for hit-testing and box selection
 #[derive(Clone, Copy, Debug, Default)]
 struct NodeRect {
@@ -209,11 +188,6 @@ impl NodeRect {
             && self.x + self.width > sel_x
             && self.y < sel_y + sel_height
             && self.y + self.height > sel_y
-    }
-
-    /// Check if a point is inside this rect
-    fn contains_point(&self, x: f32, y: f32) -> bool {
-        x >= self.x && x <= self.x + self.width && y >= self.y && y <= self.y + self.height
     }
 }
 
@@ -581,6 +555,9 @@ pub struct NodeEditorOverlay {
     pub reporting_node_height: Property<LogicalLength>,
     /// Callback when a node reports its rectangle
     pub node_rect_changed: Callback<()>,
+    /// Batch of pending node rects to register (format: "id,x,y,w,h;...")
+    /// Used when multiple nodes report rects at once
+    pub pending_node_rects_batch: Property<SharedString>,
 
     // === Link reporting (for core-based link rendering) ===
     /// Link ID being reported (set before calling link_reported)
@@ -593,12 +570,17 @@ pub struct NodeEditorOverlay {
     pub reporting_link_color: Property<Color>,
     /// Callback when a link is reported
     pub link_reported: Callback<()>,
+    /// Batch of pending links to register (format: "id,start_pin,end_pin,color_argb;...")
+    /// Used when multiple links need to be reported at once
+    pub pending_links_batch: Property<SharedString>,
 
     // === Link position data (output - regenerated when viewport/nodes change) ===
     /// Formatted string containing link position data for all registered links
     /// Format: "id,start_x,start_y,end_x,end_y,color_argb;id,start_x,start_y,end_x,end_y,color_argb;..."
     /// Empty string if no links
     pub link_positions_data: Property<SharedString>,
+    /// Callback when link positions have been updated (fired after regenerate_link_positions)
+    pub link_positions_changed: Callback<()>,
 
     // === Box selection result (output when selection_changed fires) ===
     /// Comma-separated list of node IDs that intersect with the selection box
@@ -669,75 +651,8 @@ impl Item for NodeEditorOverlay {
             }
         }
 
-        // Check if a Pin component is reporting its position
-        let reporting_pin = self.reporting_pin_id();
-        if reporting_pin > 0 {
-            let pin_x = self.reporting_pin_x().get();
-            let pin_y = self.reporting_pin_y().get();
-
-            // Store the pin position for hit-testing
-            let mut state = self.data.state.borrow_mut();
-            state.pin_positions.insert(reporting_pin, LogicalPoint::new(pin_x, pin_y));
-            drop(state);
-
-            // Clear the reporting trigger
-            Self::FIELD_OFFSETS.reporting_pin_id.apply_pin(self).set(0);
-        }
-
-        // Check if a Node component is reporting its rectangle
-        let reporting_node = self.reporting_node_id();
-        if reporting_node > 0 {
-            let node_x = self.reporting_node_x().get();
-            let node_y = self.reporting_node_y().get();
-            let node_width = self.reporting_node_width().get();
-            let node_height = self.reporting_node_height().get();
-
-            // Store the node rectangle for hit-testing and box selection
-            let mut state = self.data.state.borrow_mut();
-            state.node_rects.insert(
-                reporting_node,
-                NodeRect {
-                    x: node_x,
-                    y: node_y,
-                    width: node_width,
-                    height: node_height,
-                },
-            );
-            drop(state);
-
-            // Clear the reporting trigger
-            Self::FIELD_OFFSETS.reporting_node_id.apply_pin(self).set(0);
-
-            // Regenerate link positions since node moved
-            self.regenerate_link_positions();
-        }
-
-        // Check if a Link is being reported
-        let reporting_link = self.reporting_link_id();
-        if reporting_link > 0 {
-            let start_pin_id = self.reporting_link_start_pin_id();
-            let end_pin_id = self.reporting_link_end_pin_id();
-            let color = self.reporting_link_color();
-
-            // Store the link in the registry
-            let mut state = self.data.state.borrow_mut();
-            state.links.insert(
-                reporting_link,
-                LinkRecord {
-                    id: reporting_link,
-                    start_pin_id,
-                    end_pin_id,
-                    color,
-                },
-            );
-            drop(state);
-
-            // Clear the reporting trigger
-            Self::FIELD_OFFSETS.reporting_link_id.apply_pin(self).set(0);
-
-            // Regenerate all link positions now that we have a new link
-            self.regenerate_link_positions();
-        }
+        // Process any pending reports from pins, nodes, and links
+        self.process_pending_reports();
 
         // Check if a node is being clicked (for selection)
         let clicked_node = self.clicked_node_id();
@@ -980,6 +895,10 @@ impl Item for NodeEditorOverlay {
         _self_rc: &ItemRc,
         _size: LogicalSize,
     ) -> RenderingResult {
+        // Process any pending reports from pins, nodes, and links
+        // This ensures reports are processed even without input events
+        self.process_pending_reports();
+
         // Selection box, active link preview, and minimap are rendered
         // in Slint using Rectangle and Path components bound to this
         // overlay's properties (is-selecting, selection-x/y/width/height,
@@ -1002,6 +921,168 @@ impl Item for NodeEditorOverlay {
 }
 
 impl NodeEditorOverlay {
+    /// Process pending reports from pins, nodes, and links
+    /// This is called from render() to ensure reports are processed even without input events
+    fn process_pending_reports(self: Pin<&Self>) {
+        // Check if a Pin component is reporting its position
+        let reporting_pin = self.reporting_pin_id();
+        if reporting_pin > 0 {
+            let pin_x = self.reporting_pin_x().get();
+            let pin_y = self.reporting_pin_y().get();
+
+            // Store the pin position for hit-testing
+            let mut state = self.data.state.borrow_mut();
+            state.pin_positions.insert(reporting_pin, LogicalPoint::new(pin_x, pin_y));
+            drop(state);
+
+            // Clear the reporting trigger
+            Self::FIELD_OFFSETS.reporting_pin_id.apply_pin(self).set(0);
+        }
+
+        // Check if a Node component is reporting its rectangle (single)
+        let reporting_node = self.reporting_node_id();
+        if reporting_node > 0 {
+            let node_x = self.reporting_node_x().get();
+            let node_y = self.reporting_node_y().get();
+            let node_width = self.reporting_node_width().get();
+            let node_height = self.reporting_node_height().get();
+
+            // Store the node rectangle for hit-testing and box selection
+            let mut state = self.data.state.borrow_mut();
+            state.node_rects.insert(
+                reporting_node,
+                NodeRect {
+                    x: node_x,
+                    y: node_y,
+                    width: node_width,
+                    height: node_height,
+                },
+            );
+            drop(state);
+
+            // Clear the reporting trigger
+            Self::FIELD_OFFSETS.reporting_node_id.apply_pin(self).set(0);
+
+            // Regenerate link positions since node moved
+            self.regenerate_link_positions();
+        }
+
+        // Check for batch node rect reports (format: "id,x,y,w,h;...")
+        let node_batch = self.pending_node_rects_batch();
+        if !node_batch.is_empty() {
+            let mut rects_added = false;
+            let mut state = self.data.state.borrow_mut();
+
+            for rect_str in node_batch.split(';') {
+                if rect_str.is_empty() {
+                    continue;
+                }
+                let parts: alloc::vec::Vec<&str> = rect_str.split(',').collect();
+                if parts.len() >= 5 {
+                    if let (Ok(id), Ok(x), Ok(y), Ok(w), Ok(h)) = (
+                        parts[0].parse::<i32>(),
+                        parts[1].parse::<f32>(),
+                        parts[2].parse::<f32>(),
+                        parts[3].parse::<f32>(),
+                        parts[4].parse::<f32>(),
+                    ) {
+                        state.node_rects.insert(
+                            id,
+                            NodeRect {
+                                x,
+                                y,
+                                width: w,
+                                height: h,
+                            },
+                        );
+                        rects_added = true;
+                    }
+                }
+            }
+
+            drop(state);
+
+            // Clear the batch
+            Self::FIELD_OFFSETS.pending_node_rects_batch.apply_pin(self).set(SharedString::default());
+
+            // Regenerate link positions if any rects were added
+            if rects_added {
+                self.regenerate_link_positions();
+            }
+        }
+
+        // Check if a Link is being reported (single link)
+        let reporting_link = self.reporting_link_id();
+        if reporting_link > 0 {
+            let start_pin_id = self.reporting_link_start_pin_id();
+            let end_pin_id = self.reporting_link_end_pin_id();
+            let color = self.reporting_link_color();
+
+            // Store the link in the registry
+            let mut state = self.data.state.borrow_mut();
+            state.links.insert(
+                reporting_link,
+                LinkRecord {
+                    id: reporting_link,
+                    start_pin_id,
+                    end_pin_id,
+                    color,
+                },
+            );
+            drop(state);
+
+            // Clear the reporting trigger
+            Self::FIELD_OFFSETS.reporting_link_id.apply_pin(self).set(0);
+
+            // Regenerate all link positions now that we have a new link
+            self.regenerate_link_positions();
+        }
+
+        // Check for batch link reports (format: "id,start_pin,end_pin,color_argb;...")
+        let batch = self.pending_links_batch();
+        if !batch.is_empty() {
+            let mut links_added = false;
+            let mut state = self.data.state.borrow_mut();
+
+            for link_str in batch.split(';') {
+                if link_str.is_empty() {
+                    continue;
+                }
+                let parts: alloc::vec::Vec<&str> = link_str.split(',').collect();
+                if parts.len() >= 4 {
+                    if let (Ok(id), Ok(start_pin), Ok(end_pin), Ok(color_argb)) = (
+                        parts[0].parse::<i32>(),
+                        parts[1].parse::<i32>(),
+                        parts[2].parse::<i32>(),
+                        parts[3].parse::<u32>(),
+                    ) {
+                        let color = Color::from_argb_encoded(color_argb);
+                        state.links.insert(
+                            id,
+                            LinkRecord {
+                                id,
+                                start_pin_id: start_pin,
+                                end_pin_id: end_pin,
+                                color,
+                            },
+                        );
+                        links_added = true;
+                    }
+                }
+            }
+
+            drop(state);
+
+            // Clear the batch
+            Self::FIELD_OFFSETS.pending_links_batch.apply_pin(self).set(SharedString::default());
+
+            // Regenerate link positions if any links were added
+            if links_added {
+                self.regenerate_link_positions();
+            }
+        }
+    }
+
     /// Regenerate all link positions based on current node rects and viewport state
     /// Updates the link_positions_data property with formatted position data
     fn regenerate_link_positions(self: Pin<&Self>) {
@@ -1039,6 +1120,9 @@ impl NodeEditorOverlay {
         // Join with semicolon separator
         let data_str = result.join(";");
         Self::FIELD_OFFSETS.link_positions_data.apply_pin(self).set(SharedString::from(&data_str));
+
+        // Notify that link positions have changed
+        self.link_positions_changed.call(&());
     }
 
     fn handle_mouse_pressed(

@@ -325,8 +325,19 @@ export component MainWindow inherits Window {
     // Link position data (managed by overlay, updated when viewport/nodes change)
     out property <string> link-positions-data <=> overlay.link-positions-data;
 
+    // Batch of pending links to register (set from Rust)
+    // Format: "id,start_pin,end_pin,color_argb;id,start_pin,end_pin,color_argb;..."
+    in-out property <string> pending-links-batch <=> overlay.pending-links-batch;
+
+    // Batch of pending node rects to register (set from Rust)
+    // Format: "id,x,y,w,h;..." where x,y,w,h are screen coordinates
+    in-out property <string> pending-node-rects-batch <=> overlay.pending-node-rects-batch;
+
     // Callback to report a link to the overlay (called from Rust on init)
     callback report-link(int, int, int, color);  // id, start-pin-id, end-pin-id, color
+
+    // Callback when link positions change (forwarded from overlay)
+    callback link-positions-updated();
 
     // Implement report-link to forward to overlay
     report-link(id, start-pin, end-pin, col) => {
@@ -773,13 +784,11 @@ export component MainWindow inherits Window {
             link-pin-id = 0;
         }
         report-rect(id, x, y, w, h) => {
-            // Report node rectangle to overlay for hit-testing and box selection
-            overlay.reporting-node-id = id;
-            overlay.reporting-node-x = x;
-            overlay.reporting-node-y = y;
-            overlay.reporting-node-width = w;
-            overlay.reporting-node-height = h;
-            // Trigger the callback (overlay will store the rect and clear reporting-node-id)
+            // Append to batch (format: "id,x,y,w,h;...")
+            // Convert lengths to floats by dividing by 1px
+            overlay.pending-node-rects-batch = overlay.pending-node-rects-batch +
+                (overlay.pending-node-rects-batch == "" ? "" : ";") +
+                id + "," + (x / 1px) + "," + (y / 1px) + "," + (w / 1px) + "," + (h / 1px);
         }
     }
 
@@ -836,6 +845,11 @@ export component MainWindow inherits Window {
         add-node-requested => {
             // Add a new node
             root.add-node();
+        }
+
+        link-positions-changed => {
+            // Overlay has updated link positions - notify Rust to sync
+            root.link-positions-updated();
         }
     }
 

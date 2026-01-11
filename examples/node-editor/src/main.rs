@@ -11,13 +11,29 @@ slint::include_modules!();
 
 // Node dimensions (must match ui.slint)
 const NODE_BASE_WIDTH: f32 = 150.0;
-const BASE_PIN_SIZE: f32 = 12.0;
-const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
+const NODE_BASE_HEIGHT: f32 = 80.0;
 const GRID_SPACING: f32 = 24.0;
 
 /// Snap a value to the nearest grid position
 fn snap_to_grid(value: f32) -> f32 {
     (value / GRID_SPACING).round() * GRID_SPACING
+}
+
+/// Build node rects batch string from model data and current viewport
+/// Format: "id,screen_x,screen_y,width,height;..."
+fn build_node_rects_batch(nodes: &VecModel<NodeData>, zoom: f32, pan_x: f32, pan_y: f32) -> String {
+    (0..nodes.row_count())
+        .filter_map(|i| nodes.row_data(i))
+        .map(|node| {
+            // Compute screen position: (world_pos) * zoom + pan
+            let screen_x = node.world_x * zoom + pan_x;
+            let screen_y = node.world_y * zoom + pan_y;
+            let width = NODE_BASE_WIDTH * zoom;
+            let height = NODE_BASE_HEIGHT * zoom;
+            format!("{},{},{},{},{}", node.id, screen_x, screen_y, width, height)
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 fn main() {
@@ -86,12 +102,29 @@ fn main() {
     ]));
     window.set_links(ModelRc::from(links.clone()));
 
-    // Report links to overlay for core-based position computation
-    for i in 0..links.row_count() {
-        if let Some(link) = links.row_data(i) {
-            window.invoke_report_link(link.id, link.start_pin_id, link.end_pin_id, link.color);
-        }
-    }
+    // Report links to overlay for core-based position computation (using batch)
+    // Format: "id,start_pin,end_pin,color_argb;..."
+    let batch: Vec<String> = (0..links.row_count())
+        .filter_map(|i| links.row_data(i))
+        .map(|link| {
+            format!(
+                "{},{},{},{}",
+                link.id,
+                link.start_pin_id,
+                link.end_pin_id,
+                link.color.as_argb_encoded()
+            )
+        })
+        .collect();
+    window.set_pending_links_batch(SharedString::from(batch.join(";").as_str()));
+
+    // Report initial node rects to overlay (using batch)
+    // Initial zoom=1.0, pan_x=0, pan_y=0
+    let initial_zoom = 1.0f32;
+    let initial_pan_x = 0.0f32;
+    let initial_pan_y = 0.0f32;
+    let node_rects_batch = build_node_rects_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
+    window.set_pending_node_rects_batch(SharedString::from(node_rects_batch.as_str()));
 
     // Handle selection changes - sync overlay's selection state to NodeData model
     let nodes_for_selection = nodes.clone();
@@ -113,12 +146,12 @@ fn main() {
         }
     });
 
-    // Handle link position updates when viewport changes
-    // Core computes positions, we just read and update the model
-    let links_for_viewport = links.clone();
-    let window_for_viewport = window.as_weak();
-    window.on_update_viewport(move |_zoom, _pan_x, _pan_y| {
-        if let Some(window) = window_for_viewport.upgrade() {
+    // Handle link position updates from core
+    // This is called whenever the core regenerates link positions (viewport changes, node moves, etc.)
+    let links_for_sync = links.clone();
+    let window_for_sync = window.as_weak();
+    window.on_link_positions_updated(move || {
+        if let Some(window) = window_for_sync.upgrade() {
             let link_data_str = window.get_link_positions_data();
 
             // Parse format: "id,start_x,start_y,end_x,end_y,color_argb;..."
@@ -137,14 +170,14 @@ fn main() {
                         parts[4].parse::<f32>(),
                     ) {
                         // Find and update the link in the model
-                        for i in 0..links_for_viewport.row_count() {
-                            if let Some(mut link) = links_for_viewport.row_data(i) {
+                        for i in 0..links_for_sync.row_count() {
+                            if let Some(mut link) = links_for_sync.row_data(i) {
                                 if link.id == id {
                                     link.start_x = start_x;
                                     link.start_y = start_y;
                                     link.end_x = end_x;
                                     link.end_y = end_y;
-                                    links_for_viewport.set_row_data(i, link);
+                                    links_for_sync.set_row_data(i, link);
                                     break;
                                 }
                             }
@@ -152,6 +185,17 @@ fn main() {
                     }
                 }
             }
+        }
+    });
+
+    // Handle viewport changes - update node rects when pan/zoom changes
+    let nodes_for_viewport = nodes.clone();
+    let window_for_viewport = window.as_weak();
+    window.on_update_viewport(move |zoom, pan_x, pan_y| {
+        // Rebuild node rects with new viewport parameters
+        if let Some(window) = window_for_viewport.upgrade() {
+            let batch = build_node_rects_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
+            window.set_pending_node_rects_batch(SharedString::from(batch.as_str()));
         }
     });
 
@@ -181,9 +225,16 @@ fn main() {
             end_y: 0.0,
         });
 
-        // Report link to overlay for position computation
+        // Report link to overlay for position computation (append to batch)
         if let Some(window) = window_for_create.upgrade() {
-            window.invoke_report_link(id, start_pin, end_pin, color);
+            let current_batch = window.get_pending_links_batch();
+            let new_entry = format!("{},{},{},{}", id, start_pin, end_pin, color.as_argb_encoded());
+            let new_batch = if current_batch.is_empty() {
+                new_entry
+            } else {
+                format!("{};{}", current_batch, new_entry)
+            };
+            window.set_pending_links_batch(SharedString::from(new_batch.as_str()));
         }
     });
 
@@ -216,7 +267,14 @@ fn main() {
             }
         }
 
-        // Link positions will be automatically updated by core when nodes move
+        // Update node rects in core so link positions are recomputed
+        if let Some(window) = window_for_drag.upgrade() {
+            let zoom = window.get_zoom();
+            let pan_x = window.get_pan_x();
+            let pan_y = window.get_pan_y();
+            let batch = build_node_rects_batch(&nodes_for_drag, zoom, pan_x, pan_y);
+            window.set_pending_node_rects_batch(SharedString::from(batch.as_str()));
+        }
     });
 
     // Handle deleting selected nodes
@@ -293,6 +351,9 @@ fn main() {
 
     // Box selection is now fully handled by the overlay
     // (overlay computes intersecting nodes and updates current-selected-ids)
+
+    // Link positions are synced automatically via link-positions-changed callback
+    // when nodes report their rects during initialization
 
     window.run().unwrap();
 }
