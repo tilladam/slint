@@ -177,6 +177,49 @@ fn main() {
         }
     });
 
+    // Handle deleting selected nodes
+    let nodes_for_delete = nodes.clone();
+    let links_for_delete = links.clone();
+    window.on_delete_selected_nodes(move || {
+        // Collect indices of selected nodes (in reverse order for safe removal)
+        let mut indices_to_remove: Vec<usize> = Vec::new();
+        let mut deleted_node_ids: Vec<i32> = Vec::new();
+
+        for i in 0..nodes_for_delete.row_count() {
+            if let Some(node) = nodes_for_delete.row_data(i) {
+                if node.selected {
+                    indices_to_remove.push(i);
+                    deleted_node_ids.push(node.id);
+                }
+            }
+        }
+
+        // Remove nodes in reverse order to maintain valid indices
+        for &i in indices_to_remove.iter().rev() {
+            nodes_for_delete.remove(i);
+        }
+
+        // Also remove any links connected to deleted nodes
+        // Pin IDs are node_id * 10 + pin_type, so we check if pin's node is deleted
+        let mut link_indices_to_remove: Vec<usize> = Vec::new();
+        for i in 0..links_for_delete.row_count() {
+            if let Some(link) = links_for_delete.row_data(i) {
+                let start_node_id = link.start_pin_id / 10;
+                let end_node_id = link.end_pin_id / 10;
+                if deleted_node_ids.contains(&start_node_id)
+                    || deleted_node_ids.contains(&end_node_id)
+                {
+                    link_indices_to_remove.push(i);
+                }
+            }
+        }
+
+        // Remove links in reverse order
+        for &i in link_indices_to_remove.iter().rev() {
+            links_for_delete.remove(i);
+        }
+    });
+
     // Handle box selection
     let nodes_for_box = nodes.clone();
     window.on_box_select(move |sel_x, sel_y, sel_width, sel_height, zoom, pan_x, pan_y| {

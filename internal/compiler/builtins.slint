@@ -847,6 +847,8 @@ export component NodeEditorOverlay inherits Empty {
     callback selection-changed();
     /// Callback when viewport changes (pan or zoom)
     callback viewport-changed();
+    /// Callback when delete key is pressed (Delete or Backspace)
+    callback delete-selected();
 
     //-default_size_binding:expands_to_parent_geometry
 }

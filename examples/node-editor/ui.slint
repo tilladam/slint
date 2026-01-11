@@ -293,6 +293,7 @@ export component MainWindow inherits Window {
     callback commit-drag(float, float);  // delta-world-x, delta-world-y - called on drag end
     callback update-grid(float, float, float, float, float);  // width, height, zoom, pan-x, pan-y
     callback create-link(int, int);  // start-pin-id, end-pin-id
+    callback delete-selected-nodes();  // delete all selected nodes
 
     // Grid SVG commands (set by Rust)
     in property <string> grid-commands: "";
@@ -593,6 +594,11 @@ export component MainWindow inherits Window {
         viewport-changed => {
             // Update grid when pan or zoom changes
             root.update-grid(background-layer.width / 1px, background-layer.height / 1px, zoom, pan-x / 1px, pan-y / 1px);
+        }
+
+        delete-selected => {
+            // Delete selected nodes
+            root.delete-selected-nodes();
         }
     }
 

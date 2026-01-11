@@ -17,8 +17,8 @@ use super::{
 };
 use crate::graphics::{Brush, Color};
 use crate::input::{
-    FocusEvent, FocusEventResult, InputEventFilterResult, InputEventResult, KeyEvent, MouseEvent,
-    PointerEventButton,
+    FocusEvent, FocusEventResult, FocusReason, InputEventFilterResult, InputEventResult, KeyEvent,
+    KeyEventType, MouseEvent, PointerEventButton,
 };
 use crate::item_rendering::CachedRenderingData;
 use crate::layout::{LayoutInfo, Orientation};
@@ -27,7 +27,7 @@ use crate::lengths::{
 };
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
-use crate::window::WindowAdapter;
+use crate::window::{WindowAdapter, WindowInner};
 use crate::{Callback, Coord, Property};
 use alloc::boxed::Box;
 use alloc::rc::Rc;
@@ -347,6 +347,8 @@ pub struct NodeEditorOverlay {
     pub selection_changed: Callback<()>,
     /// Callback when viewport changes (pan or zoom)
     pub viewport_changed: Callback<()>,
+    /// Callback when delete key is pressed (Delete or Backspace)
+    pub delete_selected: Callback<()>,
 
     // === Link creation trigger (set properties then call callback) ===
     /// Pin ID to start link from (set by Pin component before calling start-link)
@@ -444,19 +446,19 @@ impl Item for NodeEditorOverlay {
             return InputEventFilterResult::Intercept;
         }
 
-        // Otherwise, let events pass through to nodes behind the overlay
-        InputEventFilterResult::ForwardAndIgnore
+        // Forward to children but still receive the event afterward to grab focus
+        InputEventFilterResult::ForwardEvent
     }
 
     fn input_event(
         self: Pin<&Self>,
         event: &MouseEvent,
         window_adapter: &Rc<dyn WindowAdapter>,
-        _self_rc: &ItemRc,
+        self_rc: &ItemRc,
     ) -> InputEventResult {
         match event {
             MouseEvent::Pressed { position, button, .. } => {
-                self.handle_mouse_pressed(*position, *button, window_adapter)
+                self.handle_mouse_pressed(*position, *button, window_adapter, self_rc)
             }
             MouseEvent::Released { position, button, .. } => {
                 self.handle_mouse_released(*position, *button)
@@ -480,6 +482,11 @@ impl Item for NodeEditorOverlay {
         _window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
     ) -> KeyEventResult {
+        // Only handle KeyPressed events
+        if event.event_type != KeyEventType::KeyPressed {
+            return KeyEventResult::EventIgnored;
+        }
+
         // Handle Escape to cancel link creation
         let state = self.data.state.borrow();
         if state.is_creating_link {
@@ -487,6 +494,16 @@ impl Item for NodeEditorOverlay {
                 return KeyEventResult::EventAccepted;
             }
         }
+
+        // Handle Delete/Backspace for deletion - must be in capture_key_event
+        // because returning EventAccepted here prevents key_event from being called
+        if event.text.starts_with(crate::input::key_codes::Delete)
+            || event.text.starts_with(crate::input::key_codes::Backspace)
+        {
+            self.delete_selected.call(&());
+            return KeyEventResult::EventAccepted;
+        }
+
         KeyEventResult::EventIgnored
     }
 
@@ -496,6 +513,11 @@ impl Item for NodeEditorOverlay {
         _window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
     ) -> KeyEventResult {
+        // Only handle KeyPressed events
+        if event.event_type != KeyEventType::KeyPressed {
+            return KeyEventResult::EventIgnored;
+        }
+
         // Handle Escape to cancel link creation
         if event.text.starts_with(crate::input::key_codes::Escape) {
             let mut state = self.data.state.borrow_mut();
@@ -510,6 +532,15 @@ impl Item for NodeEditorOverlay {
                 return KeyEventResult::EventAccepted;
             }
         }
+
+        // Handle Delete or Backspace to delete selected items
+        if event.text.starts_with(crate::input::key_codes::Delete)
+            || event.text.starts_with(crate::input::key_codes::Backspace)
+        {
+            self.delete_selected.call(&());
+            return KeyEventResult::EventAccepted;
+        }
+
         KeyEventResult::EventIgnored
     }
 
@@ -519,7 +550,8 @@ impl Item for NodeEditorOverlay {
         _window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
     ) -> FocusEventResult {
-        FocusEventResult::FocusIgnored
+        // Accept focus so we can receive key events (Delete, Escape, etc.)
+        FocusEventResult::FocusAccepted
     }
 
     fn render(
@@ -568,7 +600,15 @@ impl NodeEditorOverlay {
         position: LogicalPoint,
         button: PointerEventButton,
         window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
     ) -> InputEventResult {
+        // Grab focus so we can receive key events (Delete, Escape, etc.)
+        WindowInner::from_pub(window_adapter.window()).set_focus_item(
+            self_rc,
+            true,
+            FocusReason::PointerClick,
+        );
+
         match button {
             PointerEventButton::Middle => {
                 // Start panning
