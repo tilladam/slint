@@ -3,7 +3,8 @@
 // Demonstrates the NodeEditorBackground and NodeEditorOverlay components
 // for building visual node graph editors.
 
-use slint::{Model, ModelRc, SharedString, VecModel};
+use slint::{Color, Model, ModelRc, SharedString, VecModel};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 slint::include_modules!();
@@ -88,6 +89,55 @@ fn main() {
 
     // Set the model on the window
     window.set_nodes(ModelRc::from(nodes.clone()));
+
+    // Create the links model with initial connections
+    // Link colors for variety
+    let link_colors = [
+        Color::from_argb_u8(255, 255, 152, 0),   // Orange
+        Color::from_argb_u8(255, 33, 150, 243),  // Blue
+        Color::from_argb_u8(255, 76, 175, 80),   // Green
+        Color::from_argb_u8(255, 156, 39, 176),  // Purple
+        Color::from_argb_u8(255, 233, 30, 99),   // Pink
+    ];
+    let next_link_id = Rc::new(RefCell::new(3)); // Start after initial links
+    let color_index = Rc::new(RefCell::new(2)); // Start after initial colors
+
+    let links: Rc<VecModel<LinkData>> = Rc::new(VecModel::from(vec![
+        // Input (pin 12) -> Process (pin 21)
+        LinkData {
+            id: 1,
+            start_pin_id: 12,
+            end_pin_id: 21,
+            color: link_colors[0],
+        },
+        // Process (pin 22) -> Output (pin 31)
+        LinkData {
+            id: 2,
+            start_pin_id: 22,
+            end_pin_id: 31,
+            color: link_colors[1],
+        },
+    ]));
+    window.set_links(ModelRc::from(links.clone()));
+
+    // Handle link creation
+    let links_for_create = links.clone();
+    let next_link_id_for_create = next_link_id.clone();
+    let color_index_for_create = color_index.clone();
+    window.on_create_link(move |start_pin, end_pin| {
+        let id = *next_link_id_for_create.borrow();
+        *next_link_id_for_create.borrow_mut() += 1;
+
+        let idx = *color_index_for_create.borrow();
+        *color_index_for_create.borrow_mut() = (idx + 1) % link_colors.len();
+
+        links_for_create.push(LinkData {
+            id,
+            start_pin_id: start_pin,
+            end_pin_id: end_pin,
+            color: link_colors[idx],
+        });
+    });
 
     // Handle node selection
     let nodes_for_select = nodes.clone();

@@ -9,6 +9,14 @@ export struct NodeData {
     selected: bool,
 }
 
+// Data structure for links - exported to Rust
+export struct LinkData {
+    id: int,
+    start-pin-id: int,
+    end-pin-id: int,
+    color: color,
+}
+
 // Grid component for the node editor background
 // Uses Rust-provided SVG path for grid lines
 component Grid inherits Path {
@@ -277,10 +285,14 @@ export component MainWindow inherits Window {
     // Node model - owned by Rust
     in property <[NodeData]> nodes;
 
+    // Link model - owned by Rust
+    in property <[LinkData]> links;
+
     // Callbacks to Rust for state changes
     callback select-node(int, bool);  // node-id, shift-held
     callback commit-drag(float, float);  // delta-world-x, delta-world-y - called on drag end
     callback update-grid(float, float, float, float, float);  // width, height, zoom, pan-x, pan-y
+    callback create-link(int, int);  // start-pin-id, end-pin-id
 
     // Grid SVG commands (set by Rust)
     in property <string> grid-commands: "";
@@ -386,18 +398,6 @@ export component MainWindow inherits Window {
     // Hit radius for pin detection (in screen pixels, scales with zoom)
     property <length> pin-hit-radius: 15px * zoom;
 
-    // User-created links (up to 10 dynamic links for this example)
-    // Each link stores: enabled, start-pin-id, end-pin-id
-    property <bool> user-link-0-enabled: false;
-    property <int> user-link-0-start: 0;
-    property <int> user-link-0-end: 0;
-    property <bool> user-link-1-enabled: false;
-    property <int> user-link-1-start: 0;
-    property <int> user-link-1-end: 0;
-    property <bool> user-link-2-enabled: false;
-    property <int> user-link-2-start: 0;
-    property <int> user-link-2-end: 0;
-
     // Helper: check if point is near a pin (returns pin-id or 0)
     pure function point-near-pin(x: length, y: length, pin-x: length, pin-y: length, pin-id: int) -> int {
         if (x - pin-x) * (x - pin-x) + (y - pin-y) * (y - pin-y) < pin-hit-radius * pin-hit-radius {
@@ -461,23 +461,9 @@ export component MainWindow inherits Window {
         return 0;
     }
 
-    // Create a link between two pins
-    function create-link(start-pin: int, end-pin: int) {
-        // Find first available slot
-        if !user-link-0-enabled {
-            user-link-0-enabled = true;
-            user-link-0-start = start-pin;
-            user-link-0-end = end-pin;
-        } else if !user-link-1-enabled {
-            user-link-1-enabled = true;
-            user-link-1-start = start-pin;
-            user-link-1-end = end-pin;
-        } else if !user-link-2-enabled {
-            user-link-2-enabled = true;
-            user-link-2-start = start-pin;
-            user-link-2-end = end-pin;
-        }
-        debug("Link created: " + start-pin + " -> " + end-pin);
+    // Internal function to request link creation from Rust
+    function request-link-creation(start-pin: int, end-pin: int) {
+        root.create-link(start-pin, end-pin);
     }
 
     // Helper functions for link creation
@@ -511,9 +497,9 @@ export component MainWindow inherits Window {
                    (is-input-pin(pin-id) && is-output-pin(drop-target-pin)) {
                     // Normalize: always store output -> input
                     if is-output-pin(pin-id) {
-                        create-link(pin-id, drop-target-pin);
+                        request-link-creation(pin-id, drop-target-pin);
                     } else {
-                        create-link(drop-target-pin, pin-id);
+                        request-link-creation(drop-target-pin, pin-id);
                     }
                 }
             }
@@ -560,59 +546,13 @@ export component MainWindow inherits Window {
         pin-drag-ended(pin-id, x, y) => { end-link-creation(pin-id, x, y); }
     }
 
-    // Links layer (between nodes and overlay)
-    // Link from Input's output (pin 12) to Process's input (pin 21)
-    Link {
-        start-x: get-pin-x(12);
-        start-y: get-pin-y(12);
-        end-x: get-pin-x(21);
-        end-y: get-pin-y(21);
-        link-color: #ff9800;
-        line-width: 3px * zoom;
-        zoom: zoom;
-    }
-
-    // Link from Process's output (pin 22) to Output's input (pin 31)
-    Link {
-        start-x: get-pin-x(22);
-        start-y: get-pin-y(22);
-        end-x: get-pin-x(31);
-        end-y: get-pin-y(31);
-        link-color: #2196f3;
-        line-width: 3px * zoom;
-        zoom: zoom;
-    }
-
-    // User-created links (dynamic)
-    Link {
-        visible: user-link-0-enabled;
-        start-x: get-pin-x(user-link-0-start);
-        start-y: get-pin-y(user-link-0-start);
-        end-x: get-pin-x(user-link-0-end);
-        end-y: get-pin-y(user-link-0-end);
-        link-color: #4caf50;
-        line-width: 3px * zoom;
-        zoom: zoom;
-    }
-
-    Link {
-        visible: user-link-1-enabled;
-        start-x: get-pin-x(user-link-1-start);
-        start-y: get-pin-y(user-link-1-start);
-        end-x: get-pin-x(user-link-1-end);
-        end-y: get-pin-y(user-link-1-end);
-        link-color: #9c27b0;
-        line-width: 3px * zoom;
-        zoom: zoom;
-    }
-
-    Link {
-        visible: user-link-2-enabled;
-        start-x: get-pin-x(user-link-2-start);
-        start-y: get-pin-y(user-link-2-start);
-        end-x: get-pin-x(user-link-2-end);
-        end-y: get-pin-y(user-link-2-end);
-        link-color: #e91e63;
+    // Links layer (between nodes and overlay) - iterates over Rust-owned model
+    for link-data in links: Link {
+        start-x: get-pin-x(link-data.start-pin-id);
+        start-y: get-pin-y(link-data.start-pin-id);
+        end-x: get-pin-x(link-data.end-pin-id);
+        end-y: get-pin-y(link-data.end-pin-id);
+        link-color: link-data.color;
         line-width: 3px * zoom;
         zoom: zoom;
     }
