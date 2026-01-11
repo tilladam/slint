@@ -417,8 +417,33 @@ impl Item for NodeEditorOverlay {
             return InputEventFilterResult::Intercept;
         }
 
-        // Otherwise, let events pass through to children (nodes)
-        InputEventFilterResult::ForwardEvent
+        // Check if this is a Ctrl+left click (box selection) or middle mouse (pan)
+        // These should be intercepted by the overlay
+        if let MouseEvent::Pressed { button, .. } = _event {
+            match button {
+                PointerEventButton::Middle => {
+                    return InputEventFilterResult::Intercept;
+                }
+                PointerEventButton::Left => {
+                    let modifiers = _window_adapter.window().0.modifiers.get();
+                    if modifiers.control() {
+                        return InputEventFilterResult::Intercept;
+                    }
+                }
+                PointerEventButton::Right => {
+                    return InputEventFilterResult::Intercept;
+                }
+                _ => {}
+            }
+        }
+
+        // For scroll events, intercept for zoom
+        if let MouseEvent::Wheel { .. } = _event {
+            return InputEventFilterResult::Intercept;
+        }
+
+        // Otherwise, let events pass through to nodes behind the overlay
+        InputEventFilterResult::ForwardAndIgnore
     }
 
     fn input_event(
@@ -562,10 +587,10 @@ impl NodeEditorOverlay {
                 InputEventResult::EventAccepted
             }
             PointerEventButton::Left => {
-                // Check if Shift is held for box selection
+                // Check if Ctrl is held for box selection (Shift is reserved for extend-selection)
                 let modifiers = window_adapter.window().0.modifiers.get();
-                if modifiers.shift() {
-                    // Shift+Left click starts box selection
+                if modifiers.control() {
+                    // Ctrl+Left click starts box selection
                     let mut state = self.data.state.borrow_mut();
                     state.is_box_selecting = true;
                     state.box_select_start = position;

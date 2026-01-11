@@ -47,6 +47,9 @@ component Node inherits Rectangle {
     in property <int> input-pin-id: node-id * 10 + 1;   // e.g., node 1 -> pin 11
     in property <int> output-pin-id: node-id * 10 + 2;  // e.g., node 1 -> pin 12
 
+    // Selection state
+    in property <bool> selected: false;
+
     // World coordinates (grid space) - these are what get modified by dragging
     in-out property <length> world-x;
     in-out property <length> world-y;
@@ -60,6 +63,9 @@ component Node inherits Rectangle {
     callback pin-drag-started(int, length, length);
     callback pin-drag-moved(int, length, length);
     callback pin-drag-ended(int, length, length);
+
+    // Callback when node is clicked (for selection) - passes node-id and shift-held
+    callback clicked(int, bool);
 
     // Pin dimensions (scaled by zoom)
     property <length> base-pin-size: 12px;
@@ -84,10 +90,10 @@ component Node inherits Rectangle {
     y: screen-y;
     width: base-width * zoom;
     height: base-height * zoom;
-    background: #2d2d2d;
+    background: selected ? #3a3a4a : #2d2d2d;
     border-radius: 8px * zoom;
-    border-width: 1px * zoom;
-    border-color: #555;
+    border-width: selected ? 2px * zoom : 1px * zoom;
+    border-color: selected ? #4a9eff : #555;
 
     // Title bar
     Rectangle {
@@ -95,7 +101,7 @@ component Node inherits Rectangle {
         y: 8px * zoom;
         width: parent.width - 16px * zoom;
         height: 24px * zoom;
-        background: #3d3d3d;
+        background: selected ? #4a6a9a : #3d3d3d;
         border-radius: 4px * zoom;
 
         Text {
@@ -109,11 +115,45 @@ component Node inherits Rectangle {
 
     // Drag handling for the node body (must be before pins so pins are on top)
     TouchArea {
+        property <bool> shift-held: false;
+        property <bool> was-dragged: false;
+        property <length> drag-threshold: 5px;
+        property <length> last-mouse-x;
+        property <length> last-mouse-y;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                shift-held = event.modifiers.shift;
+                was-dragged = false;
+                last-mouse-x = self.mouse-x;
+                last-mouse-y = self.mouse-y;
+            }
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                // Only trigger click if we didn't drag
+                if !was-dragged {
+                    root.clicked(node-id, shift-held);
+                }
+            }
+        }
         moved => {
             if self.pressed {
-                // Convert screen delta to world delta by dividing by zoom
-                world-x += (self.mouse-x - self.pressed-x) / zoom;
-                world-y += (self.mouse-y - self.pressed-y) / zoom;
+                // Check if moved beyond threshold from press position
+                if !was-dragged {
+                    if self.mouse-x - self.pressed-x > drag-threshold ||
+                       self.pressed-x - self.mouse-x > drag-threshold ||
+                       self.mouse-y - self.pressed-y > drag-threshold ||
+                       self.pressed-y - self.mouse-y > drag-threshold {
+                        was-dragged = true;
+                    }
+                }
+
+                // If dragging, update node position using incremental delta
+                if was-dragged {
+                    world-x += (self.mouse-x - last-mouse-x) / zoom;
+                    world-y += (self.mouse-y - last-mouse-y) / zoom;
+                }
+                last-mouse-x = self.mouse-x;
+                last-mouse-y = self.mouse-y;
             }
         }
     }
@@ -204,6 +244,49 @@ export component MainWindow inherits Window {
         grid-spacing: 24px;
         grid-color: #333333;
         background-color: #1a1a1a;
+    }
+
+    // Node selection state (individual booleans for multi-select)
+    property <bool> node-1-selected: false;
+    property <bool> node-2-selected: false;
+    property <bool> node-3-selected: false;
+
+    function select-node(node-id: int, shift-held: bool) {
+        if shift-held {
+            // Shift+click: toggle this node without affecting others
+            if node-id == 1 {
+                node-1-selected = !node-1-selected;
+            } else if node-id == 2 {
+                node-2-selected = !node-2-selected;
+            } else if node-id == 3 {
+                node-3-selected = !node-3-selected;
+            }
+        } else {
+            // Normal click: select only this node (clear others)
+            node-1-selected = node-id == 1;
+            node-2-selected = node-id == 2;
+            node-3-selected = node-id == 3;
+        }
+    }
+
+    // Check if a node intersects with the current selection box
+    pure function node-in-selection(node-x: length, node-y: length, node-w: length, node-h: length) -> bool {
+        // Two rectangles intersect if they overlap on both axes
+        return node-x < overlay.selection-x + overlay.selection-width &&
+               node-x + node-w > overlay.selection-x &&
+               node-y < overlay.selection-y + overlay.selection-height &&
+               node-y + node-h > overlay.selection-y;
+    }
+
+    // Update selection based on box select - selects ALL nodes in box
+    function update-box-selection() {
+        // Only process if selection box has meaningful size
+        if overlay.selection-width > 5px && overlay.selection-height > 5px {
+            // Select all nodes that intersect with the selection box
+            node-1-selected = node-in-selection(input-node.x, input-node.y, input-node.width, input-node.height);
+            node-2-selected = node-in-selection(process-node.x, process-node.y, process-node.width, process-node.height);
+            node-3-selected = node-in-selection(output-node.x, output-node.y, output-node.width, output-node.height);
+        }
     }
 
     // Link creation state managed directly in Slint
@@ -349,11 +432,13 @@ export component MainWindow inherits Window {
     input-node := Node {
         title: "Input";
         node-id: 1;
+        selected: node-1-selected;
         world-x: 100px;
         world-y: 200px;
         zoom: zoom;
         pan-x: pan-x;
         pan-y: pan-y;
+        clicked(id, shift) => { select-node(id, shift); }
         pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
         pin-drag-moved(pin-id, x, y) => { update-link-position(pin-id, x, y); }
         pin-drag-ended(pin-id, x, y) => { end-link-creation(pin-id, x, y); }
@@ -362,11 +447,13 @@ export component MainWindow inherits Window {
     process-node := Node {
         title: "Process";
         node-id: 2;
+        selected: node-2-selected;
         world-x: 350px;
         world-y: 150px;
         zoom: zoom;
         pan-x: pan-x;
         pan-y: pan-y;
+        clicked(id, shift) => { select-node(id, shift); }
         pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
         pin-drag-moved(pin-id, x, y) => { update-link-position(pin-id, x, y); }
         pin-drag-ended(pin-id, x, y) => { end-link-creation(pin-id, x, y); }
@@ -375,11 +462,13 @@ export component MainWindow inherits Window {
     output-node := Node {
         title: "Output";
         node-id: 3;
+        selected: node-3-selected;
         world-x: 600px;
         world-y: 200px;
         zoom: zoom;
         pan-x: pan-x;
         pan-y: pan-y;
+        clicked(id, shift) => { select-node(id, shift); }
         pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
         pin-drag-moved(pin-id, x, y) => { update-link-position(pin-id, x, y); }
         pin-drag-ended(pin-id, x, y) => { end-link-creation(pin-id, x, y); }
@@ -467,7 +556,7 @@ export component MainWindow inherits Window {
         }
 
         selection-changed => {
-            debug("Selection changed");
+            update-box-selection();
         }
     }
 
@@ -500,7 +589,7 @@ export component MainWindow inherits Window {
         x: 10px;
         y: 10px;
         width: 280px;
-        height: 135px;
+        height: 155px;
         background: #00000080;
         border-radius: 8px;
 
@@ -513,7 +602,8 @@ export component MainWindow inherits Window {
             Text { text: "Scroll wheel: Zoom"; color: #ccc; font-size: 12px; }
             Text { text: "Drag nodes to move them"; color: #ccc; font-size: 12px; }
             Text { text: "Drag from pin: Create link"; color: #ccc; font-size: 12px; }
-            Text { text: "Shift+drag: Box select"; color: #ccc; font-size: 12px; }
+            Text { text: "Ctrl+drag: Box select"; color: #ccc; font-size: 12px; }
+            Text { text: "Shift+click: Extend selection"; color: #ccc; font-size: 12px; }
         }
     }
 

@@ -1,0 +1,347 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for node selection behavior WITH NodeEditorOverlay on top (shift+click passthrough)
+
+// A simplified Node component for testing selection
+component TestNode inherits Rectangle {
+    in property <int> node-id;
+    in property <bool> selected: false;
+
+    // Callback when node is clicked - passes node-id and shift-held
+    callback clicked(int, bool);
+
+    width: 100phx;
+    height: 80phx;
+    background: selected ? #4a9eff : #2d2d2d;
+    border-width: 1phx;
+    border-color: selected ? #ffffff : #555555;
+
+    // Drag handling for the node body
+    touch := TouchArea {
+        property <bool> shift-held: false;
+        property <bool> was-dragged: false;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                shift-held = event.modifiers.shift;
+                was-dragged = false;
+            }
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                // Only trigger click if we didn't drag
+                if !was-dragged {
+                    root.clicked(node-id, shift-held);
+                }
+            }
+        }
+        moved => {
+            if self.pressed {
+                was-dragged = true;
+            }
+        }
+    }
+
+    // Expose internal state for testing
+    out property <bool> test-touch-has-hover: touch.has-hover;
+    out property <bool> test-touch-pressed: touch.pressed;
+}
+
+TestCase := Window {
+    width: 600phx;
+    height: 400phx;
+
+    // Shared pan state (used by overlay)
+    property <length> pan-x: 0phx;
+    property <length> pan-y: 0phx;
+    property <float> zoom: 1.0;
+
+    // Node selection state (individual booleans for multi-select)
+    property <bool> node-1-selected: false;
+    property <bool> node-2-selected: false;
+    property <bool> node-3-selected: false;
+
+    // Track callback invocations for testing
+    property <int> last-clicked-node: 0;
+    property <bool> last-click-had-shift: false;
+    property <int> click-count: 0;
+
+    // Selection logic
+    function select-node(node-id: int, shift-held: bool) {
+        last-clicked-node = node-id;
+        last-click-had-shift = shift-held;
+        click-count += 1;
+
+        if shift-held {
+            // Shift+click: toggle this node without affecting others
+            if node-id == 1 {
+                node-1-selected = !node-1-selected;
+            } else if node-id == 2 {
+                node-2-selected = !node-2-selected;
+            } else if node-id == 3 {
+                node-3-selected = !node-3-selected;
+            }
+        } else {
+            // Normal click: select only this node (clear others)
+            node-1-selected = node-id == 1;
+            node-2-selected = node-id == 2;
+            node-3-selected = node-id == 3;
+        }
+    }
+
+    // Background layer (first)
+    NodeEditorBackground {
+        width: 100%;
+        height: 100%;
+        pan-x <=> root.pan-x;
+        pan-y <=> root.pan-y;
+        zoom: root.zoom;
+        grid-spacing: 24phx;
+        grid-color: #333333;
+        background-color: #1a1a1a;
+    }
+
+    // Three test nodes (middle layer)
+    node1 := TestNode {
+        x: 50phx;
+        y: 100phx;
+        node-id: 1;
+        selected: node-1-selected;
+        clicked(id, shift) => { select-node(id, shift); }
+    }
+
+    node2 := TestNode {
+        x: 200phx;
+        y: 100phx;
+        node-id: 2;
+        selected: node-2-selected;
+        clicked(id, shift) => { select-node(id, shift); }
+    }
+
+    node3 := TestNode {
+        x: 350phx;
+        y: 100phx;
+        node-id: 3;
+        selected: node-3-selected;
+        clicked(id, shift) => { select-node(id, shift); }
+    }
+
+    // Overlay layer (on top) - this intercepts some events
+    overlay := NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+        pan-x <=> root.pan-x;
+        pan-y <=> root.pan-y;
+        zoom <=> root.zoom;
+        min-zoom: 0.25;
+        max-zoom: 4.0;
+        selection-box-color: #4488ff40;
+        active-link-color: #ffffff;
+    }
+
+    // Expose properties for testing
+    out property <bool> test-node-1-selected: node-1-selected;
+    out property <bool> test-node-2-selected: node-2-selected;
+    out property <bool> test-node-3-selected: node-3-selected;
+    out property <int> test-last-clicked-node: last-clicked-node;
+    out property <bool> test-last-click-had-shift: last-click-had-shift;
+    out property <int> test-click-count: click-count;
+
+    // Node position info for targeting
+    out property <length> test-node-1-x: node1.x;
+    out property <length> test-node-1-y: node1.y;
+    out property <length> test-node-2-x: node2.x;
+    out property <length> test-node-2-y: node2.y;
+    out property <length> test-node-3-x: node3.x;
+    out property <length> test-node-3-y: node3.y;
+    out property <length> test-node-width: node1.width;
+    out property <length> test-node-height: node1.height;
+
+    // Overlay state
+    out property <bool> test-is-selecting: overlay.is-selecting;
+    out property <length> test-pan-x: pan-x;
+    out property <length> test-pan-y: pan-y;
+}
+
+/*
+
+```rust
+// Test: Click on node 1 WITH OVERLAY - should pass through
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Get node 1 center position
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+
+// Move mouse to node 1
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+
+// Click on node 1
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+// Verify callback was invoked
+assert_eq!(instance.get_test_click_count(), 1, "Click callback should be invoked through overlay");
+assert_eq!(instance.get_test_last_clicked_node(), 1, "Should report node 1 was clicked");
+assert_eq!(instance.get_test_last_click_had_shift(), false, "Shift should not be held");
+
+// Verify selection state
+assert_eq!(instance.get_test_node_1_selected(), true, "Node 1 should be selected");
+```
+
+```rust
+// Test: Shift+click on node 2 WITH OVERLAY - should extend selection (key test!)
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// First select node 1 with normal click
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+assert_eq!(instance.get_test_node_1_selected(), true, "Node 1 selected after first click");
+
+// Now shift+click on node 2
+let node2_center_x = instance.get_test_node_2_x() + instance.get_test_node_width() / 2.0;
+let node2_center_y = instance.get_test_node_2_y() + instance.get_test_node_height() / 2.0;
+
+// Hold shift key
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), true);
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node2_center_x, node2_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+
+// Release shift key
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), false);
+
+// Verify shift was detected
+assert_eq!(instance.get_test_click_count(), 2, "Two clicks total");
+assert_eq!(instance.get_test_last_clicked_node(), 2, "Last clicked was node 2");
+assert_eq!(instance.get_test_last_click_had_shift(), true, "Shift should be detected through overlay");
+
+// Verify selection state - both nodes should be selected
+assert_eq!(instance.get_test_node_1_selected(), true, "Node 1 should remain selected");
+assert_eq!(instance.get_test_node_2_selected(), true, "Node 2 should be selected");
+assert_eq!(instance.get_test_node_3_selected(), false, "Node 3 should not be selected");
+```
+
+```rust
+// Test: Ctrl+drag should start box selection (not pass through)
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// Hold Ctrl and drag (should start box selection, not select nodes)
+slint_testing::send_keyboard_char(&instance, Key::Control.into(), true);
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(50.0, 50.0)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(50.0, 50.0),
+    button: PointerEventButton::Left
+});
+
+// Should start selecting
+assert_eq!(instance.get_test_is_selecting(), true, "Should start box selection with Ctrl+drag");
+
+// Drag
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(200.0, 200.0)
+});
+
+// Release
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(200.0, 200.0),
+    button: PointerEventButton::Left
+});
+
+slint_testing::send_keyboard_char(&instance, Key::Control.into(), false);
+
+// Node click should NOT have been triggered
+assert_eq!(instance.get_test_click_count(), 0, "Click should not fire during Ctrl+drag box selection");
+```
+
+```rust
+// Test: Middle mouse pan works through overlay
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Initial pan
+assert_eq!(instance.get_test_pan_x(), 0.0);
+assert_eq!(instance.get_test_pan_y(), 0.0);
+
+// Pan with middle mouse
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(300.0, 200.0)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(300.0, 200.0),
+    button: PointerEventButton::Middle
+});
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(400.0, 250.0)
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(400.0, 250.0),
+    button: PointerEventButton::Middle
+});
+
+// Pan should have changed
+assert_eq!(instance.get_test_pan_x(), 100.0, "Pan X should update");
+assert_eq!(instance.get_test_pan_y(), 50.0, "Pan Y should update");
+```
+
+```rust
+// Test: Click on empty area (outside nodes) with overlay - should not select any nodes
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Click on empty area
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(500.0, 300.0)  // Far from any node
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(500.0, 300.0),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(500.0, 300.0),
+    button: PointerEventButton::Left
+});
+
+// No node clicks should have occurred
+assert_eq!(instance.get_test_click_count(), 0, "No node click when clicking empty area");
+assert_eq!(instance.get_test_node_1_selected(), false);
+assert_eq!(instance.get_test_node_2_selected(), false);
+assert_eq!(instance.get_test_node_3_selected(), false);
+```
+
+*/

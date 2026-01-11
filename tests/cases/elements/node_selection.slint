@@ -1,0 +1,417 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// Tests for node selection behavior (click and shift+click)
+
+// A simplified Node component for testing selection
+component TestNode inherits Rectangle {
+    in property <int> node-id;
+    in property <bool> selected: false;
+
+    // Callback when node is clicked - passes node-id and shift-held
+    callback clicked(int, bool);
+
+    width: 100phx;
+    height: 80phx;
+    background: selected ? #4a9eff : #2d2d2d;
+    border-width: 1phx;
+    border-color: selected ? #ffffff : #555555;
+
+    // Drag handling for the node body
+    touch := TouchArea {
+        property <bool> shift-held: false;
+        property <bool> was-dragged: false;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                shift-held = event.modifiers.shift;
+                was-dragged = false;
+            }
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                // Only trigger click if we didn't drag
+                if !was-dragged {
+                    root.clicked(node-id, shift-held);
+                }
+            }
+        }
+        moved => {
+            if self.pressed {
+                was-dragged = true;
+            }
+        }
+    }
+
+    // Expose internal state for testing
+    out property <bool> test-touch-has-hover: touch.has-hover;
+    out property <bool> test-touch-pressed: touch.pressed;
+}
+
+TestCase := Window {
+    width: 600phx;
+    height: 400phx;
+
+    // Node selection state (individual booleans for multi-select)
+    property <bool> node-1-selected: false;
+    property <bool> node-2-selected: false;
+    property <bool> node-3-selected: false;
+
+    // Track callback invocations for testing
+    property <int> last-clicked-node: 0;
+    property <bool> last-click-had-shift: false;
+    property <int> click-count: 0;
+
+    // Selection logic
+    function select-node(node-id: int, shift-held: bool) {
+        last-clicked-node = node-id;
+        last-click-had-shift = shift-held;
+        click-count += 1;
+
+        if shift-held {
+            // Shift+click: toggle this node without affecting others
+            if node-id == 1 {
+                node-1-selected = !node-1-selected;
+            } else if node-id == 2 {
+                node-2-selected = !node-2-selected;
+            } else if node-id == 3 {
+                node-3-selected = !node-3-selected;
+            }
+        } else {
+            // Normal click: select only this node (clear others)
+            node-1-selected = node-id == 1;
+            node-2-selected = node-id == 2;
+            node-3-selected = node-id == 3;
+        }
+    }
+
+    // Three test nodes
+    node1 := TestNode {
+        x: 50phx;
+        y: 100phx;
+        node-id: 1;
+        selected: node-1-selected;
+        clicked(id, shift) => { select-node(id, shift); }
+    }
+
+    node2 := TestNode {
+        x: 200phx;
+        y: 100phx;
+        node-id: 2;
+        selected: node-2-selected;
+        clicked(id, shift) => { select-node(id, shift); }
+    }
+
+    node3 := TestNode {
+        x: 350phx;
+        y: 100phx;
+        node-id: 3;
+        selected: node-3-selected;
+        clicked(id, shift) => { select-node(id, shift); }
+    }
+
+    // Expose properties for testing
+    out property <bool> test-node-1-selected: node-1-selected;
+    out property <bool> test-node-2-selected: node-2-selected;
+    out property <bool> test-node-3-selected: node-3-selected;
+    out property <int> test-last-clicked-node: last-clicked-node;
+    out property <bool> test-last-click-had-shift: last-click-had-shift;
+    out property <int> test-click-count: click-count;
+
+    // Node position info for targeting
+    out property <length> test-node-1-x: node1.x;
+    out property <length> test-node-1-y: node1.y;
+    out property <length> test-node-2-x: node2.x;
+    out property <length> test-node-2-y: node2.y;
+    out property <length> test-node-3-x: node3.x;
+    out property <length> test-node-3-y: node3.y;
+    out property <length> test-node-width: node1.width;
+    out property <length> test-node-height: node1.height;
+}
+
+/*
+
+```rust
+// Test: Initial state - no nodes selected
+let instance = TestCase::new().unwrap();
+
+assert_eq!(instance.get_test_node_1_selected(), false);
+assert_eq!(instance.get_test_node_2_selected(), false);
+assert_eq!(instance.get_test_node_3_selected(), false);
+assert_eq!(instance.get_test_click_count(), 0);
+```
+
+```rust
+// Test: Click on node 1 to select it
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// Get node 1 center position
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+
+// Move mouse to node 1
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+
+// Click on node 1
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+// Verify callback was invoked
+assert_eq!(instance.get_test_click_count(), 1, "Click callback should be invoked");
+assert_eq!(instance.get_test_last_clicked_node(), 1, "Should report node 1 was clicked");
+assert_eq!(instance.get_test_last_click_had_shift(), false, "Shift should not be held");
+
+// Verify selection state
+assert_eq!(instance.get_test_node_1_selected(), true, "Node 1 should be selected");
+assert_eq!(instance.get_test_node_2_selected(), false, "Node 2 should not be selected");
+assert_eq!(instance.get_test_node_3_selected(), false, "Node 3 should not be selected");
+```
+
+```rust
+// Test: Click on node 2 deselects node 1 and selects node 2
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+// First select node 1
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+assert_eq!(instance.get_test_node_1_selected(), true);
+
+// Now click on node 2
+let node2_center_x = instance.get_test_node_2_x() + instance.get_test_node_width() / 2.0;
+let node2_center_y = instance.get_test_node_2_y() + instance.get_test_node_height() / 2.0;
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node2_center_x, node2_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+
+// Verify selection state
+assert_eq!(instance.get_test_click_count(), 2, "Two clicks total");
+assert_eq!(instance.get_test_last_clicked_node(), 2, "Last clicked was node 2");
+assert_eq!(instance.get_test_node_1_selected(), false, "Node 1 should be deselected");
+assert_eq!(instance.get_test_node_2_selected(), true, "Node 2 should be selected");
+assert_eq!(instance.get_test_node_3_selected(), false, "Node 3 should not be selected");
+```
+
+```rust
+// Test: Shift+click on node 2 extends selection (keeps node 1 selected)
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// First select node 1 with normal click
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+assert_eq!(instance.get_test_node_1_selected(), true, "Node 1 selected after first click");
+
+// Now shift+click on node 2
+let node2_center_x = instance.get_test_node_2_x() + instance.get_test_node_width() / 2.0;
+let node2_center_y = instance.get_test_node_2_y() + instance.get_test_node_height() / 2.0;
+
+// Hold shift key
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), true);
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node2_center_x, node2_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+
+// Release shift key
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), false);
+
+// Verify shift was detected
+assert_eq!(instance.get_test_click_count(), 2, "Two clicks total");
+assert_eq!(instance.get_test_last_clicked_node(), 2, "Last clicked was node 2");
+assert_eq!(instance.get_test_last_click_had_shift(), true, "Shift should be detected");
+
+// Verify selection state - both nodes should be selected
+assert_eq!(instance.get_test_node_1_selected(), true, "Node 1 should remain selected");
+assert_eq!(instance.get_test_node_2_selected(), true, "Node 2 should be selected");
+assert_eq!(instance.get_test_node_3_selected(), false, "Node 3 should not be selected");
+```
+
+```rust
+// Test: Shift+click on already selected node toggles it off
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+// First select node 1
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+assert_eq!(instance.get_test_node_1_selected(), true);
+
+// Shift+click on node 1 again to deselect it
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), true);
+
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), false);
+
+// Verify
+assert_eq!(instance.get_test_click_count(), 2);
+assert_eq!(instance.get_test_last_click_had_shift(), true, "Shift should be detected");
+assert_eq!(instance.get_test_node_1_selected(), false, "Node 1 should be deselected");
+```
+
+```rust
+// Test: Multiple shift+clicks to select all three nodes
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition, platform::Key};
+let instance = TestCase::new().unwrap();
+
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+let node2_center_x = instance.get_test_node_2_x() + instance.get_test_node_width() / 2.0;
+let node2_center_y = instance.get_test_node_2_y() + instance.get_test_node_height() / 2.0;
+let node3_center_x = instance.get_test_node_3_x() + instance.get_test_node_width() / 2.0;
+let node3_center_y = instance.get_test_node_3_y() + instance.get_test_node_height() / 2.0;
+
+// Click node 1 (normal click)
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+// Hold shift and click node 2
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), true);
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node2_center_x, node2_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node2_center_x, node2_center_y),
+    button: PointerEventButton::Left
+});
+
+// Still holding shift, click node 3
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node3_center_x, node3_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node3_center_x, node3_center_y),
+    button: PointerEventButton::Left
+});
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node3_center_x, node3_center_y),
+    button: PointerEventButton::Left
+});
+
+slint_testing::send_keyboard_char(&instance, Key::Shift.into(), false);
+
+// Verify all three nodes are selected
+assert_eq!(instance.get_test_click_count(), 3);
+assert_eq!(instance.get_test_node_1_selected(), true, "Node 1 should be selected");
+assert_eq!(instance.get_test_node_2_selected(), true, "Node 2 should be selected");
+assert_eq!(instance.get_test_node_3_selected(), true, "Node 3 should be selected");
+```
+
+```rust
+// Test: Dragging should not trigger click
+use slint::{platform::WindowEvent, platform::PointerEventButton, LogicalPosition};
+let instance = TestCase::new().unwrap();
+
+let node1_center_x = instance.get_test_node_1_x() + instance.get_test_node_width() / 2.0;
+let node1_center_y = instance.get_test_node_1_y() + instance.get_test_node_height() / 2.0;
+
+// Start pressing on node 1
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x, node1_center_y)
+});
+instance.window().dispatch_event(WindowEvent::PointerPressed {
+    position: LogicalPosition::new(node1_center_x, node1_center_y),
+    button: PointerEventButton::Left
+});
+
+// Move significantly (drag)
+instance.window().dispatch_event(WindowEvent::PointerMoved {
+    position: LogicalPosition::new(node1_center_x + 50.0, node1_center_y + 50.0)
+});
+
+// Release
+instance.window().dispatch_event(WindowEvent::PointerReleased {
+    position: LogicalPosition::new(node1_center_x + 50.0, node1_center_y + 50.0),
+    button: PointerEventButton::Left
+});
+
+// Click callback should NOT be invoked because we dragged
+assert_eq!(instance.get_test_click_count(), 0, "Click should not fire after drag");
+assert_eq!(instance.get_test_node_1_selected(), false, "Node 1 should not be selected");
+```
+
+*/
