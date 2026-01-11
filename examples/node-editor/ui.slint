@@ -8,10 +8,11 @@ component Link inherits Path {
     in property <length> end-y;
     in property <color> link-color: #888888;
     in property <length> line-width: 2px;
+    in property <float> zoom: 1.0;
 
     // Calculate control point offset (horizontal bezier)
     property <length> dx: abs(end-x - start-x);
-    property <length> offset: max(dx * 0.5, 50px);
+    property <length> offset: max(dx * 0.5, 50px * zoom);
 
     // Control points
     property <length> ctrl1-x: start-x + offset;
@@ -45,43 +46,60 @@ component Node inherits Rectangle {
     in property <int> node-id;
     in property <int> input-pin-id: node-id * 10 + 1;   // e.g., node 1 -> pin 11
     in property <int> output-pin-id: node-id * 10 + 2;  // e.g., node 1 -> pin 12
-    in-out property <length> node-x;
-    in-out property <length> node-y;
+
+    // World coordinates (grid space) - these are what get modified by dragging
+    in-out property <length> world-x;
+    in-out property <length> world-y;
+
+    // Transform parameters (from parent)
+    in property <float> zoom: 1.0;
+    in property <length> pan-x: 0px;
+    in property <length> pan-y: 0px;
 
     // Callback when pin drag starts (pin-id, x, y)
     callback pin-drag-started(int, length, length);
 
-    // Pin dimensions
-    property <length> pin-size: 12px;
+    // Pin dimensions (scaled by zoom)
+    property <length> base-pin-size: 12px;
+    property <length> pin-size: base-pin-size * zoom;
     property <length> pin-radius: pin-size / 2;
 
-    // Expose pin positions (center of pin circles, in parent coordinates)
-    out property <length> input-pin-x: node-x + input-pin.x + pin-radius;
-    out property <length> input-pin-y: node-y + input-pin.y + pin-radius;
-    out property <length> output-pin-x: node-x + output-pin.x + pin-radius;
-    out property <length> output-pin-y: node-y + output-pin.y + pin-radius;
+    // Base dimensions
+    property <length> base-width: 150px;
+    property <length> base-height: 80px;
 
-    x: node-x;
-    y: node-y;
-    width: 150px;
-    height: 80px;
+    // Screen position calculated from world position
+    property <length> screen-x: world-x * zoom + pan-x;
+    property <length> screen-y: world-y * zoom + pan-y;
+
+    // Expose pin positions (center of pin circles, in parent coordinates)
+    out property <length> input-pin-x: screen-x + input-pin.x + pin-radius;
+    out property <length> input-pin-y: screen-y + input-pin.y + pin-radius;
+    out property <length> output-pin-x: screen-x + output-pin.x + pin-radius;
+    out property <length> output-pin-y: screen-y + output-pin.y + pin-radius;
+
+    x: screen-x;
+    y: screen-y;
+    width: base-width * zoom;
+    height: base-height * zoom;
     background: #2d2d2d;
-    border-radius: 8px;
-    border-width: 1px;
+    border-radius: 8px * zoom;
+    border-width: 1px * zoom;
     border-color: #555;
 
     // Title bar
     Rectangle {
-        x: 8px;
-        y: 8px;
-        width: parent.width - 16px;
-        height: 24px;
+        x: 8px * zoom;
+        y: 8px * zoom;
+        width: parent.width - 16px * zoom;
+        height: 24px * zoom;
         background: #3d3d3d;
-        border-radius: 4px;
+        border-radius: 4px * zoom;
 
         Text {
             text: title;
             color: white;
+            font-size: 14px * zoom;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -89,8 +107,8 @@ component Node inherits Rectangle {
 
     // Input pin (green) - with drag-to-link support
     input-pin := Rectangle {
-        x: 8px;
-        y: 8px + 24px + 8px;  // below title bar
+        x: 8px * zoom;
+        y: (8px + 24px + 8px) * zoom;  // below title bar
         width: pin-size;
         height: pin-size;
         background: input-pin-touch.has-hover ? #66BB6A : #4CAF50;
@@ -107,8 +125,8 @@ component Node inherits Rectangle {
 
     // Output pin (blue) - with drag-to-link support
     output-pin := Rectangle {
-        x: parent.width - 8px - pin-size;
-        y: 8px + 24px + 8px;  // below title bar
+        x: parent.width - 8px * zoom - pin-size;
+        y: (8px + 24px + 8px) * zoom;  // below title bar
         width: pin-size;
         height: pin-size;
         background: output-pin-touch.has-hover ? #42A5F5 : #2196F3;
@@ -127,8 +145,9 @@ component Node inherits Rectangle {
     TouchArea {
         moved => {
             if self.pressed {
-                node-x += self.mouse-x - self.pressed-x;
-                node-y += self.mouse-y - self.pressed-y;
+                // Convert screen delta to world delta by dividing by zoom
+                world-x += (self.mouse-x - self.pressed-x) / zoom;
+                world-y += (self.mouse-y - self.pressed-y) / zoom;
             }
         }
     }
@@ -164,28 +183,37 @@ export component MainWindow inherits Window {
         overlay.pending-link-y = y;
     }
 
-    // Nodes layer (in the middle)
+    // Nodes layer - world coordinates transformed to screen by Node component
     input-node := Node {
         title: "Input";
         node-id: 1;
-        node-x: 100px + pan-x;
-        node-y: 200px + pan-y;
+        world-x: 100px;
+        world-y: 200px;
+        zoom: zoom;
+        pan-x: pan-x;
+        pan-y: pan-y;
         pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
     }
 
     process-node := Node {
         title: "Process";
         node-id: 2;
-        node-x: 350px + pan-x;
-        node-y: 150px + pan-y;
+        world-x: 350px;
+        world-y: 150px;
+        zoom: zoom;
+        pan-x: pan-x;
+        pan-y: pan-y;
         pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
     }
 
     output-node := Node {
         title: "Output";
         node-id: 3;
-        node-x: 600px + pan-x;
-        node-y: 200px + pan-y;
+        world-x: 600px;
+        world-y: 200px;
+        zoom: zoom;
+        pan-x: pan-x;
+        pan-y: pan-y;
         pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
     }
 
@@ -197,7 +225,8 @@ export component MainWindow inherits Window {
         end-x: process-node.input-pin-x;
         end-y: process-node.input-pin-y;
         link-color: #ff9800;
-        line-width: 3px;
+        line-width: 3px * zoom;
+        zoom: zoom;
     }
 
     // Link from Process's output to Output's input
@@ -207,7 +236,8 @@ export component MainWindow inherits Window {
         end-x: output-node.input-pin-x;
         end-y: output-node.input-pin-y;
         link-color: #2196f3;
-        line-width: 3px;
+        line-width: 3px * zoom;
+        zoom: zoom;
     }
 
     // Overlay layer (on top)
@@ -259,7 +289,8 @@ export component MainWindow inherits Window {
         end-x: overlay.link-end-x;
         end-y: overlay.link-end-y;
         link-color: #ffffff80;
-        line-width: 2px;
+        line-width: 2px * zoom;
+        zoom: zoom;
     }
 
     // Instructions overlay
