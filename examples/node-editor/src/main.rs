@@ -8,8 +8,58 @@ use std::rc::Rc;
 
 slint::include_modules!();
 
+/// Generate SVG path commands for the grid lines
+fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y: f32) -> String {
+    let grid_spacing = 24.0;
+    let effective_spacing = grid_spacing * zoom;
+
+    // Skip if spacing is too small
+    if effective_spacing < 4.0 {
+        return String::new();
+    }
+
+    // Calculate grid offset based on pan (modulo spacing for infinite grid effect)
+    let offset_x = pan_x.rem_euclid(effective_spacing);
+    let offset_y = pan_y.rem_euclid(effective_spacing);
+
+    let mut commands = String::with_capacity(10000);
+
+    // Generate vertical lines
+    let mut x = offset_x;
+    while x < width + effective_spacing {
+        if !commands.is_empty() {
+            commands.push(' ');
+        }
+        commands.push_str(&format!("M {} 0 L {} {}", x, x, height));
+        x += effective_spacing;
+    }
+
+    // Generate horizontal lines
+    let mut y = offset_y;
+    while y < height + effective_spacing {
+        commands.push(' ');
+        commands.push_str(&format!("M 0 {} L {} {}", y, width, y));
+        y += effective_spacing;
+    }
+
+    commands
+}
+
 fn main() {
     let window = MainWindow::new().unwrap();
+
+    // Set initial grid
+    let initial_grid = generate_grid_commands(1200.0, 800.0, 1.0, 0.0, 0.0);
+    window.set_grid_commands(SharedString::from(&initial_grid));
+
+    // Handle grid update requests
+    let window_weak = window.as_weak();
+    window.on_update_grid(move |width, height, zoom, pan_x, pan_y| {
+        if let Some(window) = window_weak.upgrade() {
+            let commands = generate_grid_commands(width, height, zoom, pan_x, pan_y);
+            window.set_grid_commands(SharedString::from(&commands));
+        }
+    });
 
     // Create the node model
     let nodes: Rc<VecModel<NodeData>> = Rc::new(VecModel::from(vec![

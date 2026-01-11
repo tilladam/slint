@@ -345,6 +345,8 @@ pub struct NodeEditorOverlay {
     pub context_menu_requested: Callback<()>,
     /// Callback when box selection completes
     pub selection_changed: Callback<()>,
+    /// Callback when viewport changes (pan or zoom)
+    pub viewport_changed: Callback<()>,
 
     // === Link creation trigger (set properties then call callback) ===
     /// Pin ID to start link from (set by Pin component before calling start-link)
@@ -673,6 +675,9 @@ impl NodeEditorOverlay {
             Self::FIELD_OFFSETS.pan_x.apply_pin(self).set(LogicalLength::new(new_pan.x));
             Self::FIELD_OFFSETS.pan_y.apply_pin(self).set(LogicalLength::new(new_pan.y));
 
+            // Notify viewport change
+            self.viewport_changed.call(&());
+
             return InputEventResult::GrabMouse;
         }
 
@@ -741,6 +746,9 @@ impl NodeEditorOverlay {
             Self::FIELD_OFFSETS.zoom.apply_pin(self).set(new_zoom);
             Self::FIELD_OFFSETS.pan_x.apply_pin(self).set(LogicalLength::new(new_pan_x));
             Self::FIELD_OFFSETS.pan_y.apply_pin(self).set(LogicalLength::new(new_pan_y));
+
+            // Notify viewport change
+            self.viewport_changed.call(&());
 
             return InputEventResult::EventAccepted;
         }

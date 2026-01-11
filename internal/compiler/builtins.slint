@@ -845,6 +845,8 @@ export component NodeEditorOverlay inherits Empty {
     callback context-menu-requested();
     /// Callback when box selection completes
     callback selection-changed();
+    /// Callback when viewport changes (pan or zoom)
+    callback viewport-changed();
 
     //-default_size_binding:expands_to_parent_geometry
 }
