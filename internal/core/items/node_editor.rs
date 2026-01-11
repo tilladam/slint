@@ -651,46 +651,8 @@ impl Item for NodeEditorOverlay {
             }
         }
 
-        // Process any pending reports from pins, nodes, and links
+        // Process any pending reports from pins, nodes, links, and clicks
         self.process_pending_reports();
-
-        // Check if a node is being clicked (for selection)
-        let clicked_node = self.clicked_node_id();
-        if clicked_node > 0 {
-            let shift_held = self.clicked_shift_held();
-
-            let mut state = self.data.state.borrow_mut();
-
-            if shift_held {
-                // Multi-select: toggle the clicked node
-                if state.selected_node_ids.contains(&clicked_node) {
-                    state.selected_node_ids.remove(&clicked_node);
-                } else {
-                    state.selected_node_ids.insert(clicked_node);
-                }
-            } else {
-                // Single select: clear all and select only clicked node
-                state.selected_node_ids.clear();
-                state.selected_node_ids.insert(clicked_node);
-            }
-
-            // Update the current selected IDs output property
-            let ids_str = state
-                .selected_node_ids
-                .iter()
-                .map(|id| alloc::format!("{}", id))
-                .collect::<alloc::vec::Vec<_>>()
-                .join(",");
-            drop(state);
-
-            Self::FIELD_OFFSETS
-                .current_selected_ids
-                .apply_pin(self)
-                .set(SharedString::from(&ids_str));
-
-            // Clear the click trigger
-            Self::FIELD_OFFSETS.clicked_node_id.apply_pin(self).set(0);
-        }
 
         // Check if a Pin component is requesting link completion (pin has mouse capture)
         if self.complete_link_creation() {
@@ -1080,6 +1042,47 @@ impl NodeEditorOverlay {
             if links_added {
                 self.regenerate_link_positions();
             }
+        }
+
+        // Check if a node is being clicked (for selection)
+        let clicked_node = self.clicked_node_id();
+        if clicked_node > 0 {
+            let shift_held = self.clicked_shift_held();
+
+            let mut state = self.data.state.borrow_mut();
+
+            if shift_held {
+                // Multi-select: toggle the clicked node
+                if state.selected_node_ids.contains(&clicked_node) {
+                    state.selected_node_ids.remove(&clicked_node);
+                } else {
+                    state.selected_node_ids.insert(clicked_node);
+                }
+            } else {
+                // Single select: clear all and select only clicked node
+                state.selected_node_ids.clear();
+                state.selected_node_ids.insert(clicked_node);
+            }
+
+            // Update the current selected IDs output property
+            let ids_str = state
+                .selected_node_ids
+                .iter()
+                .map(|id| alloc::format!("{}", id))
+                .collect::<alloc::vec::Vec<_>>()
+                .join(",");
+            drop(state);
+
+            Self::FIELD_OFFSETS
+                .current_selected_ids
+                .apply_pin(self)
+                .set(SharedString::from(&ids_str));
+
+            // Clear the click trigger
+            Self::FIELD_OFFSETS.clicked_node_id.apply_pin(self).set(0);
+
+            // Notify that selection changed
+            self.selection_changed.call(&());
         }
     }
 

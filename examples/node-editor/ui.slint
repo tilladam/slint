@@ -116,7 +116,7 @@ component Node inherits Rectangle {
     callback clicked(int, bool);
 
     // Callbacks for node dragging (for multi-select support)
-    callback drag-started(int);
+    callback drag-started(int, bool);  // node-id, already-selected
     callback drag-moved(int, length, length);  // node-id, offset-x, offset-y
     callback drag-ended(int, length, length);  // node-id, delta-x, delta-y
 
@@ -206,7 +206,7 @@ component Node inherits Rectangle {
                        self.mouse-y - self.pressed-y > drag-threshold ||
                        self.pressed-y - self.mouse-y > drag-threshold {
                         was-dragged = true;
-                        root.drag-started(node-id);
+                        root.drag-started(node-id, selected);
                     }
                 }
 
@@ -733,7 +733,15 @@ export component MainWindow inherits Window {
             overlay.clicked-shift-held = shift;
             root.selection-changed(overlay.current-selected-ids);
         }
-        drag-started(id) => {
+        drag-started(id, already-selected) => {
+            // Only change selection if the node is not already selected
+            // This preserves multi-selection when dragging a selected node
+            if !already-selected {
+                overlay.clicked-node-id = id;
+                overlay.clicked-shift-held = false;
+                root.selection-changed(overlay.current-selected-ids);
+            }
+
             is-dragging = true;
             visual-drag-offset-x = 0px;
             visual-drag-offset-y = 0px;
