@@ -321,6 +321,20 @@ pub struct NodeEditorOverlay {
     /// Y coordinate where context menu was requested
     pub context_menu_y: Property<LogicalLength>,
 
+    // === Active link creation state (for Slint rendering) ===
+    /// Whether a link is currently being created
+    pub is_creating_link: Property<bool>,
+    /// X coordinate of link start (where drag started)
+    pub link_start_x: Property<LogicalLength>,
+    /// Y coordinate of link start
+    pub link_start_y: Property<LogicalLength>,
+    /// Current X coordinate of link end (mouse position)
+    pub link_end_x: Property<LogicalLength>,
+    /// Current Y coordinate of link end (mouse position)
+    pub link_end_y: Property<LogicalLength>,
+    /// ID of the pin from which link creation started
+    pub link_start_pin_id: Property<i32>,
+
     /// Callback when a link is created (use properties to get event data)
     pub link_created: Callback<()>,
     /// Callback when a link is dropped on empty space (use properties to get event data)
@@ -331,6 +345,16 @@ pub struct NodeEditorOverlay {
     pub context_menu_requested: Callback<()>,
     /// Callback when box selection completes
     pub selection_changed: Callback<()>,
+
+    // === Link creation trigger (set properties then call callback) ===
+    /// Pin ID to start link from (set by Pin component before calling start-link)
+    pub pending_link_pin_id: Property<i32>,
+    /// X position to start link from (set by Pin component before calling start-link)
+    pub pending_link_x: Property<LogicalLength>,
+    /// Y position to start link from (set by Pin component before calling start-link)
+    pub pending_link_y: Property<LogicalLength>,
+    /// Callback to start link creation - set pending_link_* properties first
+    pub start_link: Callback<()>,
 
     /// Internal state
     data: NodeEditorDataBox,
@@ -356,6 +380,34 @@ impl Item for NodeEditorOverlay {
         _window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
     ) -> InputEventFilterResult {
+        // Check if a Pin component wants to start link creation
+        // (Pin sets pending_link_pin_id > 0 then we start link creation)
+        let pending_pin = self.pending_link_pin_id();
+        if pending_pin > 0 {
+            let mut state = self.data.state.borrow_mut();
+            if !state.is_creating_link {
+                // Start link creation from the pending properties
+                let start_x = self.pending_link_x().get();
+                let start_y = self.pending_link_y().get();
+
+                state.is_creating_link = true;
+                state.link_start_pin = pending_pin;
+                state.link_current_pos = LogicalPoint::new(start_x, start_y);
+                drop(state);
+
+                // Update link creation properties for Slint rendering
+                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(true);
+                Self::FIELD_OFFSETS.link_start_pin_id.apply_pin(self).set(pending_pin);
+                Self::FIELD_OFFSETS.link_start_x.apply_pin(self).set(LogicalLength::new(start_x));
+                Self::FIELD_OFFSETS.link_start_y.apply_pin(self).set(LogicalLength::new(start_y));
+                Self::FIELD_OFFSETS.link_end_x.apply_pin(self).set(LogicalLength::new(start_x));
+                Self::FIELD_OFFSETS.link_end_y.apply_pin(self).set(LogicalLength::new(start_y));
+
+                // Clear the pending trigger
+                Self::FIELD_OFFSETS.pending_link_pin_id.apply_pin(self).set(0);
+            }
+        }
+
         // The overlay is on top, so we need to decide whether to handle the event
         // or pass it through to the nodes below
         let state = self.data.state.borrow();
@@ -424,6 +476,9 @@ impl Item for NodeEditorOverlay {
                 state.is_creating_link = false;
                 state.link_start_pin = -1;
                 drop(state);
+
+                // Clear link creation properties
+                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
                 self.link_cancelled.call(&());
                 return KeyEventResult::EventAccepted;
             }
@@ -566,6 +621,9 @@ impl NodeEditorOverlay {
                     state.is_creating_link = false;
                     state.link_start_pin = -1;
                     drop(state);
+
+                    // Clear link creation visual
+                    Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
                     self.link_dropped.call(&());
                     return InputEventResult::EventAccepted;
                 }
@@ -615,6 +673,12 @@ impl NodeEditorOverlay {
 
         if state.is_creating_link {
             state.link_current_pos = position;
+            drop(state);
+
+            // Update link end position for Slint rendering
+            Self::FIELD_OFFSETS.link_end_x.apply_pin(self).set(LogicalLength::new(position.x));
+            Self::FIELD_OFFSETS.link_end_y.apply_pin(self).set(LogicalLength::new(position.y));
+
             return InputEventResult::GrabMouse;
         }
 
@@ -685,6 +749,7 @@ impl NodeEditorOverlay {
             return InputEventResult::EventAccepted;
         }
         if was_creating_link {
+            Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
             self.link_cancelled.call(&());
             return InputEventResult::EventAccepted;
         }

@@ -39,12 +39,17 @@ component Link inherits Path {
               " " + end-x / 1px + " " + end-y / 1px;
 }
 
-// A basic node component
+// A basic node component with interactive pins
 component Node inherits Rectangle {
     in property <string> title: "Node";
     in property <int> node-id;
+    in property <int> input-pin-id: node-id * 10 + 1;   // e.g., node 1 -> pin 11
+    in property <int> output-pin-id: node-id * 10 + 2;  // e.g., node 1 -> pin 12
     in-out property <length> node-x;
     in-out property <length> node-y;
+
+    // Callback when pin drag starts (pin-id, x, y)
+    callback pin-drag-started(int, length, length);
 
     // Pin dimensions
     property <length> pin-size: 12px;
@@ -82,27 +87,43 @@ component Node inherits Rectangle {
         }
     }
 
-    // Input pin (green) - positioned explicitly
+    // Input pin (green) - with drag-to-link support
     input-pin := Rectangle {
         x: 8px;
         y: 8px + 24px + 8px;  // below title bar
         width: pin-size;
         height: pin-size;
-        background: #4CAF50;
+        background: input-pin-touch.has-hover ? #66BB6A : #4CAF50;
         border-radius: pin-radius;
+
+        input-pin-touch := TouchArea {
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    pin-drag-started(input-pin-id, input-pin-x, input-pin-y);
+                }
+            }
+        }
     }
 
-    // Output pin (blue) - positioned explicitly
+    // Output pin (blue) - with drag-to-link support
     output-pin := Rectangle {
         x: parent.width - 8px - pin-size;
         y: 8px + 24px + 8px;  // below title bar
         width: pin-size;
         height: pin-size;
-        background: #2196F3;
+        background: output-pin-touch.has-hover ? #42A5F5 : #2196F3;
         border-radius: pin-radius;
+
+        output-pin-touch := TouchArea {
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    pin-drag-started(output-pin-id, output-pin-x, output-pin-y);
+                }
+            }
+        }
     }
 
-    // Drag handling
+    // Drag handling for the node body
     TouchArea {
         moved => {
             if self.pressed {
@@ -136,12 +157,20 @@ export component MainWindow inherits Window {
         background-color: #1a1a1a;
     }
 
+    // Helper function to start link creation
+    function start-link-creation(pin-id: int, x: length, y: length) {
+        overlay.pending-link-pin-id = pin-id;
+        overlay.pending-link-x = x;
+        overlay.pending-link-y = y;
+    }
+
     // Nodes layer (in the middle)
     input-node := Node {
         title: "Input";
         node-id: 1;
         node-x: 100px + pan-x;
         node-y: 200px + pan-y;
+        pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
     }
 
     process-node := Node {
@@ -149,6 +178,7 @@ export component MainWindow inherits Window {
         node-id: 2;
         node-x: 350px + pan-x;
         node-y: 150px + pan-y;
+        pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
     }
 
     output-node := Node {
@@ -156,6 +186,7 @@ export component MainWindow inherits Window {
         node-id: 3;
         node-x: 600px + pan-x;
         node-y: 200px + pan-y;
+        pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
     }
 
     // Links layer (between nodes and overlay)
@@ -220,12 +251,23 @@ export component MainWindow inherits Window {
         border-width: 1px;
     }
 
+    // Active link preview (rendered during link creation)
+    Link {
+        visible: overlay.is-creating-link;
+        start-x: overlay.link-start-x;
+        start-y: overlay.link-start-y;
+        end-x: overlay.link-end-x;
+        end-y: overlay.link-end-y;
+        link-color: #ffffff80;
+        line-width: 2px;
+    }
+
     // Instructions overlay
     Rectangle {
         x: 10px;
         y: 10px;
         width: 280px;
-        height: 120px;
+        height: 135px;
         background: #00000080;
         border-radius: 8px;
 
@@ -237,6 +279,7 @@ export component MainWindow inherits Window {
             Text { text: "Middle mouse: Pan"; color: #ccc; font-size: 12px; }
             Text { text: "Scroll wheel: Zoom"; color: #ccc; font-size: 12px; }
             Text { text: "Drag nodes to move them"; color: #ccc; font-size: 12px; }
+            Text { text: "Drag from pin: Create link"; color: #ccc; font-size: 12px; }
             Text { text: "Shift+drag: Box select"; color: #ccc; font-size: 12px; }
         }
     }

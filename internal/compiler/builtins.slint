@@ -811,14 +811,35 @@ export component NodeEditorOverlay inherits Empty {
     /// Y coordinate where context menu was requested
     out property <length> context-menu-y;
 
+    // === Active link creation state (for Slint rendering) ===
+    /// Whether a link is currently being created
+    out property <bool> is-creating-link: false;
+    /// X coordinate of link start (where drag started)
+    out property <length> link-start-x;
+    /// Y coordinate of link start
+    out property <length> link-start-y;
+    /// Current X coordinate of link end (mouse position)
+    out property <length> link-end-x;
+    /// Current Y coordinate of link end (mouse position)
+    out property <length> link-end-y;
+    /// ID of the pin from which link creation started
+    out property <int> link-start-pin-id: -1;
+
+    // === Link creation trigger (set properties then call callback) ===
+    /// Pin ID to start link from (set before calling start-link)
+    in property <int> pending-link-pin-id;
+    /// X position to start link from (set before calling start-link)
+    in property <length> pending-link-x;
+    /// Y position to start link from (set before calling start-link)
+    in property <length> pending-link-y;
+    /// Callback to start link creation - set pending-link-* properties first
+    callback start-link();
+
     /// Callback when a link is created between two pins
-    /// Note: Use properties to get event data (TODO: add proper callback args)
     callback link-created();
     /// Callback when a link is dropped on empty space (can be used to create nodes)
-    /// Note: Use properties to get event data (TODO: add proper callback args)
     callback link-dropped();
     /// Callback when link creation is cancelled
-    /// Note: Use properties to get event data (TODO: add proper callback args)
     callback link-cancelled();
     /// Callback for context menu
     callback context-menu-requested();
