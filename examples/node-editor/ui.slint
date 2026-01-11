@@ -1,5 +1,14 @@
 // Simple Node Editor Example
 
+// Data structure for nodes - exported to Rust
+export struct NodeData {
+    id: int,
+    title: string,
+    world-x: float,
+    world-y: float,
+    selected: bool,
+}
+
 // A bezier link between two pins
 component Link inherits Path {
     in property <length> start-x;
@@ -50,14 +59,18 @@ component Node inherits Rectangle {
     // Selection state
     in property <bool> selected: false;
 
-    // World coordinates (grid space) - these are what get modified by dragging
-    in-out property <length> world-x;
-    in-out property <length> world-y;
+    // World coordinates (grid space) - base position from model
+    in property <length> world-x;
+    in property <length> world-y;
 
     // Transform parameters (from parent)
     in property <float> zoom: 1.0;
     in property <length> pan-x: 0px;
     in property <length> pan-y: 0px;
+
+    // External drag offset (for multi-select: all selected nodes get same offset)
+    in property <length> drag-offset-x: 0px;
+    in property <length> drag-offset-y: 0px;
 
     // Callbacks for pin drag-to-link (pin-id, x, y)
     callback pin-drag-started(int, length, length);
@@ -66,6 +79,11 @@ component Node inherits Rectangle {
 
     // Callback when node is clicked (for selection) - passes node-id and shift-held
     callback clicked(int, bool);
+
+    // Callbacks for node dragging (for multi-select support)
+    callback drag-started(int);
+    callback drag-moved(int, length, length);  // node-id, offset-x, offset-y
+    callback drag-ended(int, length, length);  // node-id, delta-x, delta-y
 
     // Pin dimensions (scaled by zoom)
     property <length> base-pin-size: 12px;
@@ -76,9 +94,9 @@ component Node inherits Rectangle {
     property <length> base-width: 150px;
     property <length> base-height: 80px;
 
-    // Screen position calculated from world position
-    property <length> screen-x: world-x * zoom + pan-x;
-    property <length> screen-y: world-y * zoom + pan-y;
+    // Screen position calculated from world position + drag offset
+    property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
+    property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
 
     // Expose pin positions (center of pin circles, in parent coordinates)
     out property <length> input-pin-x: screen-x + input-pin.x + pin-radius;
@@ -118,54 +136,41 @@ component Node inherits Rectangle {
         property <bool> shift-held: false;
         property <bool> was-dragged: false;
         property <length> drag-threshold: 5px;
-        // Store absolute screen position of mouse at press time
-        property <length> press-abs-x;
-        property <length> press-abs-y;
-        // Store original world position when drag starts
-        property <length> drag-start-world-x;
-        property <length> drag-start-world-y;
 
         pointer-event(event) => {
             if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                 shift-held = event.modifiers.shift;
                 was-dragged = false;
-                // Capture absolute screen position of mouse (node position + relative mouse pos)
-                press-abs-x = screen-x + self.mouse-x;
-                press-abs-y = screen-y + self.mouse-y;
-                // Remember where the node was when we started
-                drag-start-world-x = world-x;
-                drag-start-world-y = world-y;
             }
             if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
-                // Only trigger click if we didn't drag
                 if !was-dragged {
                     root.clicked(node-id, shift-held);
+                } else {
+                    // Drag ended - report final delta (parent will reset offset)
+                    root.drag-ended(node-id,
+                        (self.mouse-x - self.pressed-x) / zoom,
+                        (self.mouse-y - self.pressed-y) / zoom);
                 }
             }
         }
         moved => {
             if self.pressed {
-                // Calculate current absolute mouse position
-                // (node screen pos + relative mouse pos = absolute screen pos)
-                // Note: screen-x/y change as we drag, but screen-x + mouse-x stays constant
-                // for a given screen mouse position
-
-                // Check threshold using relative coords (these don't have feedback issues)
+                // Check threshold
                 if !was-dragged {
                     if self.mouse-x - self.pressed-x > drag-threshold ||
                        self.pressed-x - self.mouse-x > drag-threshold ||
                        self.mouse-y - self.pressed-y > drag-threshold ||
                        self.pressed-y - self.mouse-y > drag-threshold {
                         was-dragged = true;
+                        root.drag-started(node-id);
                     }
                 }
 
-                // If dragging, compute delta using absolute screen coordinates
+                // Report offset to parent (mouse-x - pressed-x is stable)
                 if was-dragged {
-                    // Current absolute mouse position
-                    // screen-x + mouse-x gives absolute position regardless of node movement
-                    world-x = drag-start-world-x + (screen-x + self.mouse-x - press-abs-x) / zoom;
-                    world-y = drag-start-world-y + (screen-y + self.mouse-y - press-abs-y) / zoom;
+                    root.drag-moved(node-id,
+                        (self.mouse-x - self.pressed-x) / zoom,
+                        (self.mouse-y - self.pressed-y) / zoom);
                 }
             }
         }
@@ -242,10 +247,73 @@ export component MainWindow inherits Window {
     height: 800px;
     background: #1a1a1a;
 
+    // Node model - owned by Rust
+    in property <[NodeData]> nodes;
+
+    // Callbacks to Rust for state changes
+    callback select-node(int, bool);  // node-id, shift-held
+    callback commit-drag(float, float);  // delta-world-x, delta-world-y - called on drag end
+
+    // Visual drag offset (tracked in Slint, not affecting model until drag ends)
+    property <bool> is-dragging: false;
+    property <length> visual-drag-offset-x: 0px;
+    property <length> visual-drag-offset-y: 0px;
+
     // Shared pan state
     property <length> pan-x: 0px;
     property <length> pan-y: 0px;
     property <float> zoom: 1.0;
+
+    // Node dimensions (must match Node component)
+    property <length> node-base-width: 150px;
+    property <length> node-base-height: 80px;
+    property <length> base-pin-size: 12px;
+    property <length> pin-size: base-pin-size * zoom;
+    property <length> pin-radius: pin-size / 2;
+
+    // Compute pin positions from node world coordinates
+    // Input pin: left side, below title bar
+    pure function compute-input-pin-x(world-x: float) -> length {
+        return world-x * 1px * zoom + pan-x + 8px * zoom + pin-radius;
+    }
+    pure function compute-input-pin-y(world-y: float) -> length {
+        return world-y * 1px * zoom + pan-y + (8px + 24px + 8px) * zoom + pin-radius;
+    }
+    // Output pin: right side, below title bar
+    pure function compute-output-pin-x(world-x: float) -> length {
+        return world-x * 1px * zoom + pan-x + node-base-width * zoom - 8px * zoom - pin-size + pin-radius;
+    }
+    pure function compute-output-pin-y(world-y: float) -> length {
+        return world-y * 1px * zoom + pan-y + (8px + 24px + 8px) * zoom + pin-radius;
+    }
+
+    // Get node world position from model by ID (includes visual drag offset if dragging)
+    pure function get-node-world-x(node-id: int) -> float {
+        // Note: Slint doesn't support array indexing by computed index,
+        // so we use fixed positions for the 3-node example
+        if node-id == 1 && nodes.length > 0 {
+            return nodes[0].world-x + (nodes[0].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if node-id == 2 && nodes.length > 1 {
+            return nodes[1].world-x + (nodes[1].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        if node-id == 3 && nodes.length > 2 {
+            return nodes[2].world-x + (nodes[2].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
+        }
+        return 0;
+    }
+    pure function get-node-world-y(node-id: int) -> float {
+        if node-id == 1 && nodes.length > 0 {
+            return nodes[0].world-y + (nodes[0].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if node-id == 2 && nodes.length > 1 {
+            return nodes[1].world-y + (nodes[1].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        if node-id == 3 && nodes.length > 2 {
+            return nodes[2].world-y + (nodes[2].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
+        }
+        return 0;
+    }
 
     // The three-layer node editor structure
     NodeEditorBackground {
@@ -259,48 +327,9 @@ export component MainWindow inherits Window {
         background-color: #1a1a1a;
     }
 
-    // Node selection state (individual booleans for multi-select)
-    property <bool> node-1-selected: false;
-    property <bool> node-2-selected: false;
-    property <bool> node-3-selected: false;
-
-    function select-node(node-id: int, shift-held: bool) {
-        if shift-held {
-            // Shift+click: toggle this node without affecting others
-            if node-id == 1 {
-                node-1-selected = !node-1-selected;
-            } else if node-id == 2 {
-                node-2-selected = !node-2-selected;
-            } else if node-id == 3 {
-                node-3-selected = !node-3-selected;
-            }
-        } else {
-            // Normal click: select only this node (clear others)
-            node-1-selected = node-id == 1;
-            node-2-selected = node-id == 2;
-            node-3-selected = node-id == 3;
-        }
-    }
-
-    // Check if a node intersects with the current selection box
-    pure function node-in-selection(node-x: length, node-y: length, node-w: length, node-h: length) -> bool {
-        // Two rectangles intersect if they overlap on both axes
-        return node-x < overlay.selection-x + overlay.selection-width &&
-               node-x + node-w > overlay.selection-x &&
-               node-y < overlay.selection-y + overlay.selection-height &&
-               node-y + node-h > overlay.selection-y;
-    }
-
-    // Update selection based on box select - selects ALL nodes in box
-    function update-box-selection() {
-        // Only process if selection box has meaningful size
-        if overlay.selection-width > 5px && overlay.selection-height > 5px {
-            // Select all nodes that intersect with the selection box
-            node-1-selected = node-in-selection(input-node.x, input-node.y, input-node.width, input-node.height);
-            node-2-selected = node-in-selection(process-node.x, process-node.y, process-node.width, process-node.height);
-            node-3-selected = node-in-selection(output-node.x, output-node.y, output-node.width, output-node.height);
-        }
-    }
+    // Callback for box selection - Rust handles the actual selection
+    // Parameters: sel-x, sel-y, sel-width, sel-height, zoom, pan-x, pan-y
+    callback box-select(length, length, length, length, float, length, length);
 
     // Link creation state managed directly in Slint
     property <bool> link-active: false;
@@ -343,39 +372,48 @@ export component MainWindow inherits Window {
         return mod(pin-id, 10) == 2;
     }
 
-    // Helper: get pin position by id
+    // Helper: get pin position by id (computed from model data)
     pure function get-pin-x(pin-id: int) -> length {
-        // Node 1 pins: 11 (input), 12 (output)
-        if pin-id == 11 { return input-node.input-pin-x; }
-        if pin-id == 12 { return input-node.output-pin-x; }
-        // Node 2 pins: 21 (input), 22 (output)
-        if pin-id == 21 { return process-node.input-pin-x; }
-        if pin-id == 22 { return process-node.output-pin-x; }
-        // Node 3 pins: 31 (input), 32 (output)
-        if pin-id == 31 { return output-node.input-pin-x; }
-        if pin-id == 32 { return output-node.output-pin-x; }
+        // Pin ID format: node_id * 10 + pin_type (1=input, 2=output)
+        // Extract node-id and pin type
+        if mod(pin-id, 10) == 1 {
+            // Input pin
+            if pin-id == 11 { return compute-input-pin-x(get-node-world-x(1)); }
+            if pin-id == 21 { return compute-input-pin-x(get-node-world-x(2)); }
+            if pin-id == 31 { return compute-input-pin-x(get-node-world-x(3)); }
+        } else {
+            // Output pin
+            if pin-id == 12 { return compute-output-pin-x(get-node-world-x(1)); }
+            if pin-id == 22 { return compute-output-pin-x(get-node-world-x(2)); }
+            if pin-id == 32 { return compute-output-pin-x(get-node-world-x(3)); }
+        }
         return 0px;
     }
 
     pure function get-pin-y(pin-id: int) -> length {
-        if pin-id == 11 { return input-node.input-pin-y; }
-        if pin-id == 12 { return input-node.output-pin-y; }
-        if pin-id == 21 { return process-node.input-pin-y; }
-        if pin-id == 22 { return process-node.output-pin-y; }
-        if pin-id == 31 { return output-node.input-pin-y; }
-        if pin-id == 32 { return output-node.output-pin-y; }
+        if mod(pin-id, 10) == 1 {
+            // Input pin
+            if pin-id == 11 { return compute-input-pin-y(get-node-world-y(1)); }
+            if pin-id == 21 { return compute-input-pin-y(get-node-world-y(2)); }
+            if pin-id == 31 { return compute-input-pin-y(get-node-world-y(3)); }
+        } else {
+            // Output pin
+            if pin-id == 12 { return compute-output-pin-y(get-node-world-y(1)); }
+            if pin-id == 22 { return compute-output-pin-y(get-node-world-y(2)); }
+            if pin-id == 32 { return compute-output-pin-y(get-node-world-y(3)); }
+        }
         return 0px;
     }
 
-    // Find which pin (if any) is at position
+    // Find which pin (if any) is at position (uses computed positions from model)
     pure function find-pin-at(x: length, y: length) -> int {
-        // Check all pins
-        if point-near-pin(x, y, input-node.input-pin-x, input-node.input-pin-y, 11) != 0 { return 11; }
-        if point-near-pin(x, y, input-node.output-pin-x, input-node.output-pin-y, 12) != 0 { return 12; }
-        if point-near-pin(x, y, process-node.input-pin-x, process-node.input-pin-y, 21) != 0 { return 21; }
-        if point-near-pin(x, y, process-node.output-pin-x, process-node.output-pin-y, 22) != 0 { return 22; }
-        if point-near-pin(x, y, output-node.input-pin-x, output-node.input-pin-y, 31) != 0 { return 31; }
-        if point-near-pin(x, y, output-node.output-pin-x, output-node.output-pin-y, 32) != 0 { return 32; }
+        // Check all pins using computed positions
+        if point-near-pin(x, y, get-pin-x(11), get-pin-y(11), 11) != 0 { return 11; }
+        if point-near-pin(x, y, get-pin-x(12), get-pin-y(12), 12) != 0 { return 12; }
+        if point-near-pin(x, y, get-pin-x(21), get-pin-y(21), 21) != 0 { return 21; }
+        if point-near-pin(x, y, get-pin-x(22), get-pin-y(22), 22) != 0 { return 22; }
+        if point-near-pin(x, y, get-pin-x(31), get-pin-y(31), 31) != 0 { return 31; }
+        if point-near-pin(x, y, get-pin-x(32), get-pin-y(32), 32) != 0 { return 32; }
         return 0;
     }
 
@@ -441,70 +479,61 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Nodes layer - world coordinates transformed to screen by Node component
-    input-node := Node {
-        title: "Input";
-        node-id: 1;
-        selected: node-1-selected;
-        world-x: 100px;
-        world-y: 200px;
+    // Nodes layer - iterate over model from Rust
+    // During drag, apply visual offset. Model is only updated on drag-end.
+    for node-data in nodes: Node {
+        title: node-data.title;
+        node-id: node-data.id;
+        selected: node-data.selected;
+        world-x: node-data.world-x * 1px;
+        world-y: node-data.world-y * 1px;
+        // Pass drag offset to selected nodes
+        drag-offset-x: node-data.selected && is-dragging ? visual-drag-offset-x : 0px;
+        drag-offset-y: node-data.selected && is-dragging ? visual-drag-offset-y : 0px;
         zoom: zoom;
         pan-x: pan-x;
         pan-y: pan-y;
-        clicked(id, shift) => { select-node(id, shift); }
-        pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
-        pin-drag-moved(pin-id, x, y) => { update-link-position(pin-id, x, y); }
-        pin-drag-ended(pin-id, x, y) => { end-link-creation(pin-id, x, y); }
-    }
-
-    process-node := Node {
-        title: "Process";
-        node-id: 2;
-        selected: node-2-selected;
-        world-x: 350px;
-        world-y: 150px;
-        zoom: zoom;
-        pan-x: pan-x;
-        pan-y: pan-y;
-        clicked(id, shift) => { select-node(id, shift); }
-        pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
-        pin-drag-moved(pin-id, x, y) => { update-link-position(pin-id, x, y); }
-        pin-drag-ended(pin-id, x, y) => { end-link-creation(pin-id, x, y); }
-    }
-
-    output-node := Node {
-        title: "Output";
-        node-id: 3;
-        selected: node-3-selected;
-        world-x: 600px;
-        world-y: 200px;
-        zoom: zoom;
-        pan-x: pan-x;
-        pan-y: pan-y;
-        clicked(id, shift) => { select-node(id, shift); }
+        clicked(id, shift) => { root.select-node(id, shift); }
+        drag-started(id) => {
+            is-dragging = true;
+            visual-drag-offset-x = 0px;
+            visual-drag-offset-y = 0px;
+        }
+        drag-moved(id, offset-x, offset-y) => {
+            // Update visual offset for all selected nodes
+            visual-drag-offset-x = offset-x;
+            visual-drag-offset-y = offset-y;
+        }
+        drag-ended(id, delta-x, delta-y) => {
+            // Commit to model
+            root.commit-drag(delta-x / 1px, delta-y / 1px);
+            is-dragging = false;
+            visual-drag-offset-x = 0px;
+            visual-drag-offset-y = 0px;
+        }
         pin-drag-started(pin-id, x, y) => { start-link-creation(pin-id, x, y); }
         pin-drag-moved(pin-id, x, y) => { update-link-position(pin-id, x, y); }
         pin-drag-ended(pin-id, x, y) => { end-link-creation(pin-id, x, y); }
     }
 
     // Links layer (between nodes and overlay)
-    // Link from Input's output to Process's input
+    // Link from Input's output (pin 12) to Process's input (pin 21)
     Link {
-        start-x: input-node.output-pin-x;
-        start-y: input-node.output-pin-y;
-        end-x: process-node.input-pin-x;
-        end-y: process-node.input-pin-y;
+        start-x: get-pin-x(12);
+        start-y: get-pin-y(12);
+        end-x: get-pin-x(21);
+        end-y: get-pin-y(21);
         link-color: #ff9800;
         line-width: 3px * zoom;
         zoom: zoom;
     }
 
-    // Link from Process's output to Output's input
+    // Link from Process's output (pin 22) to Output's input (pin 31)
     Link {
-        start-x: process-node.output-pin-x;
-        start-y: process-node.output-pin-y;
-        end-x: output-node.input-pin-x;
-        end-y: output-node.input-pin-y;
+        start-x: get-pin-x(22);
+        start-y: get-pin-y(22);
+        end-x: get-pin-x(31);
+        end-y: get-pin-y(31);
         link-color: #2196f3;
         line-width: 3px * zoom;
         zoom: zoom;
@@ -569,7 +598,12 @@ export component MainWindow inherits Window {
         }
 
         selection-changed => {
-            update-box-selection();
+            // Send box selection info to Rust for processing
+            if overlay.selection-width > 5px && overlay.selection-height > 5px {
+                root.box-select(overlay.selection-x, overlay.selection-y,
+                               overlay.selection-width, overlay.selection-height,
+                               zoom, pan-x, pan-y);
+            }
         }
     }
 
