@@ -3,14 +3,27 @@
 
 //! Node Editor items for building visual node graph editors.
 //!
-//! This module provides two native items that work together:
-//! - `NodeEditorBackground`: Renders grid and static links (bezier curves)
-//! - `NodeEditorOverlay`: Renders selection box, active link preview, handles input
+//! This module provides two native items that work together in a three-layer architecture:
 //!
-//! These are designed to be used in a three-layer architecture:
-//! 1. NodeEditorBackground (bottom layer)
-//! 2. Node children (Slint components, middle layer)
-//! 3. NodeEditorOverlay (top layer)
+//! 1. **NodeEditorBackground** (bottom layer)
+//!    - Provides properties for viewport state (pan, zoom)
+//!    - Grid rendering is the application's responsibility via Slint Path component
+//!    - Links are rendered using Slint Path components placed in this layer
+//!
+//! 2. **Node children** (middle layer, Slint components)
+//!    - Application defines node components with custom content
+//!    - Nodes handle their own drag behavior and report selection to overlay
+//!
+//! 3. **NodeEditorOverlay** (top layer)
+//!    - Handles input: pan (middle-mouse), zoom (scroll), box selection (ctrl+drag)
+//!    - Exposes state properties for Slint to render overlays:
+//!      - Box selection: `is-selecting`, `selection-x/y/width/height`
+//!      - Link preview: `is-creating-link`, `link-start-x/y`, `link-end-x/y`
+//!    - Fires callbacks: `viewport-changed`, `selection-changed`, `delete-selected`, etc.
+//!
+//! **Rendering Philosophy**: The native items handle input and state management.
+//! Visual rendering (grid, links, selection box, link preview) is done using
+//! Slint components (Rectangle, Path) that bind to the overlay's properties.
 
 use super::{
     Item, ItemConsts, ItemRc, ItemRendererRef, KeyEventResult, RenderingResult,
@@ -30,6 +43,7 @@ use crate::rtti::*;
 use crate::window::{WindowAdapter, WindowInner};
 use crate::{Callback, Coord, Property};
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
 use const_field_offset::FieldOffsets;
 use core::cell::RefCell;
@@ -61,6 +75,8 @@ struct NodeEditorState {
     box_select_start: LogicalPoint,
     /// Current position of box selection
     box_select_current: LogicalPoint,
+    /// Known pin positions for hit-testing (pin_id -> screen position)
+    pin_positions: BTreeMap<i32, LogicalPoint>,
 }
 
 /// Wraps the internal state properly with RefCell
@@ -104,7 +120,11 @@ impl core::ops::Deref for NodeEditorDataBox {
 // ============================================================================
 
 /// The background layer of a node editor.
-/// Renders the grid and static (established) links.
+///
+/// This provides viewport properties (pan, zoom) and serves as the container
+/// for grid and link rendering via Slint Path components. The grid and links
+/// are NOT rendered natively - applications should use Path components bound
+/// to callbacks that generate SVG path data (see example's `generate_grid_commands`).
 #[repr(C)]
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
@@ -185,23 +205,16 @@ impl Item for NodeEditorBackground {
 
     fn render(
         self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
+        _backend: &mut ItemRendererRef,
         _self_rc: &ItemRc,
-        size: LogicalSize,
+        _size: LogicalSize,
     ) -> RenderingResult {
-        // Draw background
-        let background = self.background_color();
-        if !background.is_transparent() {
-            // We'll use the item renderer to draw rectangles
-            // For now, just continue rendering children
-        }
-
-        // Draw grid
-        self.render_grid(backend, size);
-
-        // Note: Links are rendered using Path components in Slint,
+        // Grid rendering is the application's responsibility.
+        // Use a Path component in Slint bound to grid commands generated
+        // in Rust (see example's generate_grid_commands function).
+        //
+        // Links are also rendered using Path components in Slint,
         // placed between the background and overlay layers.
-
         RenderingResult::ContinueRenderingChildren
     }
 
@@ -219,54 +232,6 @@ impl Item for NodeEditorBackground {
     }
 }
 
-impl NodeEditorBackground {
-    fn render_grid(self: Pin<&Self>, _backend: &mut ItemRendererRef, size: LogicalSize) {
-        let grid_spacing = self.grid_spacing();
-        let grid_color = self.grid_color();
-        let pan_x = self.pan_x();
-        let pan_y = self.pan_y();
-        let zoom = self.zoom().max(0.1); // Prevent division by zero
-
-        if grid_spacing.get() <= 0.0 || grid_color.alpha() == 0 {
-            return;
-        }
-
-        // Calculate effective grid spacing with zoom
-        let effective_spacing = LogicalLength::new(grid_spacing.get() * zoom);
-
-        // Skip if spacing is too small to be visible
-        if effective_spacing.get() < 4.0 {
-            return;
-        }
-
-        // Calculate grid offset based on pan
-        let offset_x = pan_x.get() % effective_spacing.get();
-        let offset_y = pan_y.get() % effective_spacing.get();
-
-        // TODO: Implement actual grid line rendering
-        // This requires adding a draw_line method to ItemRenderer or using draw_rectangle
-        // with very thin rectangles. For now, we'll add this in Phase 1 completion.
-
-        // The grid will be rendered as a series of thin rectangles
-        // Vertical lines
-        let mut x = offset_x;
-        let _line_width = LogicalLength::new(1.0);
-        while x < size.width {
-            // Draw vertical line at x
-            // backend.draw_rectangle(...)
-            x += effective_spacing.get();
-        }
-
-        // Horizontal lines
-        let mut y = offset_y;
-        while y < size.height {
-            // Draw horizontal line at y
-            // backend.draw_rectangle(...)
-            y += effective_spacing.get();
-        }
-    }
-}
-
 impl ItemConsts for NodeEditorBackground {
     const cached_rendering_data_offset: const_field_offset::FieldOffset<
         NodeEditorBackground,
@@ -279,7 +244,15 @@ impl ItemConsts for NodeEditorBackground {
 // ============================================================================
 
 /// The overlay layer of a node editor.
-/// Handles input and exposes state for Slint-rendered overlays (selection box, etc.).
+///
+/// Handles user input (pan, zoom, box selection, link creation) and exposes
+/// state properties for Slint to render visual feedback:
+///
+/// - **Box selection**: `is-selecting`, `selection-x/y/width/height`
+/// - **Link preview**: `is-creating-link`, `link-start-x/y`, `link-end-x/y`
+///
+/// Applications should use Slint Rectangle and Path components bound to these
+/// properties to render the selection box and active link preview.
 #[repr(C)]
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
@@ -294,11 +267,6 @@ pub struct NodeEditorOverlay {
     pub min_zoom: Property<f32>,
     /// Maximum zoom level
     pub max_zoom: Property<f32>,
-
-    /// Selection box color (deprecated - use Slint Rectangle instead)
-    pub selection_box_color: Property<Color>,
-    /// Active link color during creation (deprecated - use Slint Path instead)
-    pub active_link_color: Property<Color>,
 
     /// Enable minimap
     pub minimap_enabled: Property<bool>,
@@ -362,6 +330,30 @@ pub struct NodeEditorOverlay {
     /// Callback to start link creation - set pending_link_* properties first
     pub start_link: Callback<()>,
 
+    // === Link completion trigger (for when pin TouchArea has mouse capture) ===
+    /// Set to true to complete link creation
+    pub complete_link_creation: Property<bool>,
+    /// Target pin ID computed by Slint (0 if dropped on empty space)
+    pub target_pin_id: Property<i32>,
+
+    // === Pin position reporting (for hit-testing during link creation) ===
+    /// Pin ID being reported (set before calling pin-position-changed)
+    pub reporting_pin_id: Property<i32>,
+    /// X position of pin being reported (in screen coordinates)
+    pub reporting_pin_x: Property<LogicalLength>,
+    /// Y position of pin being reported (in screen coordinates)
+    pub reporting_pin_y: Property<LogicalLength>,
+    /// Hit radius for pin detection
+    pub pin_hit_radius: Property<LogicalLength>,
+    /// Callback when a pin reports its position
+    pub pin_position_changed: Callback<()>,
+
+    // === Link creation result (output when link_created is fired) ===
+    /// Start pin ID of the created link (output pin)
+    pub created_link_start_pin: Property<i32>,
+    /// End pin ID of the created link (input pin)
+    pub created_link_end_pin: Property<i32>,
+
     /// Internal state
     data: NodeEditorDataBox,
 
@@ -411,6 +403,63 @@ impl Item for NodeEditorOverlay {
 
                 // Clear the pending trigger
                 Self::FIELD_OFFSETS.pending_link_pin_id.apply_pin(self).set(0);
+            }
+        }
+
+        // Check if a Pin component is reporting its position
+        let reporting_pin = self.reporting_pin_id();
+        if reporting_pin > 0 {
+            let pin_x = self.reporting_pin_x().get();
+            let pin_y = self.reporting_pin_y().get();
+
+            // Store the pin position for hit-testing
+            let mut state = self.data.state.borrow_mut();
+            state.pin_positions.insert(reporting_pin, LogicalPoint::new(pin_x, pin_y));
+            drop(state);
+
+            // Clear the reporting trigger
+            Self::FIELD_OFFSETS.reporting_pin_id.apply_pin(self).set(0);
+        }
+
+        // Check if a Pin component is requesting link completion (pin has mouse capture)
+        if self.complete_link_creation() {
+            // Get the target pin ID (pre-computed by Slint's find-pin-at function)
+            let end_pin = self.target_pin_id();
+
+            // Get the start pin from state
+            let mut state = self.data.state.borrow_mut();
+            let start_pin = state.link_start_pin;
+            let was_creating = state.is_creating_link;
+            state.is_creating_link = false;
+            state.link_start_pin = -1;
+            drop(state);
+
+            // Clear the completion trigger and target pin
+            Self::FIELD_OFFSETS.complete_link_creation.apply_pin(self).set(false);
+            Self::FIELD_OFFSETS.target_pin_id.apply_pin(self).set(0);
+
+            if was_creating {
+                // Clear link creation visual
+                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
+
+                if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
+                    // Normalize: output pin first, input pin second
+                    let (output_pin, input_pin) = if start_pin % 10 == 2 {
+                        (start_pin, end_pin)
+                    } else {
+                        (end_pin, start_pin)
+                    };
+
+                    // Set the created link properties
+                    Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
+                    Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
+
+                    // Emit link_created callback
+                    self.link_created.call(&());
+                } else {
+                    // Dropped on empty space or incompatible pin
+                    self.link_dropped.call(&());
+                }
             }
         }
 
@@ -564,27 +613,14 @@ impl Item for NodeEditorOverlay {
 
     fn render(
         self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
+        _backend: &mut ItemRendererRef,
         _self_rc: &ItemRc,
-        size: LogicalSize,
+        _size: LogicalSize,
     ) -> RenderingResult {
-        let state = self.data.state.borrow();
-
-        // Render selection box if active
-        if state.is_box_selecting {
-            self.render_selection_box(backend, &state, size);
-        }
-
-        // Render active link preview if creating a link
-        if state.is_creating_link {
-            self.render_active_link(backend, &state, size);
-        }
-
-        // Render minimap if enabled
-        if self.minimap_enabled() {
-            self.render_minimap(backend, size);
-        }
-
+        // Selection box, active link preview, and minimap are rendered
+        // in Slint using Rectangle and Path components bound to this
+        // overlay's properties (is-selecting, selection-x/y/width/height,
+        // is-creating-link, link-start-x/y, link-end-x/y, etc.).
         RenderingResult::ContinueRenderingChildren
     }
 
@@ -668,7 +704,7 @@ impl NodeEditorOverlay {
 
     fn handle_mouse_released(
         self: Pin<&Self>,
-        _position: LogicalPoint, // TODO: Use for pin hit testing
+        position: LogicalPoint,
         button: PointerEventButton,
     ) -> InputEventResult {
         let mut state = self.data.state.borrow_mut();
@@ -691,15 +727,35 @@ impl NodeEditorOverlay {
                     return InputEventResult::EventAccepted;
                 }
                 if state.is_creating_link {
-                    // TODO: Check if we're over a valid pin
-                    // For now, emit link_dropped
+                    let start_pin = state.link_start_pin;
                     state.is_creating_link = false;
                     state.link_start_pin = -1;
                     drop(state);
 
+                    // Check if we're over a valid pin
+                    let end_pin = self.find_pin_at(position);
+
                     // Clear link creation visual
                     Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
-                    self.link_dropped.call(&());
+
+                    if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
+                        // Normalize: output pin first, input pin second
+                        let (output_pin, input_pin) = if start_pin % 10 == 2 {
+                            (start_pin, end_pin)
+                        } else {
+                            (end_pin, start_pin)
+                        };
+
+                        // Set the created link properties
+                        Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
+                        Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
+
+                        // Emit link_created callback
+                        self.link_created.call(&());
+                    } else {
+                        // Dropped on empty space or incompatible pin
+                        self.link_dropped.call(&());
+                    }
                     return InputEventResult::EventAccepted;
                 }
             }
@@ -838,51 +894,42 @@ impl NodeEditorOverlay {
         InputEventResult::EventIgnored
     }
 
-    fn render_selection_box(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        state: &NodeEditorState,
-        _size: LogicalSize,
-    ) {
-        let _start = state.box_select_start;
-        let _current = state.box_select_current;
-        let _color = self.selection_box_color();
-
-        // TODO: Draw selection rectangle
-        // Calculate min/max to handle any drag direction
-        // let rect = LogicalRect::from_points(start, current);
-        // Use backend to draw a semi-transparent rectangle with border
-    }
-
-    fn render_active_link(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        state: &NodeEditorState,
-        _size: LogicalSize,
-    ) {
-        let _current_pos = state.link_current_pos;
-        let _color = self.active_link_color();
-
-        // TODO: Draw bezier curve from link start pin to current mouse position
-        // This requires knowing the start pin position, which comes from
-        // the pin-position-changed callback
-    }
-
-    fn render_minimap(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        _size: LogicalSize,
-    ) {
-        // TODO: Render simplified minimap showing node positions as rectangles
-        // Position in bottom-right corner
-    }
-
     /// Start creating a link from a pin
     pub fn start_link_creation(self: Pin<&Self>, pin_id: i32, position: LogicalPoint) {
         let mut state = self.data.state.borrow_mut();
         state.is_creating_link = true;
         state.link_start_pin = pin_id;
         state.link_current_pos = position;
+    }
+
+    /// Find a pin at the given position, returns pin ID or 0 if no pin found
+    fn find_pin_at(self: Pin<&Self>, position: LogicalPoint) -> i32 {
+        let hit_radius = self.pin_hit_radius().get();
+        let hit_radius_sq = hit_radius * hit_radius;
+        let state = self.data.state.borrow();
+
+        for (&pin_id, &pin_pos) in state.pin_positions.iter() {
+            let dx = position.x - pin_pos.x;
+            let dy = position.y - pin_pos.y;
+            let dist_sq = dx * dx + dy * dy;
+            if dist_sq <= hit_radius_sq {
+                return pin_id;
+            }
+        }
+
+        0 // No pin found
+    }
+
+    /// Check if two pins are compatible for linking (one input, one output)
+    fn pins_compatible(start_pin: i32, end_pin: i32) -> bool {
+        if start_pin == end_pin {
+            return false;
+        }
+        // Pin ID convention: id % 10 == 1 for input, == 2 for output
+        let start_type = start_pin % 10;
+        let end_type = end_pin % 10;
+        // One must be input (1) and one must be output (2)
+        (start_type == 1 && end_type == 2) || (start_type == 2 && end_type == 1)
     }
 }
 

@@ -755,7 +755,9 @@ export component NativeTabWidget {
 // Node Editor Components
 // ============================================================================
 
-/// Background layer for node editors. Renders grid and static links.
+/// Background layer for node editors.
+/// Provides viewport properties (pan, zoom). Grid and links are NOT rendered
+/// natively - use Path components in Slint bound to callbacks that generate SVG data.
 export component NodeEditorBackground inherits Empty {
     /// Spacing between grid lines
     in property <length> grid-spacing: 24px;
@@ -785,11 +787,6 @@ export component NodeEditorOverlay inherits Empty {
     /// Maximum zoom level
     in property <float> max-zoom: 3.0;
 
-    /// Selection box color (deprecated - use is-selecting and selection-* properties with a Rectangle)
-    in property <color> selection-box-color: #4488ff40;
-    /// Active link color during creation (deprecated - use Slint Path instead)
-    in property <color> active-link-color: #ffffff;
-
     /// Enable minimap
     in property <bool> minimap-enabled: false;
 
@@ -818,10 +815,10 @@ export component NodeEditorOverlay inherits Empty {
     out property <length> link-start-x;
     /// Y coordinate of link start
     out property <length> link-start-y;
-    /// Current X coordinate of link end (mouse position)
-    out property <length> link-end-x;
-    /// Current Y coordinate of link end (mouse position)
-    out property <length> link-end-y;
+    /// Current X coordinate of link end (mouse position, can be updated externally during drag)
+    in-out property <length> link-end-x;
+    /// Current Y coordinate of link end (mouse position, can be updated externally during drag)
+    in-out property <length> link-end-y;
     /// ID of the pin from which link creation started
     out property <int> link-start-pin-id: -1;
 
@@ -835,7 +832,31 @@ export component NodeEditorOverlay inherits Empty {
     /// Callback to start link creation - set pending-link-* properties first
     callback start-link();
 
-    /// Callback when a link is created between two pins
+    // === Link completion trigger (for when pin TouchArea has mouse capture) ===
+    /// Set to true to complete link creation (set target-pin-id first)
+    in property <bool> complete-link-creation: false;
+    /// Target pin ID computed by Slint (0 if dropped on empty space)
+    in property <int> target-pin-id;
+
+    // === Pin position reporting (for hit-testing during link creation) ===
+    /// Pin ID being reported (set before calling pin-position-changed)
+    in property <int> reporting-pin-id;
+    /// X position of pin being reported (in screen coordinates)
+    in property <length> reporting-pin-x;
+    /// Y position of pin being reported (in screen coordinates)
+    in property <length> reporting-pin-y;
+    /// Hit radius for pin detection
+    in property <length> pin-hit-radius: 15px;
+    /// Callback when a pin reports its position - set reporting-pin-* properties first
+    callback pin-position-changed();
+
+    // === Link creation result (output when link-created is fired) ===
+    /// Start pin ID of the created link (output pin)
+    out property <int> created-link-start-pin;
+    /// End pin ID of the created link (input pin)
+    out property <int> created-link-end-pin;
+
+    /// Callback when a link is created between two pins (read created-link-start-pin and created-link-end-pin)
     callback link-created();
     /// Callback when a link is dropped on empty space (can be used to create nodes)
     callback link-dropped();
