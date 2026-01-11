@@ -878,6 +878,17 @@ export component NodeEditorOverlay inherits Empty {
     /// Comma-separated list of node IDs that intersect with the selection box
     out property <string> selected-node-ids-str;
 
+    // === Node selection management ===
+    /// Node ID being clicked (set before calling node-clicked)
+    in property <int> clicked-node-id;
+    /// Whether shift was held during node click
+    in property <bool> clicked-shift-held;
+    /// Callback when a node is clicked - set clicked-node-id and clicked-shift-held first
+    callback node-clicked();
+
+    /// Comma-separated list of currently selected node IDs (output)
+    out property <string> current-selected-ids;
+
     /// Callback when a link is created between two pins (read created-link-start-pin and created-link-end-pin)
     callback link-created();
     /// Callback when a link is dropped on empty space (can be used to create nodes)

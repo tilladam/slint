@@ -44,7 +44,7 @@ use crate::rtti::*;
 use crate::window::{WindowAdapter, WindowInner};
 use crate::{Callback, Coord, Property, SharedString};
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::rc::Rc;
 use alloc::string::String;
 use const_field_offset::FieldOffsets;
@@ -193,6 +193,8 @@ struct NodeEditorState {
     pin_positions: BTreeMap<i32, LogicalPoint>,
     /// Known node rectangles for hit-testing and box selection (node_id -> screen rect)
     node_rects: BTreeMap<i32, NodeRect>,
+    /// Set of selected node IDs (owned by core)
+    selected_node_ids: BTreeSet<i32>,
 }
 
 /// Wraps the internal state properly with RefCell
@@ -525,6 +527,18 @@ pub struct NodeEditorOverlay {
     /// Format: "1,2,3" or empty string if none
     pub selected_node_ids_str: Property<SharedString>,
 
+    // === Node selection management ===
+    /// Node ID being clicked (set before calling node-clicked)
+    pub clicked_node_id: Property<i32>,
+    /// Whether shift was held during node click
+    pub clicked_shift_held: Property<bool>,
+    /// Callback when a node is clicked - set clicked-node-id and clicked-shift-held first
+    pub node_clicked: Callback<()>,
+
+    /// Comma-separated list of currently selected node IDs (output)
+    /// Format: "1,2,3" or empty string if none
+    pub current_selected_ids: Property<SharedString>,
+
     /// Internal state
     data: NodeEditorDataBox,
 
@@ -615,6 +629,44 @@ impl Item for NodeEditorOverlay {
 
             // Clear the reporting trigger
             Self::FIELD_OFFSETS.reporting_node_id.apply_pin(self).set(0);
+        }
+
+        // Check if a node is being clicked (for selection)
+        let clicked_node = self.clicked_node_id();
+        if clicked_node > 0 {
+            let shift_held = self.clicked_shift_held();
+
+            let mut state = self.data.state.borrow_mut();
+
+            if shift_held {
+                // Multi-select: toggle the clicked node
+                if state.selected_node_ids.contains(&clicked_node) {
+                    state.selected_node_ids.remove(&clicked_node);
+                } else {
+                    state.selected_node_ids.insert(clicked_node);
+                }
+            } else {
+                // Single select: clear all and select only clicked node
+                state.selected_node_ids.clear();
+                state.selected_node_ids.insert(clicked_node);
+            }
+
+            // Update the current selected IDs output property
+            let ids_str = state
+                .selected_node_ids
+                .iter()
+                .map(|id| alloc::format!("{}", id))
+                .collect::<alloc::vec::Vec<_>>()
+                .join(",");
+            drop(state);
+
+            Self::FIELD_OFFSETS
+                .current_selected_ids
+                .apply_pin(self)
+                .set(SharedString::from(&ids_str));
+
+            // Clear the click trigger
+            Self::FIELD_OFFSETS.clicked_node_id.apply_pin(self).set(0);
         }
 
         // Check if a Pin component is requesting link completion (pin has mouse capture)
@@ -923,25 +975,34 @@ impl NodeEditorOverlay {
                     let sel_height = (sel_current.y - sel_start.y).abs();
 
                     // Find all nodes that intersect with the selection box
-                    let mut selected_ids: alloc::vec::Vec<i32> = state
+                    let intersecting_ids: BTreeSet<i32> = state
                         .node_rects
                         .iter()
                         .filter(|(_, rect)| rect.intersects(sel_x, sel_y, sel_width, sel_height))
                         .map(|(id, _)| *id)
                         .collect();
-                    selected_ids.sort();
 
-                    state.is_box_selecting = false;
-                    drop(state);
+                    // Update selection state (replace with intersecting nodes)
+                    state.selected_node_ids = intersecting_ids;
 
-                    // Set the selected node IDs as a comma-separated string
-                    let ids_str = selected_ids
+                    // Build output string from selection state
+                    let ids_str = state
+                        .selected_node_ids
                         .iter()
                         .map(|id| alloc::format!("{}", id))
                         .collect::<alloc::vec::Vec<_>>()
                         .join(",");
+
+                    state.is_box_selecting = false;
+                    drop(state);
+
+                    // Update both output properties
                     Self::FIELD_OFFSETS
                         .selected_node_ids_str
+                        .apply_pin(self)
+                        .set(SharedString::from(&ids_str));
+                    Self::FIELD_OFFSETS
+                        .current_selected_ids
                         .apply_pin(self)
                         .set(SharedString::from(&ids_str));
 

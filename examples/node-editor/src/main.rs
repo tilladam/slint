@@ -154,6 +154,26 @@ fn main() {
     // Compute initial link positions (zoom=1.0, pan=0,0)
     update_all_link_positions(&links, &nodes, 1.0, 0.0, 0.0);
 
+    // Handle selection changes - sync overlay's selection state to NodeData model
+    let nodes_for_selection = nodes.clone();
+    window.on_selection_changed(move |selected_ids_str| {
+        let selected_ids: std::collections::HashSet<i32> = selected_ids_str
+            .split(',')
+            .filter_map(|s| s.trim().parse::<i32>().ok())
+            .collect();
+
+        // Update the selected field for all nodes
+        for i in 0..nodes_for_selection.row_count() {
+            if let Some(mut node) = nodes_for_selection.row_data(i) {
+                let should_select = selected_ids.contains(&node.id);
+                if node.selected != should_select {
+                    node.selected = should_select;
+                    nodes_for_selection.set_row_data(i, node);
+                }
+            }
+        }
+    });
+
     // Handle link position updates when viewport changes
     // (Grid rendering is now handled internally by NodeEditorBackground)
     let links_for_viewport = links.clone();
@@ -195,38 +215,27 @@ fn main() {
         });
     });
 
-    // Handle node selection
-    let nodes_for_select = nodes.clone();
-    window.on_select_node(move |node_id, shift_held| {
-        for i in 0..nodes_for_select.row_count() {
-            if let Some(mut node) = nodes_for_select.row_data(i) {
-                if shift_held {
-                    // Shift+click: toggle only the clicked node
-                    if node.id == node_id {
-                        node.selected = !node.selected;
-                        nodes_for_select.set_row_data(i, node);
-                    }
-                } else {
-                    // Normal click: select only clicked, deselect others
-                    let should_select = node.id == node_id;
-                    if node.selected != should_select {
-                        node.selected = should_select;
-                        nodes_for_select.set_row_data(i, node);
-                    }
-                }
-            }
-        }
-    });
+    // Node selection is now handled by the overlay (overlay.clicked-node-id)
 
     // Handle drag commit - apply delta to all selected nodes when drag ends
     let nodes_for_drag = nodes.clone();
     let links_for_drag = links.clone();
     let window_for_drag = window.as_weak();
     window.on_commit_drag(move |delta_x, delta_y, snap_enabled| {
+        // Get selected node IDs from overlay
+        let selected_ids: std::collections::HashSet<i32> = if let Some(window) = window_for_drag.upgrade() {
+            window.get_current_selected_ids()
+                .split(',')
+                .filter_map(|s| s.trim().parse::<i32>().ok())
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+
         // Apply delta to all selected nodes, optionally snapping to grid
         for i in 0..nodes_for_drag.row_count() {
             if let Some(mut node) = nodes_for_drag.row_data(i) {
-                if node.selected {
+                if selected_ids.contains(&node.id) {
                     let new_x = node.world_x + delta_x;
                     let new_y = node.world_y + delta_y;
                     node.world_x = if snap_enabled { snap_to_grid(new_x) } else { new_x };
@@ -248,14 +257,25 @@ fn main() {
     // Handle deleting selected nodes
     let nodes_for_delete = nodes.clone();
     let links_for_delete = links.clone();
+    let window_for_delete = window.as_weak();
     window.on_delete_selected_nodes(move || {
+        // Get selected node IDs from overlay
+        let selected_ids: std::collections::HashSet<i32> = if let Some(window) = window_for_delete.upgrade() {
+            window.get_current_selected_ids()
+                .split(',')
+                .filter_map(|s| s.trim().parse::<i32>().ok())
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+
         // Collect indices of selected nodes (in reverse order for safe removal)
         let mut indices_to_remove: Vec<usize> = Vec::new();
         let mut deleted_node_ids: Vec<i32> = Vec::new();
 
         for i in 0..nodes_for_delete.row_count() {
             if let Some(node) = nodes_for_delete.row_data(i) {
-                if node.selected {
+                if selected_ids.contains(&node.id) {
                     indices_to_remove.push(i);
                     deleted_node_ids.push(node.id);
                 }
@@ -306,26 +326,8 @@ fn main() {
         });
     });
 
-    // Handle box selection - overlay computes intersecting node IDs
-    let nodes_for_box = nodes.clone();
-    window.on_box_select_nodes(move |selected_ids_str| {
-        // Parse comma-separated node IDs from overlay
-        let selected_ids: std::collections::HashSet<i32> = selected_ids_str
-            .split(',')
-            .filter_map(|s| s.trim().parse::<i32>().ok())
-            .collect();
-
-        // Update selection state for all nodes
-        for i in 0..nodes_for_box.row_count() {
-            if let Some(mut node) = nodes_for_box.row_data(i) {
-                let should_select = selected_ids.contains(&node.id);
-                if node.selected != should_select {
-                    node.selected = should_select;
-                    nodes_for_box.set_row_data(i, node);
-                }
-            }
-        }
-    });
+    // Box selection is now fully handled by the overlay
+    // (overlay computes intersecting nodes and updates current-selected-ids)
 
     window.run().unwrap();
 }

@@ -299,7 +299,7 @@ export component MainWindow inherits Window {
     in property <[LinkData]> links;
 
     // Callbacks to Rust for state changes
-    callback select-node(int, bool);  // node-id, shift-held
+    callback selection-changed(string);  // comma-separated node IDs
     callback commit-drag(float, float, bool);  // delta-world-x, delta-world-y, snap-to-grid
     callback update-viewport(float, float, float);  // zoom, pan-x, pan-y (for link position updates)
     callback create-link(int, int);  // start-pin-id, end-pin-id
@@ -318,6 +318,9 @@ export component MainWindow inherits Window {
     in-out property <length> pan-x: 0px;
     in-out property <length> pan-y: 0px;
     in-out property <float> zoom: 1.0;
+
+    // Selection state (managed by overlay)
+    out property <string> current-selected-ids <=> overlay.current-selected-ids;
 
     // Node dimensions (must match Node component)
     property <length> node-base-width: 150px;
@@ -482,10 +485,6 @@ export component MainWindow inherits Window {
             commands: parent.grid-commands;
         }
     }
-
-    // Callback for box selection - overlay computes intersecting node IDs
-    // Parameter: comma-separated list of node IDs (e.g., "1,2,3")
-    callback box-select-nodes(string);
 
     // Link creation state managed directly in Slint
     property <bool> link-active: false;
@@ -704,7 +703,11 @@ export component MainWindow inherits Window {
         zoom: zoom;
         pan-x: pan-x;
         pan-y: pan-y;
-        clicked(id, shift) => { root.select-node(id, shift); }
+        clicked(id, shift) => {
+            overlay.clicked-node-id = id;
+            overlay.clicked-shift-held = shift;
+            root.selection-changed(overlay.current-selected-ids);
+        }
         drag-started(id) => {
             is-dragging = true;
             visual-drag-offset-x = 0px;
@@ -802,10 +805,8 @@ export component MainWindow inherits Window {
         }
 
         selection-changed => {
-            // Overlay has computed intersecting node IDs - pass to Rust
-            if overlay.selection-width > 5px && overlay.selection-height > 5px {
-                root.box-select-nodes(overlay.selected-node-ids-str);
-            }
+            // Overlay has computed intersecting node IDs and updated selection - notify Rust
+            root.selection-changed(overlay.current-selected-ids);
         }
 
         viewport-changed => {
