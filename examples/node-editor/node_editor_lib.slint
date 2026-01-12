@@ -50,6 +50,90 @@ export component Link inherits Path {
     commands: path-commands;
 }
 
+/// A connection point on a node where links can be attached.
+///
+/// The Pin component encapsulates rendering and drag-to-link interaction.
+/// Pins are positioned within node components and report their center position
+/// for link attachment. When dragged, they fire callbacks to create links.
+///
+/// Standard color schemes:
+/// - Input pins (data): base #4CAF50 (green), hover #66BB6A
+/// - Output pins: base #2196F3 (blue), hover #42A5F5
+/// - Control/parameter inputs: base #FFC107 (yellow), hover #FFD54F
+///
+/// Example usage:
+/// ```slint
+/// Pin {
+///     x: 8px * zoom;
+///     y: 40px * zoom;
+///     pin-id: node-id * 10 + 1;
+///     zoom: zoom;
+///     base-color: #4CAF50;
+///     hover-color: #66BB6A;
+///     base-size: 12px;
+///     drag-started(id, x, y) => { /* handle drag start */ }
+///     drag-moved(id, x, y) => { /* handle drag move */ }
+///     drag-ended(id, x, y) => { /* handle drag end */ }
+/// }
+/// ```
+export component Pin inherits Rectangle {
+    /// Unique identifier for this pin (typically node-id * 10 + pin-type)
+    in property <int> pin-id;
+    /// Current zoom level for scaling
+    in property <float> zoom: 1.0;
+    /// Base color when not hovered
+    in property <color> base-color;
+    /// Color when hovered
+    in property <color> hover-color;
+    /// Base size before zoom scaling
+    in property <length> base-size: 12px;
+
+    // Computed properties
+    property <length> pin-size: base-size * zoom;
+    property <length> pin-radius: pin-size / 2;
+
+    /// Center X position in parent coordinates (for link attachment)
+    out property <length> center-x: self.x + pin-radius;
+    /// Center Y position in parent coordinates (for link attachment)
+    out property <length> center-y: self.y + pin-radius;
+
+    /// Fired when drag starts (pin-id, x, y in parent coordinates)
+    callback drag-started(int, length, length);
+    /// Fired during drag (pin-id, x, y in parent coordinates)
+    callback drag-moved(int, length, length);
+    /// Fired when drag ends (pin-id, x, y in parent coordinates)
+    callback drag-ended(int, length, length);
+
+    // Rectangle styling
+    width: pin-size;
+    height: pin-size;
+    background: touch.has-hover ? hover-color : base-color;
+    border-radius: pin-radius;
+
+    // Drag interaction
+    touch := TouchArea {
+        property <bool> drag-active: false;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                drag-active = true;
+                root.drag-started(pin-id, center-x, center-y);
+            }
+            if event.kind == PointerEventKind.up && drag-active {
+                drag-active = false;
+                // Calculate cursor position in parent coordinates
+                root.drag-ended(pin-id, center-x + self.mouse-x - pin-radius, center-y + self.mouse-y - pin-radius);
+            }
+        }
+        moved => {
+            if drag-active {
+                // Update link preview with cursor position
+                root.drag-moved(pin-id, center-x + self.mouse-x - pin-radius, center-y + self.mouse-y - pin-radius);
+            }
+        }
+    }
+}
+
 /// Composite node editor with three-layer architecture.
 ///
 /// Provides:
