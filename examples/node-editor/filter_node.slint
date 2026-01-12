@@ -99,8 +99,9 @@ export component FilterNode inherits Rectangle {
     property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
 
     // Pin Y positions - centered on each content row
-    property <length> row-1-center: (title-height + content-padding + row-height / 2) * zoom;
-    property <length> row-2-center: (title-height + content-padding + row-height + row-height / 2) * zoom;
+    // Account for: VerticalLayout padding + title + HorizontalLayout padding-top + row offset
+    property <length> row-1-center: (content-padding + title-height + content-padding + row-height / 2) * zoom;
+    property <length> row-2-center: (content-padding + title-height + content-padding + row-height + row-height / 2) * zoom;
 
     // Expose pin positions (center of each pin in screen coordinates)
     out property <length> data-input-pin-x: screen-x + data-input-pin.x + pin-radius;
@@ -118,6 +119,49 @@ export component FilterNode inherits Rectangle {
     border-radius: 8px * zoom;
     border-width: selected ? 2px * zoom : 1px * zoom;
     border-color: selected ? #4a9eff : #555;
+
+    // Drag handling - MUST be before widgets so they receive events on top
+    TouchArea {
+        property <bool> shift-held: false;
+        property <bool> was-dragged: false;
+        property <length> drag-threshold: 5px;
+        property <length> press-abs-x: 0px;
+        property <length> press-abs-y: 0px;
+        property <length> current-offset-x: self.absolute-position.x + self.mouse-x - press-abs-x;
+        property <length> current-offset-y: self.absolute-position.y + self.mouse-y - press-abs-y;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                shift-held = event.modifiers.shift;
+                was-dragged = false;
+                press-abs-x = self.absolute-position.x + self.pressed-x;
+                press-abs-y = self.absolute-position.y + self.pressed-y;
+            }
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                if !was-dragged {
+                    root.clicked(node-id, shift-held);
+                } else {
+                    root.drag-ended(node-id, current-offset-x / zoom, current-offset-y / zoom);
+                }
+            }
+        }
+        moved => {
+            if self.pressed {
+                if !was-dragged {
+                    if current-offset-x > drag-threshold ||
+                       (-current-offset-x) > drag-threshold ||
+                       current-offset-y > drag-threshold ||
+                       (-current-offset-y) > drag-threshold {
+                        was-dragged = true;
+                        root.drag-started(node-id, selected);
+                    }
+                }
+                if was-dragged {
+                    root.drag-moved(node-id, current-offset-x / zoom, current-offset-y / zoom);
+                }
+            }
+        }
+    }
 
     // Main layout
     VerticalLayout {
@@ -277,49 +321,6 @@ export component FilterNode inherits Rectangle {
                 // Rows 2-3: empty
                 Rectangle {
                     height: row-height * zoom * 2;
-                }
-            }
-        }
-    }
-
-    // Drag handling (covers whole node, but widgets on top will capture their own events)
-    TouchArea {
-        property <bool> shift-held: false;
-        property <bool> was-dragged: false;
-        property <length> drag-threshold: 5px;
-        property <length> press-abs-x: 0px;
-        property <length> press-abs-y: 0px;
-        property <length> current-offset-x: self.absolute-position.x + self.mouse-x - press-abs-x;
-        property <length> current-offset-y: self.absolute-position.y + self.mouse-y - press-abs-y;
-
-        pointer-event(event) => {
-            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                shift-held = event.modifiers.shift;
-                was-dragged = false;
-                press-abs-x = self.absolute-position.x + self.pressed-x;
-                press-abs-y = self.absolute-position.y + self.pressed-y;
-            }
-            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
-                if !was-dragged {
-                    root.clicked(node-id, shift-held);
-                } else {
-                    root.drag-ended(node-id, current-offset-x / zoom, current-offset-y / zoom);
-                }
-            }
-        }
-        moved => {
-            if self.pressed {
-                if !was-dragged {
-                    if current-offset-x > drag-threshold ||
-                       (-current-offset-x) > drag-threshold ||
-                       current-offset-y > drag-threshold ||
-                       (-current-offset-y) > drag-threshold {
-                        was-dragged = true;
-                        root.drag-started(node-id, selected);
-                    }
-                }
-                if was-dragged {
-                    root.drag-moved(node-id, current-offset-x / zoom, current-offset-y / zoom);
                 }
             }
         }
