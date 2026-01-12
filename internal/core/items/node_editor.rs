@@ -1826,7 +1826,7 @@ impl NodeEditorOverlay {
     }
 
     /// Find a pin at the given position, returns pin ID or 0 if no pin found
-    /// Computes pin positions from node_rects to ensure consistency with link rendering
+    /// Uses pin positions from state.pin_positions to support arbitrary pin layouts
     fn find_pin_at(self: Pin<&Self>, position: LogicalPoint) -> i32 {
         let zoom = self.zoom();
         // Use explicit hit radius if set, otherwise default to ~66% of pin diameter
@@ -1839,24 +1839,12 @@ impl NodeEditorOverlay {
         let hit_radius_sq = hit_radius * hit_radius;
         let state = self.data.state.borrow();
 
-        // Check all nodes' pins by computing positions from node rects
-        for (&node_id, node_rect) in state.node_rects.iter() {
-            // Input pin (node_id * 10 + 1)
-            let input_pin_id = node_id * 10 + 1;
-            let (input_x, input_y) = compute_pin_screen_position(input_pin_id, node_rect, zoom);
-            let dx = position.x - input_x;
-            let dy = position.y - input_y;
+        // Check all pins from pin_positions (supports arbitrary pin counts per node)
+        for (&pin_id, pin_pos) in state.pin_positions.iter() {
+            let dx = position.x - pin_pos.x;
+            let dy = position.y - pin_pos.y;
             if dx * dx + dy * dy <= hit_radius_sq {
-                return input_pin_id;
-            }
-
-            // Output pin (node_id * 10 + 2)
-            let output_pin_id = node_id * 10 + 2;
-            let (output_x, output_y) = compute_pin_screen_position(output_pin_id, node_rect, zoom);
-            let dx = position.x - output_x;
-            let dy = position.y - output_y;
-            if dx * dx + dy * dy <= hit_radius_sq {
-                return output_pin_id;
+                return pin_id;
             }
         }
 
@@ -1868,11 +1856,15 @@ impl NodeEditorOverlay {
         if start_pin == end_pin {
             return false;
         }
-        // Pin ID convention: id % 10 == 1 for input, == 2 for output
+        // Pin ID convention: id % 10 == 1 for input, == 2 for output, == 3+ for additional inputs
         let start_type = start_pin % 10;
         let end_type = end_pin % 10;
-        // One must be input (1) and one must be output (2)
-        (start_type == 1 && end_type == 2) || (start_type == 2 && end_type == 1)
+        // Input types: 1, 3, 4, 5, ... (odd numbers or >= 3)
+        // Output types: 2
+        let start_is_output = start_type == 2;
+        let end_is_output = end_type == 2;
+        // One must be output and one must be input (not output)
+        start_is_output != end_is_output
     }
 
     /// Check if a link already exists between two pins
