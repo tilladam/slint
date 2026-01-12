@@ -194,7 +194,6 @@ impl NodeRect {
 /// A link between two pins
 #[derive(Clone, Copy, Debug)]
 struct LinkRecord {
-    id: i32,
     start_pin_id: i32,
     end_pin_id: i32,
     color: Color,
@@ -985,7 +984,6 @@ impl NodeEditorOverlay {
             state.links.insert(
                 reporting_link,
                 LinkRecord {
-                    id: reporting_link,
                     start_pin_id,
                     end_pin_id,
                     color,
@@ -1022,7 +1020,6 @@ impl NodeEditorOverlay {
                         state.links.insert(
                             id,
                             LinkRecord {
-                                id,
                                 start_pin_id: start_pin,
                                 end_pin_id: end_pin,
                                 color,
