@@ -9,12 +9,6 @@ use std::rc::Rc;
 
 slint::include_modules!();
 
-/// Snap a value to the nearest grid position using Slint-computed grid spacing
-fn snap_to_grid(window: &MainWindow, value: f32) -> f32 {
-    let grid_spacing = NodeConstants::get(window).get_grid_spacing();
-    (value / grid_spacing).round() * grid_spacing
-}
-
 /// Build node rects batch string from model data using Slint-computed positions
 /// Format: "id,screen_x,screen_y,width,height;..."
 /// Slint computes positions using globals - Rust just queries
@@ -493,8 +487,8 @@ fn main() {
                 if selected_ids.contains(&node.id) {
                     let new_x = node.world_x + delta_x;
                     let new_y = node.world_y + delta_y;
-                    node.world_x = if snap_enabled { snap_to_grid(&window, new_x) } else { new_x };
-                    node.world_y = if snap_enabled { snap_to_grid(&window, new_y) } else { new_y };
+                    node.world_x = if snap_enabled { window.invoke_snap_to_grid(new_x) } else { new_x };
+                    node.world_y = if snap_enabled { window.invoke_snap_to_grid(new_y) } else { new_y };
                     nodes_for_drag.set_row_data(i, node);
                 }
             }
@@ -506,8 +500,8 @@ fn main() {
                 if selected_ids.contains(&node.id) {
                     let new_x = node.world_x + delta_x;
                     let new_y = node.world_y + delta_y;
-                    node.world_x = if snap_enabled { snap_to_grid(&window, new_x) } else { new_x };
-                    node.world_y = if snap_enabled { snap_to_grid(&window, new_y) } else { new_y };
+                    node.world_x = if snap_enabled { window.invoke_snap_to_grid(new_x) } else { new_x };
+                    node.world_y = if snap_enabled { window.invoke_snap_to_grid(new_y) } else { new_y };
                     filter_nodes_for_drag.set_row_data(i, node);
                 }
             }
@@ -671,8 +665,8 @@ fn main() {
         nodes_for_add.push(NodeData {
             id,
             title: SharedString::from(format!("Node {}", id)),
-            world_x: snap_to_grid(&window, 192.0 + (id as f32 * 48.0) % 384.0),
-            world_y: snap_to_grid(&window, 192.0 + (id as f32 * 24.0) % 288.0),
+            world_x: window.invoke_snap_to_grid(192.0 + (id as f32 * 48.0) % 384.0),
+            world_y: window.invoke_snap_to_grid(192.0 + (id as f32 * 24.0) % 288.0),
         });
     });
 

@@ -308,6 +308,11 @@ export component MainWindow inherits Window {
     pure callback get-node-screen-rect(int) -> string;  // Returns "x,y,width,height" or empty
     pure callback get-pin-screen-pos(int) -> string;    // Returns "x,y" or empty
 
+    // Pure function to snap a value to the grid
+    pure public function snap-to-grid(value: float) -> float {
+        return editor.snap-to-grid(value);
+    }
+
     // Grid snap setting
     in-out property <bool> grid-snap-enabled: true;
 

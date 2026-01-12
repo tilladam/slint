@@ -212,6 +212,16 @@ export component NodeEditor {
     callback delete-selected <=> overlay.delete-selected;
     callback add-node-requested <=> overlay.add-node-requested;
 
+    // === Helper Functions ===
+    /// Snaps a coordinate value to the nearest grid position
+    /// Uses the grid-spacing property automatically
+    pure public function snap-to-grid(value: float) -> float {
+        if (root.grid-spacing > 0px) {
+            return round(value / (root.grid-spacing / 1px)) * (root.grid-spacing / 1px);
+        }
+        return value;
+    }
+
     // === Layer 1: Background ===
     background-layer := NodeEditorBackground {
         width: 100%;
