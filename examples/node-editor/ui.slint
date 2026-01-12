@@ -165,41 +165,48 @@ component Node inherits Rectangle {
         property <bool> shift-held: false;
         property <bool> was-dragged: false;
         property <length> drag-threshold: 5px;
+        // Store initial press position in absolute (window) coordinates
+        // This is needed because the node moves during drag, which would change
+        // the local coordinate system and cause oscillation
+        property <length> press-abs-x: 0px;
+        property <length> press-abs-y: 0px;
+        // Current offset computed from absolute positions
+        property <length> current-offset-x: self.absolute-position.x + self.mouse-x - press-abs-x;
+        property <length> current-offset-y: self.absolute-position.y + self.mouse-y - press-abs-y;
 
         pointer-event(event) => {
             if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                 shift-held = event.modifiers.shift;
                 was-dragged = false;
+                // Store absolute position of press
+                press-abs-x = self.absolute-position.x + self.pressed-x;
+                press-abs-y = self.absolute-position.y + self.pressed-y;
             }
             if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
                 if !was-dragged {
                     root.clicked(node-id, shift-held);
                 } else {
-                    // Drag ended - report final delta (parent will reset offset)
-                    root.drag-ended(node-id,
-                        (self.mouse-x - self.pressed-x) / zoom,
-                        (self.mouse-y - self.pressed-y) / zoom);
+                    // Drag ended - report final delta using absolute coordinates
+                    root.drag-ended(node-id, current-offset-x / zoom, current-offset-y / zoom);
                 }
             }
         }
         moved => {
             if self.pressed {
-                // Check threshold
+                // Check threshold using absolute coordinate offsets
                 if !was-dragged {
-                    if self.mouse-x - self.pressed-x > drag-threshold ||
-                       self.pressed-x - self.mouse-x > drag-threshold ||
-                       self.mouse-y - self.pressed-y > drag-threshold ||
-                       self.pressed-y - self.mouse-y > drag-threshold {
+                    if current-offset-x > drag-threshold ||
+                       (-current-offset-x) > drag-threshold ||
+                       current-offset-y > drag-threshold ||
+                       (-current-offset-y) > drag-threshold {
                         was-dragged = true;
                         root.drag-started(node-id, selected);
                     }
                 }
 
-                // Report offset to parent (mouse-x - pressed-x is stable)
+                // Report offset to parent
                 if was-dragged {
-                    root.drag-moved(node-id,
-                        (self.mouse-x - self.pressed-x) / zoom,
-                        (self.mouse-y - self.pressed-y) / zoom);
+                    root.drag-moved(node-id, current-offset-x / zoom, current-offset-y / zoom);
                 }
             }
         }
