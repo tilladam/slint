@@ -128,52 +128,51 @@ fn build_filter_pins_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNo
         .flat_map(|node| {
             // Data input pin (pin 1): left side, row 1
             let data_input_pin_id = node.id * 10 + 1;
-            let data_input_x = window.invoke_compute_filter_data_input_pin_x(node.world_x);
-            let data_input_y = window.invoke_compute_filter_data_input_pin_y(node.world_y);
+            let data_input_rel_x = window.invoke_compute_filter_data_input_pin_relative_x();
+            let data_input_rel_y = window.invoke_compute_filter_data_input_pin_relative_y();
 
             // Data output pin (pin 2): right side, row 1
             let data_output_pin_id = node.id * 10 + 2;
-            let data_output_x = window.invoke_compute_filter_data_output_pin_x(node.world_x);
-            let data_output_y = window.invoke_compute_filter_data_output_pin_y(node.world_y);
+            let data_output_rel_x = window.invoke_compute_filter_data_output_pin_relative_x();
+            let data_output_rel_y = window.invoke_compute_filter_data_output_pin_relative_y();
 
             // Control input pin (pin 3): left side, row 2
             let control_input_pin_id = node.id * 10 + 3;
-            let control_input_x = window.invoke_compute_filter_control_input_pin_x(node.world_x);
-            let control_input_y = window.invoke_compute_filter_control_input_pin_y(node.world_y);
+            let control_input_rel_x = window.invoke_compute_filter_control_input_pin_relative_x();
+            let control_input_rel_y = window.invoke_compute_filter_control_input_pin_relative_y();
 
             vec![
-                format!("{},{},{}", data_input_pin_id, data_input_x, data_input_y),
-                format!("{},{},{}", data_output_pin_id, data_output_x, data_output_y),
-                format!("{},{},{}", control_input_pin_id, control_input_x, control_input_y),
+                format!("{},{},{}", data_input_pin_id, data_input_rel_x, data_input_rel_y),
+                format!("{},{},{}", data_output_pin_id, data_output_rel_x, data_output_rel_y),
+                format!("{},{},{}", control_input_pin_id, control_input_rel_x, control_input_rel_y),
             ]
         })
         .collect::<Vec<_>>()
         .join(";")
 }
 
-/// Build pin positions batch string from model data using Slint-computed positions
-/// Format: "pin_id,screen_x,screen_y;..."
+/// Build pin relative offsets batch string from Slint-computed offsets
+/// Format: "pin_id,rel_x,rel_y;..." where rel_x/rel_y are unscaled offsets from node top-left
 /// Pin IDs: node_id * 10 + 1 for input, node_id * 10 + 2 for output
 ///
-/// NOTE: Slint also provides relative offset callbacks (compute-*-pin-relative-*) that
-/// could be used by the core to eliminate hardcoded constants. This would require core
-/// changes to accept format "pin_id,rel_x,rel_y" and compute absolute positions on-demand.
+/// The core computes absolute positions on-demand as: node_rect.pos + rel_offset * zoom
+/// This eliminates hardcoded layout constants from the core.
 fn build_pins_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> String {
     (0..nodes.row_count())
         .filter_map(|i| nodes.row_data(i))
         .flat_map(|node| {
-            // Call Slint pure functions to compute pin positions using globals
+            // Call Slint pure callbacks to get pin relative offsets
             let input_pin_id = node.id * 10 + 1;
-            let input_x = window.invoke_compute_input_pin_x(node.world_x);
-            let input_y = window.invoke_compute_input_pin_y(node.world_y);
+            let input_rel_x = window.invoke_compute_input_pin_relative_x();
+            let input_rel_y = window.invoke_compute_input_pin_relative_y();
 
             let output_pin_id = node.id * 10 + 2;
-            let output_x = window.invoke_compute_output_pin_x(node.world_x);
-            let output_y = window.invoke_compute_output_pin_y(node.world_y);
+            let output_rel_x = window.invoke_compute_output_pin_relative_x();
+            let output_rel_y = window.invoke_compute_output_pin_relative_y();
 
             vec![
-                format!("{},{},{}", input_pin_id, input_x, input_y),
-                format!("{},{},{}", output_pin_id, output_x, output_y),
+                format!("{},{},{}", input_pin_id, input_rel_x, input_rel_y),
+                format!("{},{},{}", output_pin_id, output_rel_x, output_rel_y),
             ]
         })
         .collect::<Vec<_>>()

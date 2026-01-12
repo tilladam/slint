@@ -140,10 +140,9 @@ fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y:
     commands
 }
 
-// Pin dimensions for computing pin positions (must match ui.slint)
+// BASE_PIN_SIZE is still used as fallback for pin hit radius if not explicitly set
+// This constant will remain until all applications set pin-hit-radius explicitly
 const BASE_PIN_SIZE: f32 = 12.0;
-const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
-const PIN_MARGIN: f32 = 8.0; // Horizontal margin from node edge
 
 /// Cubic bezier curve control points
 struct CubicBezier {
@@ -274,27 +273,18 @@ fn create_bezier_from_endpoints(
     }
 }
 
-/// Compute screen position for a pin given its ID, node rect, and zoom
-/// Pin ID format: node_id * 10 + pin_type (1 = input, 2 = output)
+/// Compute absolute screen position for a pin from its relative offset and node rect
+/// Relative offset is in unscaled coordinates (from node top-left)
 /// Returns (x, y) in screen coordinates (center of pin circle)
-fn compute_pin_screen_position(pin_id: i32, node_rect: &NodeRect, zoom: f32) -> (f32, f32) {
-    let pin_type = pin_id % 10; // 1 = input, 2 = output
-    let pin_size = BASE_PIN_SIZE * zoom;
-    let pin_radius = pin_size / 2.0;
-
-    let (x, y) = if pin_type == 1 {
-        // Input pin: left side
-        let x = node_rect.x + PIN_MARGIN * zoom + pin_radius;
-        let y = node_rect.y + PIN_Y_OFFSET * zoom + pin_radius;
-        (x, y)
-    } else {
-        // Output pin: right side
-        let x = node_rect.x + node_rect.width - PIN_MARGIN * zoom - pin_size + pin_radius;
-        let y = node_rect.y + PIN_Y_OFFSET * zoom + pin_radius;
-        (x, y)
-    };
-
-    (x, y)
+fn compute_absolute_pin_position(
+    relative_x: f32,
+    relative_y: f32,
+    node_rect: &NodeRect,
+    zoom: f32,
+) -> (f32, f32) {
+    let abs_x = node_rect.x + relative_x * zoom;
+    let abs_y = node_rect.y + relative_y * zoom;
+    (abs_x, abs_y)
 }
 
 /// Node rectangle info for hit-testing and box selection
@@ -354,8 +344,8 @@ struct NodeEditorState {
     box_select_start: LogicalPoint,
     /// Current position of box selection
     box_select_current: LogicalPoint,
-    /// Known pin positions for hit-testing (pin_id -> screen position)
-    pin_positions: BTreeMap<i32, LogicalPoint>,
+    /// Pin relative offsets (pin_id -> (rel_x, rel_y) in unscaled coordinates from node top-left)
+    pin_relative_offsets: BTreeMap<i32, (f32, f32)>,
     /// Known node rectangles for hit-testing and box selection (node_id -> screen rect)
     node_rects: BTreeMap<i32, NodeRect>,
     /// Set of selected node IDs (owned by core)
@@ -1147,22 +1137,23 @@ impl NodeEditorOverlay {
         // Track whether we need to regenerate link positions at the end
         let mut needs_link_regeneration = false;
 
-        // Check if a Pin component is reporting its position
+        // Check if a Pin component is reporting its position (single pin - deprecated)
+        // This is kept for backward compatibility but batch reporting is preferred
         let reporting_pin = self.reporting_pin_id();
         if reporting_pin > 0 {
             let pin_x = self.reporting_pin_x().get();
             let pin_y = self.reporting_pin_y().get();
 
-            // Store the pin position for hit-testing
+            // Store the pin relative offset (treating reported values as relative offsets)
             let mut state = self.data.state.borrow_mut();
-            state.pin_positions.insert(reporting_pin, LogicalPoint::new(pin_x, pin_y));
+            state.pin_relative_offsets.insert(reporting_pin, (pin_x, pin_y));
             drop(state);
 
             // Clear the reporting trigger
             Self::FIELD_OFFSETS.reporting_pin_id.apply_pin(self).set(0);
         }
 
-        // Check for batch pin position reports (format: "id,x,y;...")
+        // Check for batch pin relative offset reports (format: "id,rel_x,rel_y;...")
         let pins_batch = self.pending_pins_batch();
         if !pins_batch.is_empty() {
             let mut state = self.data.state.borrow_mut();
@@ -1173,18 +1164,18 @@ impl NodeEditorOverlay {
                 }
                 let parts: alloc::vec::Vec<&str> = pin_str.split(',').collect();
                 if parts.len() >= 3 {
-                    if let (Ok(id), Ok(x), Ok(y)) = (
+                    if let (Ok(id), Ok(rel_x), Ok(rel_y)) = (
                         parts[0].parse::<i32>(),
                         parts[1].parse::<f32>(),
                         parts[2].parse::<f32>(),
                     ) {
-                        state.pin_positions.insert(id, LogicalPoint::new(x, y));
+                        state.pin_relative_offsets.insert(id, (rel_x, rel_y));
                     }
                 }
             }
 
             // Update debug count
-            let pin_count = state.pin_positions.len() as i32;
+            let pin_count = state.pin_relative_offsets.len() as i32;
             drop(state);
 
             Self::FIELD_OFFSETS.debug_pin_count.apply_pin(self).set(pin_count);
@@ -1429,36 +1420,46 @@ impl NodeEditorOverlay {
             let end_node_rect = state.node_rects.get(&end_node_id);
 
             if let (Some(start_rect), Some(end_rect)) = (start_node_rect, end_node_rect) {
-                // Compute base pin positions
-                let (mut start_x, mut start_y) = compute_pin_screen_position(link.start_pin_id, start_rect, zoom);
-                let (mut end_x, mut end_y) = compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
+                // Get pin relative offsets
+                let start_offset = state.pin_relative_offsets.get(&link.start_pin_id);
+                let end_offset = state.pin_relative_offsets.get(&link.end_pin_id);
 
-                // Apply drag offset to selected nodes
-                // Note: drag_offset is in world coordinates, pin positions are in screen coordinates
-                // So we multiply by zoom to convert drag offset to screen space
-                if is_dragging {
-                    if state.selected_node_ids.contains(&start_node_id) {
-                        start_x += drag_offset_x * zoom;
-                        start_y += drag_offset_y * zoom;
+                if let (Some(&(start_rel_x, start_rel_y)), Some(&(end_rel_x, end_rel_y))) =
+                    (start_offset, end_offset)
+                {
+                    // Compute absolute pin positions from relative offsets
+                    let (mut start_x, mut start_y) =
+                        compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect, zoom);
+                    let (mut end_x, mut end_y) =
+                        compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect, zoom);
+
+                    // Apply drag offset to selected nodes
+                    // Note: drag_offset is in world coordinates, pin positions are in screen coordinates
+                    // So we multiply by zoom to convert drag offset to screen space
+                    if is_dragging {
+                        if state.selected_node_ids.contains(&start_node_id) {
+                            start_x += drag_offset_x * zoom;
+                            start_y += drag_offset_y * zoom;
+                        }
+                        if state.selected_node_ids.contains(&end_node_id) {
+                            end_x += drag_offset_x * zoom;
+                            end_y += drag_offset_y * zoom;
+                        }
                     }
-                    if state.selected_node_ids.contains(&end_node_id) {
-                        end_x += drag_offset_x * zoom;
-                        end_y += drag_offset_y * zoom;
-                    }
+
+                    let color_argb = link.color.as_argb_encoded();
+
+                    // Format for position data: id,start_x,start_y,end_x,end_y,color_argb
+                    position_results.push(alloc::format!(
+                        "{},{},{},{},{},{}",
+                        link_id, start_x, start_y, end_x, end_y, color_argb
+                    ));
+
+                    // Generate bezier path command and add to bezier results
+                    // Format: id|path_commands|color_argb (using | since path contains spaces)
+                    let path_cmd = generate_bezier_path_command(start_x, start_y, end_x, end_y, zoom);
+                    bezier_results.push(alloc::format!("{}|{}|{}", link_id, path_cmd, color_argb));
                 }
-
-                let color_argb = link.color.as_argb_encoded();
-
-                // Format for position data: id,start_x,start_y,end_x,end_y,color_argb
-                position_results.push(alloc::format!(
-                    "{},{},{},{},{},{}",
-                    link_id, start_x, start_y, end_x, end_y, color_argb
-                ));
-
-                // Generate bezier path command and add to bezier results
-                // Format: id|path_commands|color_argb (using | since path contains spaces)
-                let path_cmd = generate_bezier_path_command(start_x, start_y, end_x, end_y, zoom);
-                bezier_results.push(alloc::format!("{}|{}|{}", link_id, path_cmd, color_argb));
             }
         }
 
@@ -1871,7 +1872,7 @@ impl NodeEditorOverlay {
     }
 
     /// Find a pin at the given position, returns pin ID or 0 if no pin found
-    /// Uses pin positions from state.pin_positions to support arbitrary pin layouts
+    /// Computes absolute pin positions from relative offsets + node rects
     fn find_pin_at(self: Pin<&Self>, position: LogicalPoint) -> i32 {
         let zoom = self.zoom();
         // Use explicit hit radius if set, otherwise default to ~66% of pin diameter
@@ -1884,12 +1885,22 @@ impl NodeEditorOverlay {
         let hit_radius_sq = hit_radius * hit_radius;
         let state = self.data.state.borrow();
 
-        // Check all pins from pin_positions (supports arbitrary pin counts per node)
-        for (&pin_id, pin_pos) in state.pin_positions.iter() {
-            let dx = position.x - pin_pos.x;
-            let dy = position.y - pin_pos.y;
-            if dx * dx + dy * dy <= hit_radius_sq {
-                return pin_id;
+        // Check all pins from pin_relative_offsets (supports arbitrary pin counts per node)
+        for (&pin_id, &(rel_x, rel_y)) in state.pin_relative_offsets.iter() {
+            // Get node ID from pin ID (pin_id = node_id * 10 + pin_type)
+            let node_id = pin_id / 10;
+
+            // Find the node rect
+            if let Some(node_rect) = state.node_rects.get(&node_id) {
+                // Compute absolute position from relative offset
+                let (abs_x, abs_y) = compute_absolute_pin_position(rel_x, rel_y, node_rect, zoom);
+
+                // Check if mouse is within hit radius
+                let dx = position.x - abs_x;
+                let dy = position.y - abs_y;
+                if dx * dx + dy * dy <= hit_radius_sq {
+                    return pin_id;
+                }
             }
         }
 
@@ -1945,34 +1956,42 @@ impl NodeEditorOverlay {
             let end_node_rect = state.node_rects.get(&end_node_id);
 
             if let (Some(start_rect), Some(end_rect)) = (start_node_rect, end_node_rect) {
-                // Compute pin positions
-                let (mut start_x, mut start_y) =
-                    compute_pin_screen_position(link.start_pin_id, start_rect, zoom);
-                let (mut end_x, mut end_y) =
-                    compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
+                // Get pin relative offsets
+                let start_offset = state.pin_relative_offsets.get(&link.start_pin_id);
+                let end_offset = state.pin_relative_offsets.get(&link.end_pin_id);
 
-                // Apply drag offset to selected nodes
-                // Note: drag_offset is in world coordinates, pin positions are in screen coordinates
-                if is_dragging {
-                    if state.selected_node_ids.contains(&start_node_id) {
-                        start_x += drag_offset_x * zoom;
-                        start_y += drag_offset_y * zoom;
+                if let (Some(&(start_rel_x, start_rel_y)), Some(&(end_rel_x, end_rel_y))) =
+                    (start_offset, end_offset)
+                {
+                    // Compute absolute pin positions from relative offsets
+                    let (mut start_x, mut start_y) =
+                        compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect, zoom);
+                    let (mut end_x, mut end_y) =
+                        compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect, zoom);
+
+                    // Apply drag offset to selected nodes
+                    // Note: drag_offset is in world coordinates, pin positions are in screen coordinates
+                    if is_dragging {
+                        if state.selected_node_ids.contains(&start_node_id) {
+                            start_x += drag_offset_x * zoom;
+                            start_y += drag_offset_y * zoom;
+                        }
+                        if state.selected_node_ids.contains(&end_node_id) {
+                            end_x += drag_offset_x * zoom;
+                            end_y += drag_offset_y * zoom;
+                        }
                     }
-                    if state.selected_node_ids.contains(&end_node_id) {
-                        end_x += drag_offset_x * zoom;
-                        end_y += drag_offset_y * zoom;
+
+                    // Create bezier curve
+                    let bezier = create_bezier_from_endpoints(start_x, start_y, end_x, end_y, zoom);
+
+                    // Calculate distance from mouse to bezier
+                    let distance = distance_to_bezier((position.x, position.y), &bezier);
+
+                    if distance < closest_distance {
+                        closest_distance = distance;
+                        closest_link_id = link_id;
                     }
-                }
-
-                // Create bezier curve
-                let bezier = create_bezier_from_endpoints(start_x, start_y, end_x, end_y, zoom);
-
-                // Calculate distance from mouse to bezier
-                let distance = distance_to_bezier((position.x, position.y), &bezier);
-
-                if distance < closest_distance {
-                    closest_distance = distance;
-                    closest_link_id = link_id;
                 }
             }
         }
