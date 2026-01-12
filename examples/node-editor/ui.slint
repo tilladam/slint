@@ -16,7 +16,7 @@
 // 2. Add links as children (using Link component)
 // 3. Handle callbacks for link creation, selection changes, etc.
 
-import { NodeEditor, Link, Pin } from "node_editor_lib.slint";
+import { NodeEditor, Link, Pin, PinTypes, PinId } from "node_editor_lib.slint";
 
 // Node layout constants - single source of truth
 // These are exported so Rust can access them
@@ -69,8 +69,8 @@ export { FilterNodeData }
 component Node inherits Rectangle {
     in property <string> title: "Node";
     in property <int> node-id;
-    in property <int> input-pin-id: node-id * 10 + 1;   // e.g., node 1 -> pin 11
-    in property <int> output-pin-id: node-id * 10 + 2;  // e.g., node 1 -> pin 12
+    in property <int> input-pin-id: PinId.make(node-id, PinTypes.input);
+    in property <int> output-pin-id: PinId.make(node-id, PinTypes.output);
 
     // Selection state
     in property <bool> selected: false;

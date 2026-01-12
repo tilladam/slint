@@ -34,6 +34,7 @@ fn build_node_rects_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> St
 
 /// Get pin screen position for a given pin ID using Slint-computed positions
 fn get_pin_position(window: &MainWindow, nodes: &VecModel<NodeData>, pin_id: i32) -> Option<(f32, f32)> {
+    // Pin ID encoding: pin_id = node_id * 10 + pin_type (see PinId global in Slint)
     let node_id = pin_id / 10;
     let pin_type = pin_id % 10;
 
@@ -41,11 +42,11 @@ fn get_pin_position(window: &MainWindow, nodes: &VecModel<NodeData>, pin_id: i32
         if let Some(node) = nodes.row_data(i) {
             if node.id == node_id {
                 let (x, y) = if pin_type == 1 {
-                    // Input pin
+                    // Input pin (PinTypes.input == 1)
                     (window.invoke_compute_input_pin_x(node.world_x),
                      window.invoke_compute_input_pin_y(node.world_y))
                 } else {
-                    // Output pin
+                    // Output pin (PinTypes.output == 2)
                     (window.invoke_compute_output_pin_x(node.world_x),
                      window.invoke_compute_output_pin_y(node.world_y))
                 };
@@ -120,17 +121,17 @@ fn build_filter_pins_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNo
     (0..filter_nodes.row_count())
         .filter_map(|i| filter_nodes.row_data(i))
         .flat_map(|node| {
-            // Data input pin (pin 1): left side, row 1
+            // Data input pin (FilterPinTypes.data-input == 1): left side, row 1
             let data_input_pin_id = node.id * 10 + 1;
             let data_input_rel_x = window.invoke_compute_filter_data_input_pin_relative_x();
             let data_input_rel_y = window.invoke_compute_filter_data_input_pin_relative_y();
 
-            // Data output pin (pin 2): right side, row 1
+            // Data output pin (FilterPinTypes.data-output == 2): right side, row 1
             let data_output_pin_id = node.id * 10 + 2;
             let data_output_rel_x = window.invoke_compute_filter_data_output_pin_relative_x();
             let data_output_rel_y = window.invoke_compute_filter_data_output_pin_relative_y();
 
-            // Control input pin (pin 3): left side, row 2
+            // Control input pin (FilterPinTypes.control-input == 3): left side, row 2
             let control_input_pin_id = node.id * 10 + 3;
             let control_input_rel_x = window.invoke_compute_filter_control_input_pin_relative_x();
             let control_input_rel_y = window.invoke_compute_filter_control_input_pin_relative_y();
@@ -147,7 +148,7 @@ fn build_filter_pins_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNo
 
 /// Build pin relative offsets batch string from Slint-computed offsets
 /// Format: "pin_id,rel_x,rel_y;..." where rel_x/rel_y are unscaled offsets from node top-left
-/// Pin IDs: node_id * 10 + 1 for input, node_id * 10 + 2 for output
+/// Pin IDs use PinId.make(node-id, pin-type) encoding (see PinTypes global)
 ///
 /// The core computes absolute positions on-demand as: node_rect.pos + rel_offset * zoom
 /// This eliminates hardcoded layout constants from the core.
@@ -156,11 +157,11 @@ fn build_pins_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> String {
         .filter_map(|i| nodes.row_data(i))
         .flat_map(|node| {
             // Call Slint pure callbacks to get pin relative offsets
-            let input_pin_id = node.id * 10 + 1;
+            let input_pin_id = node.id * 10 + 1;  // PinTypes.input == 1
             let input_rel_x = window.invoke_compute_input_pin_relative_x();
             let input_rel_y = window.invoke_compute_input_pin_relative_y();
 
-            let output_pin_id = node.id * 10 + 2;
+            let output_pin_id = node.id * 10 + 2;  // PinTypes.output == 2
             let output_rel_x = window.invoke_compute_output_pin_relative_x();
             let output_rel_y = window.invoke_compute_output_pin_relative_y();
 
@@ -582,13 +583,13 @@ fn main() {
         }
 
         // Also remove any links connected to deleted nodes
-        // Pin IDs are node_id * 10 + pin_type, so we check if pin's node is deleted
+        // Pin IDs encode node ID: pin_id = node_id * 10 + pin_type (see PinId.make)
         let mut link_indices_to_remove: Vec<usize> = Vec::new();
         let mut deleted_link_ids: Vec<i32> = Vec::new();
         for i in 0..links_for_delete.row_count() {
             if let Some(link) = links_for_delete.row_data(i) {
-                let start_node_id = link.start_pin_id / 10;
-                let end_node_id = link.end_pin_id / 10;
+                let start_node_id = link.start_pin_id / 10;  // PinId.get-node-id()
+                let end_node_id = link.end_pin_id / 10;      // PinId.get-node-id()
                 if deleted_node_ids.contains(&start_node_id)
                     || deleted_node_ids.contains(&end_node_id)
                 {

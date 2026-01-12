@@ -6,7 +6,7 @@
 //
 // Usage:
 // ```slint
-// import { NodeEditor, Link } from "node_editor_lib.slint";
+// import { NodeEditor, Link, Pin, PinTypes, PinId } from "node_editor_lib.slint";
 //
 // MainWindow {
 //     NodeEditor {
@@ -24,6 +24,48 @@
 //     }
 // }
 // ```
+
+/// Standard pin types for library components.
+/// Applications can extend these by defining their own globals.
+export global PinTypes {
+    /// Input pin type (standard for data/signal inputs)
+    out property <int> input: 1;
+    /// Output pin type (standard for data/signal outputs)
+    out property <int> output: 2;
+}
+
+/// Pin ID encoding and decoding utilities.
+/// Pin IDs encode both the node ID and pin type using the formula:
+/// pin_id = node_id * 10 + pin_type
+export global PinId {
+    /// Create a pin ID from node ID and pin type
+    /// Example: PinId.make(5, PinTypes.input) => 51
+    pure public function make(node-id: int, pin-type: int) -> int {
+        return node-id * 10 + pin-type;
+    }
+
+    /// Extract node ID from a pin ID
+    /// Example: PinId.get-node-id(51) => 5
+    pure public function get-node-id(pin-id: int) -> int {
+        return pin-id / 10;
+    }
+
+    /// Extract pin type from a pin ID
+    /// Example: PinId.get-type(51) => 1
+    pure public function get-type(pin-id: int) -> int {
+        return mod(pin-id, 10);
+    }
+
+    /// Check if a pin is an output type
+    pure public function is-output(pin-id: int) -> bool {
+        return mod(pin-id, 10) == PinTypes.output;
+    }
+
+    /// Check if a pin is an input type (not output)
+    pure public function is-input(pin-id: int) -> bool {
+        return mod(pin-id, 10) != PinTypes.output;
+    }
+}
 
 /// A bezier link between two pins using core-generated SVG path commands.
 export component Link inherits Path {
@@ -66,7 +108,7 @@ export component Link inherits Path {
 /// Pin {
 ///     x: 8px * zoom;
 ///     y: 40px * zoom;
-///     pin-id: node-id * 10 + 1;
+///     pin-id: PinId.make(node-id, PinTypes.input);
 ///     zoom: zoom;
 ///     base-color: #4CAF50;
 ///     hover-color: #66BB6A;
@@ -77,7 +119,7 @@ export component Link inherits Path {
 /// }
 /// ```
 export component Pin inherits Rectangle {
-    /// Unique identifier for this pin (typically node-id * 10 + pin-type)
+    /// Unique identifier for this pin (use PinId.make(node-id, pin-type))
     in property <int> pin-id;
     /// Current zoom level for scaling
     in property <float> zoom: 1.0;

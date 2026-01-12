@@ -7,7 +7,17 @@
 // - Labels showing state
 
 import { ComboBox, Button } from "std-widgets.slint";
-import { Pin } from "node_editor_lib.slint";
+import { Pin, PinTypes, PinId } from "node_editor_lib.slint";
+
+/// Application-specific pin types for filter nodes
+export global FilterPinTypes {
+    /// Data input pin (reuses standard input type)
+    out property <int> data-input: PinTypes.input;
+    /// Data output pin (reuses standard output type)
+    out property <int> data-output: PinTypes.output;
+    /// Control input pin (custom type for parameter control)
+    out property <int> control-input: 3;
+}
 
 // Filter node data passed from Rust
 export struct FilterNodeData {
@@ -25,13 +35,10 @@ export component FilterNode inherits Rectangle {
     in property <string> title: "Filter";
     in property <int> node-id;
 
-    // Pin IDs: node_id * 10 + pin_number
-    // Pin 1: Data input
-    // Pin 2: Data output
-    // Pin 3: Control input
-    in property <int> data-input-pin-id: node-id * 10 + 1;
-    in property <int> data-output-pin-id: node-id * 10 + 2;
-    in property <int> control-input-pin-id: node-id * 10 + 3;
+    // Pin IDs using FilterPinTypes
+    in property <int> data-input-pin-id: PinId.make(node-id, FilterPinTypes.data-input);
+    in property <int> data-output-pin-id: PinId.make(node-id, FilterPinTypes.data-output);
+    in property <int> control-input-pin-id: PinId.make(node-id, FilterPinTypes.control-input);
 
     // Selection state
     in property <bool> selected: false;

@@ -140,6 +140,59 @@ fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y:
     commands
 }
 
+/// Pin ID encoding and decoding utilities.
+/// Pin IDs encode both the node ID and pin type using the formula:
+/// pin_id = node_id * 10 + pin_type
+///
+/// Type conventions (defined in Slint PinTypes global):
+/// - Type 1: Input (standard data/signal input)
+/// - Type 2: Output (standard data/signal output)
+/// - Type 3+: Application-specific (e.g., control inputs)
+pub mod pin_id {
+    /// Output pin type constant (must match PinTypes.output in Slint)
+    const OUTPUT_TYPE: i32 = 2;
+
+    /// Create a pin ID from node ID and pin type
+    /// Example: make(5, 1) => 51
+    #[inline]
+    pub fn make(node_id: i32, pin_type: i32) -> i32 {
+        node_id * 10 + pin_type
+    }
+
+    /// Extract node ID from a pin ID
+    /// Example: get_node_id(51) => 5
+    #[inline]
+    pub fn get_node_id(pin_id: i32) -> i32 {
+        pin_id / 10
+    }
+
+    /// Extract pin type from a pin ID
+    /// Example: get_type(51) => 1
+    #[inline]
+    pub fn get_type(pin_id: i32) -> i32 {
+        pin_id % 10
+    }
+
+    /// Check if a pin is an output type
+    #[inline]
+    pub fn is_output(pin_id: i32) -> bool {
+        get_type(pin_id) == OUTPUT_TYPE
+    }
+
+    /// Check if a pin is an input type (not output)
+    #[inline]
+    pub fn is_input(pin_id: i32) -> bool {
+        !is_output(pin_id)
+    }
+
+    /// Check if two pins are compatible for linking
+    /// Compatible means one output and one input (not same pin)
+    #[inline]
+    pub fn are_compatible(start_pin: i32, end_pin: i32) -> bool {
+        start_pin != end_pin && is_output(start_pin) != is_output(end_pin)
+    }
+}
+
 // BASE_PIN_SIZE is still used as fallback for pin hit radius if not explicitly set
 // This constant will remain until all applications set pin-hit-radius explicitly
 const BASE_PIN_SIZE: f32 = 12.0;
@@ -1101,7 +1154,7 @@ impl NodeEditorOverlay {
 
                 if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
                     // Normalize: output pin first, input pin second
-                    let (output_pin, input_pin) = if start_pin % 10 == 2 {
+                    let (output_pin, input_pin) = if pin_id::is_output(start_pin) {
                         (start_pin, end_pin)
                     } else {
                         (end_pin, start_pin)
@@ -1412,8 +1465,8 @@ impl NodeEditorOverlay {
 
         for (link_id, link) in state.links.iter() {
             // Get node IDs from pin IDs
-            let start_node_id = link.start_pin_id / 10;
-            let end_node_id = link.end_pin_id / 10;
+            let start_node_id = pin_id::get_node_id(link.start_pin_id);
+            let end_node_id = pin_id::get_node_id(link.end_pin_id);
 
             // Find node rects
             let start_node_rect = state.node_rects.get(&start_node_id);
@@ -1632,7 +1685,7 @@ impl NodeEditorOverlay {
 
                     if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
                         // Normalize: output pin first, input pin second
-                        let (output_pin, input_pin) = if start_pin % 10 == 2 {
+                        let (output_pin, input_pin) = if pin_id::is_output(start_pin) {
                             (start_pin, end_pin)
                         } else {
                             (end_pin, start_pin)
@@ -1887,8 +1940,8 @@ impl NodeEditorOverlay {
 
         // Check all pins from pin_relative_offsets (supports arbitrary pin counts per node)
         for (&pin_id, &(rel_x, rel_y)) in state.pin_relative_offsets.iter() {
-            // Get node ID from pin ID (pin_id = node_id * 10 + pin_type)
-            let node_id = pin_id / 10;
+            // Get node ID from pin ID
+            let node_id = pin_id::get_node_id(pin_id);
 
             // Find the node rect
             if let Some(node_rect) = state.node_rects.get(&node_id) {
@@ -1909,18 +1962,7 @@ impl NodeEditorOverlay {
 
     /// Check if two pins are compatible for linking (one input, one output)
     fn pins_compatible(start_pin: i32, end_pin: i32) -> bool {
-        if start_pin == end_pin {
-            return false;
-        }
-        // Pin ID convention: id % 10 == 1 for input, == 2 for output, == 3+ for additional inputs
-        let start_type = start_pin % 10;
-        let end_type = end_pin % 10;
-        // Input types: 1, 3, 4, 5, ... (odd numbers or >= 3)
-        // Output types: 2
-        let start_is_output = start_type == 2;
-        let end_is_output = end_type == 2;
-        // One must be output and one must be input (not output)
-        start_is_output != end_is_output
+        pin_id::are_compatible(start_pin, end_pin)
     }
 
     /// Check if a link already exists between two pins
@@ -1948,8 +1990,8 @@ impl NodeEditorOverlay {
 
         for (&link_id, link) in state.links.iter() {
             // Get node IDs from pin IDs
-            let start_node_id = link.start_pin_id / 10;
-            let end_node_id = link.end_pin_id / 10;
+            let start_node_id = pin_id::get_node_id(link.start_pin_id);
+            let end_node_id = pin_id::get_node_id(link.end_pin_id);
 
             // Find node rects
             let start_node_rect = state.node_rects.get(&start_node_id);
