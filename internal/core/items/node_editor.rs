@@ -1439,14 +1439,16 @@ impl NodeEditorOverlay {
                 let (mut end_x, mut end_y) = compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
 
                 // Apply drag offset to selected nodes
+                // Note: drag_offset is in world coordinates, pin positions are in screen coordinates
+                // So we multiply by zoom to convert drag offset to screen space
                 if is_dragging {
                     if state.selected_node_ids.contains(&start_node_id) {
-                        start_x += drag_offset_x;
-                        start_y += drag_offset_y;
+                        start_x += drag_offset_x * zoom;
+                        start_y += drag_offset_y * zoom;
                     }
                     if state.selected_node_ids.contains(&end_node_id) {
-                        end_x += drag_offset_x;
-                        end_y += drag_offset_y;
+                        end_x += drag_offset_x * zoom;
+                        end_y += drag_offset_y * zoom;
                     }
                 }
 
@@ -1913,14 +1915,15 @@ impl NodeEditorOverlay {
                     compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
 
                 // Apply drag offset to selected nodes
+                // Note: drag_offset is in world coordinates, pin positions are in screen coordinates
                 if is_dragging {
                     if state.selected_node_ids.contains(&start_node_id) {
-                        start_x += drag_offset_x;
-                        start_y += drag_offset_y;
+                        start_x += drag_offset_x * zoom;
+                        start_y += drag_offset_y * zoom;
                     }
                     if state.selected_node_ids.contains(&end_node_id) {
-                        end_x += drag_offset_x;
-                        end_y += drag_offset_y;
+                        end_x += drag_offset_x * zoom;
+                        end_y += drag_offset_y * zoom;
                     }
                 }
 
