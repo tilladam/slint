@@ -1,0 +1,291 @@
+// Node Editor Library
+//
+// This library provides a composite NodeEditor component that wraps the native
+// NodeEditorBackground and NodeEditorOverlay items into a convenient three-layer
+// architecture with unified properties and callbacks.
+//
+// Usage:
+// ```slint
+// import { NodeEditor, Link } from "node_editor_lib.slint";
+//
+// MainWindow {
+//     NodeEditor {
+//         pan-x: 0px;
+//         pan-y: 0px;
+//         zoom: 1.0;
+//
+//         link-created => { /* handle link creation */ }
+//
+//         // Add nodes
+//         for node in nodes: MyNode { ... }
+//
+//         // Add links
+//         for link in links: Link { path-commands: ...; }
+//     }
+// }
+// ```
+
+/// A bezier link between two pins using core-generated SVG path commands.
+export component Link inherits Path {
+    /// SVG path commands from core's bezier calculation
+    /// Format: "M x0 y0 C x1 y1 x2 y2 x3 y3"
+    in property <string> path-commands;
+    /// Color of the link
+    in property <color> link-color: #888888;
+    /// Line width (will be scaled by zoom if provided)
+    in property <length> line-width: 2px;
+
+    width: 100%;
+    height: 100%;
+    stroke: link-color;
+    stroke-width: line-width;
+    fill: transparent;
+
+    // Set viewbox to match actual size so SVG coordinates map 1:1
+    viewbox-x: 0;
+    viewbox-y: 0;
+    viewbox-width: max(self.width / 1px, 1);
+    viewbox-height: max(self.height / 1px, 1);
+
+    commands: path-commands;
+}
+
+/// Composite node editor with three-layer architecture.
+///
+/// Provides:
+/// - Layer 1: Grid background (automatically rendered)
+/// - Layer 2: User children (nodes, links via @children)
+/// - Layer 3: Input overlay (pan, zoom, selection, link creation)
+/// - Selection box and link preview (automatically rendered on top)
+export component NodeEditor {
+    // === Shared viewport state ===
+    /// Current pan offset X
+    in-out property <length> pan-x;
+    /// Current pan offset Y
+    in-out property <length> pan-y;
+    /// Current zoom level
+    in-out property <float> zoom: 1.0;
+
+    // === Grid properties ===
+    /// Spacing between grid lines
+    in property <length> grid-spacing: 24px;
+    /// Color of grid lines
+    in property <color> grid-color: #404040;
+    /// Background color of the canvas
+    in property <brush> background-color: #1a1a1a;
+
+    // === Zoom constraints ===
+    /// Minimum zoom level
+    in property <float> min-zoom: 0.1;
+    /// Maximum zoom level
+    in property <float> max-zoom: 3.0;
+
+    // === Node drag state (set during node drag for link position updates) ===
+    /// Whether nodes are currently being dragged
+    in property <bool> is-dragging: false;
+    /// X offset of dragged nodes
+    in property <length> drag-offset-x;
+    /// Y offset of dragged nodes
+    in property <length> drag-offset-y;
+
+    // === Output: Grid ===
+    /// Generated SVG path commands for grid lines
+    out property <string> grid-commands: background-layer.grid-commands;
+
+    // === Output: Selection box state ===
+    /// Whether box selection is active
+    out property <bool> is-selecting: overlay.is-selecting;
+    /// Selection box X
+    out property <length> selection-x: overlay.selection-x;
+    /// Selection box Y
+    out property <length> selection-y: overlay.selection-y;
+    /// Selection box width
+    out property <length> selection-width: overlay.selection-width;
+    /// Selection box height
+    out property <length> selection-height: overlay.selection-height;
+
+    // === Output: Context menu ===
+    /// Context menu X coordinate
+    out property <length> context-menu-x: overlay.context-menu-x;
+    /// Context menu Y coordinate
+    out property <length> context-menu-y: overlay.context-menu-y;
+
+    // === Output: Link creation state ===
+    /// Whether a link is being created
+    out property <bool> is-creating-link: overlay.is-creating-link;
+    /// Link start X
+    out property <length> link-start-x: overlay.link-start-x;
+    /// Link start Y
+    out property <length> link-start-y: overlay.link-start-y;
+    /// Link end X (bidirectional for drag updates)
+    in-out property <length> link-end-x <=> overlay.link-end-x;
+    /// Link end Y
+    in-out property <length> link-end-y <=> overlay.link-end-y;
+    /// Starting pin ID
+    out property <int> link-start-pin-id: overlay.link-start-pin-id;
+    /// Core-generated bezier path for link preview
+    out property <string> link-preview-path-commands: overlay.link-preview-path-commands;
+
+    // === Input: Link creation triggers ===
+    /// Pin ID to start link from (set before calling start-link)
+    in property <int> pending-link-pin-id <=> overlay.pending-link-pin-id;
+    /// X position to start link from
+    in property <length> pending-link-x <=> overlay.pending-link-x;
+    /// Y position to start link from
+    in property <length> pending-link-y <=> overlay.pending-link-y;
+    /// Set to true to complete link creation
+    in property <bool> complete-link-creation <=> overlay.complete-link-creation;
+    /// Target pin ID for completion
+    in property <int> target-pin-id <=> overlay.target-pin-id;
+
+    // === Input: Pin position reporting ===
+    in property <int> reporting-pin-id <=> overlay.reporting-pin-id;
+    in property <length> reporting-pin-x <=> overlay.reporting-pin-x;
+    in property <length> reporting-pin-y <=> overlay.reporting-pin-y;
+    in property <length> pin-hit-radius <=> overlay.pin-hit-radius;
+    in-out property <string> pending-pins-batch <=> overlay.pending-pins-batch;
+
+    // === Output: Link creation result ===
+    /// Created link start pin ID
+    out property <int> created-link-start-pin: overlay.created-link-start-pin;
+    /// Created link end pin ID
+    out property <int> created-link-end-pin: overlay.created-link-end-pin;
+
+    // === Input: Node rectangle reporting ===
+    in property <int> reporting-node-id <=> overlay.reporting-node-id;
+    in property <length> reporting-node-x <=> overlay.reporting-node-x;
+    in property <length> reporting-node-y <=> overlay.reporting-node-y;
+    in property <length> reporting-node-width <=> overlay.reporting-node-width;
+    in property <length> reporting-node-height <=> overlay.reporting-node-height;
+    in-out property <string> pending-node-rects-batch <=> overlay.pending-node-rects-batch;
+
+    // === Input: Link reporting ===
+    in property <int> reporting-link-id <=> overlay.reporting-link-id;
+    in property <int> reporting-link-start-pin-id <=> overlay.reporting-link-start-pin-id;
+    in property <int> reporting-link-end-pin-id <=> overlay.reporting-link-end-pin-id;
+    in property <color> reporting-link-color <=> overlay.reporting-link-color;
+    in-out property <string> pending-links-batch <=> overlay.pending-links-batch;
+    in-out property <string> pending-deleted-link-ids <=> overlay.pending-deleted-link-ids;
+
+    // === Output: Link position data ===
+    out property <string> link-positions-data: overlay.link-positions-data;
+    /// Core-generated bezier paths for all links
+    in-out property <string> link-bezier-paths <=> overlay.link-bezier-paths;
+
+    // === Output: Selection state ===
+    /// Selected node IDs from box selection (comma-separated)
+    out property <string> selected-node-ids-str: overlay.selected-node-ids-str;
+    /// Currently selected node IDs
+    out property <string> current-selected-ids: overlay.current-selected-ids;
+    /// Currently selected link IDs
+    out property <string> current-selected-link-ids: overlay.current-selected-link-ids;
+
+    // === Input: Node click handling ===
+    in property <int> clicked-node-id <=> overlay.clicked-node-id;
+    in property <bool> clicked-shift-held <=> overlay.clicked-shift-held;
+
+    // === Output: Link hover state ===
+    out property <int> hovered-link-id: overlay.hovered-link-id;
+    in property <length> link-hover-distance <=> overlay.link-hover-distance;
+
+    // === Output: Debug ===
+    out property <int> debug-pin-count: overlay.debug-pin-count;
+    out property <int> debug-link-count: overlay.debug-link-count;
+
+    // === Callbacks: Triggers (set properties first, then call) ===
+    callback start-link <=> overlay.start-link;
+    callback pin-position-changed <=> overlay.pin-position-changed;
+    callback node-rect-changed <=> overlay.node-rect-changed;
+    callback link-reported <=> overlay.link-reported;
+    callback node-clicked <=> overlay.node-clicked;
+
+    // === Callbacks: Events ===
+    callback link-created <=> overlay.link-created;
+    callback link-hovered <=> overlay.link-hovered;
+    callback link-selection-changed <=> overlay.link-selection-changed;
+    callback link-positions-changed <=> overlay.link-positions-changed;
+    callback link-dropped <=> overlay.link-dropped;
+    callback link-cancelled <=> overlay.link-cancelled;
+    callback context-menu-requested <=> overlay.context-menu-requested;
+    callback selection-changed <=> overlay.selection-changed;
+    callback viewport-changed <=> overlay.viewport-changed;
+    callback delete-selected <=> overlay.delete-selected;
+    callback add-node-requested <=> overlay.add-node-requested;
+
+    // === Layer 1: Background ===
+    background-layer := NodeEditorBackground {
+        width: 100%;
+        height: 100%;
+        grid-spacing: root.grid-spacing;
+        grid-color: root.grid-color;
+        background-color: root.background-color;
+        pan-x <=> root.pan-x;
+        pan-y <=> root.pan-y;
+        zoom: root.zoom;
+
+        // Background fill
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: root.background-color;
+        }
+
+        // Grid
+        Path {
+            width: 100%;
+            height: 100%;
+            stroke: root.grid-color;
+            stroke-width: 1px;
+            fill: transparent;
+            viewbox-x: 0;
+            viewbox-y: 0;
+            viewbox-width: max(self.width / 1px, 1);
+            viewbox-height: max(self.height / 1px, 1);
+            commands: background-layer.grid-commands;
+        }
+    }
+
+    // === Layer 2: User children (nodes, links) ===
+    @children
+
+    // === Layer 3: Overlay ===
+    overlay := NodeEditorOverlay {
+        width: 100%;
+        height: 100%;
+        pan-x <=> root.pan-x;
+        pan-y <=> root.pan-y;
+        zoom <=> root.zoom;
+        min-zoom: root.min-zoom;
+        max-zoom: root.max-zoom;
+        is-dragging: root.is-dragging;
+        drag-offset-x: root.drag-offset-x;
+        drag-offset-y: root.drag-offset-y;
+    }
+
+    // === Selection box (on top) ===
+    Rectangle {
+        visible: overlay.is-selecting;
+        x: overlay.selection-x;
+        y: overlay.selection-y;
+        width: overlay.selection-width;
+        height: overlay.selection-height;
+        background: #4488ff20;
+        border-color: #4488ff;
+        border-width: 1px;
+    }
+
+    // === Link preview (on top) ===
+    Path {
+        visible: overlay.is-creating-link;
+        width: 100%;
+        height: 100%;
+        commands: overlay.link-preview-path-commands;
+        stroke: #ffffff80;
+        stroke-width: 2px * root.zoom;
+        fill: transparent;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: max(self.width / 1px, 1);
+        viewbox-height: max(self.height / 1px, 1);
+    }
+}

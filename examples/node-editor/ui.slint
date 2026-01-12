@@ -1,26 +1,22 @@
 // Node Editor Example
 //
-// This example demonstrates the NodeEditorBackground and NodeEditorOverlay
-// native items for building visual node graph editors.
+// This example demonstrates the NodeEditor composite component which wraps
+// NodeEditorBackground and NodeEditorOverlay into a convenient three-layer
+// architecture.
 //
-// Architecture (three-layer approach):
-// 1. NodeEditorBackground - generates grid geometry, provides viewport (pan, zoom)
-// 2. Node children - application-defined components (Node)
-// 3. NodeEditorOverlay - handles input (pan, zoom, box selection, link creation)
+// The composite handles:
+// - Grid background rendering
+// - Pan and zoom
+// - Box selection
+// - Link creation with bezier preview
+// - Selection box rendering
 //
-// Rendering (hybrid approach - core provides geometry, Slint provides styling):
-// - Grid: Path component bound to background.grid-commands
-// - Links: Path components with bezier curves (position data from core)
-// - Selection box: Rectangle bound to overlay's is-selecting/selection-* properties
-// - Link preview: Path bound to overlay.is-creating-link/link-start-*/link-end-*
-//
-// Link creation flow (handled by core overlay):
-// 1. Pin TouchArea starts drag -> sets overlay.pending-link-* properties
-// 2. Core starts link creation, sets is-creating-link = true
-// 3. Pin TouchArea moves -> updates overlay.link-end-x/y
-// 4. Pin TouchArea releases -> sets overlay.complete-link-creation = true
-// 5. Core uses find_pin_at() for hit-testing (no node limit!) and fires link-created callback
-// 6. Rust's on_create_link callback adds the link to the model
+// Usage pattern:
+// 1. Add nodes as children of NodeEditor
+// 2. Add links as children (using Link component)
+// 3. Handle callbacks for link creation, selection changes, etc.
+
+import { NodeEditor, Link } from "node_editor_lib.slint";
 
 // Data structure for nodes - exported to Rust
 // Note: Selection state is owned by core (overlay.current-selected-ids), not stored here
@@ -43,31 +39,6 @@ export struct LinkData {
     path-commands: string,
 }
 
-// A bezier link between two pins
-// Uses core-generated SVG path commands for bezier curve
-component Link inherits Path {
-    /// SVG path commands from core's bezier calculation
-    /// Format: "M x0 y0 C x1 y1 x2 y2 x3 y3"
-    in property <string> path-commands;
-    in property <color> link-color: #888888;
-    in property <length> line-width: 2px;
-    in property <float> zoom: 1.0;
-
-    width: 100%;
-    height: 100%;
-    stroke: link-color;
-    stroke-width: line-width;
-    fill: transparent;
-
-    // Set viewbox to match actual size so SVG coordinates map 1:1
-    // Use max() to avoid zero-size viewbox during initial layout
-    viewbox-x: 0;
-    viewbox-y: 0;
-    viewbox-width: max(self.width / 1px, 1);
-    viewbox-height: max(self.height / 1px, 1);
-
-    commands: path-commands;
-}
 
 // A basic node component with interactive pins
 component Node inherits Rectangle {
@@ -314,14 +285,14 @@ export component MainWindow inherits Window {
     in-out property <length> pan-y: 0px;
     in-out property <float> zoom: 1.0;
 
-    // Selection state (managed by overlay)
-    out property <string> current-selected-ids <=> overlay.current-selected-ids;
+    // Selection state (managed by editor)
+    out property <string> current-selected-ids <=> editor.current-selected-ids;
 
-    // Link hover state (managed by overlay)
-    out property <int> hovered-link-id <=> overlay.hovered-link-id;
+    // Link hover state (managed by editor)
+    out property <int> hovered-link-id <=> editor.hovered-link-id;
 
-    // Link selection state (managed by overlay)
-    out property <string> current-selected-link-ids <=> overlay.current-selected-link-ids;
+    // Link selection state (managed by editor)
+    out property <string> current-selected-link-ids <=> editor.current-selected-link-ids;
 
     // Pure callback to check if a link is selected (parses current-selected-link-ids)
     pure callback is-link-selected(int) -> bool;
@@ -333,41 +304,41 @@ export component MainWindow inherits Window {
     // Callback to delete selected links (called from Rust)
     callback delete-selected-links();
 
-    // Link position data (managed by overlay, updated when viewport/nodes change)
-    out property <string> link-positions-data <=> overlay.link-positions-data;
+    // Link position data (managed by editor, updated when viewport/nodes change)
+    out property <string> link-positions-data <=> editor.link-positions-data;
 
     // Core-generated bezier paths for all links (hybrid architecture)
     // Format: "id|path_commands|color_argb;..." where path_commands is SVG like "M x0 y0 C x1 y1 x2 y2 x3 y3"
-    in-out property <string> link-bezier-paths <=> overlay.link-bezier-paths;
+    in-out property <string> link-bezier-paths <=> editor.link-bezier-paths;
 
     // Batch of pending links to register (set from Rust)
     // Format: "id,start_pin,end_pin,color_argb;id,start_pin,end_pin,color_argb;..."
-    in-out property <string> pending-links-batch <=> overlay.pending-links-batch;
+    in-out property <string> pending-links-batch <=> editor.pending-links-batch;
 
     // Batch of link IDs to delete (set from Rust when links are removed)
     // Format: "id1,id2,id3,..."
-    in-out property <string> pending-deleted-link-ids <=> overlay.pending-deleted-link-ids;
+    in-out property <string> pending-deleted-link-ids <=> editor.pending-deleted-link-ids;
 
     // Batch of pending node rects to register (set from Rust)
     // Format: "id,x,y,w,h;..." where x,y,w,h are screen coordinates
-    in-out property <string> pending-node-rects-batch <=> overlay.pending-node-rects-batch;
+    in-out property <string> pending-node-rects-batch <=> editor.pending-node-rects-batch;
 
     // Batch of pending pin positions to register (set from Rust)
     // Format: "pin_id,x,y;..." where x,y are screen coordinates
-    in-out property <string> pending-pins-batch <=> overlay.pending-pins-batch;
+    in-out property <string> pending-pins-batch <=> editor.pending-pins-batch;
 
-    // Callback to report a link to the overlay (called from Rust on init)
+    // Callback to report a link to the editor (called from Rust on init)
     callback report-link(int, int, int, color);  // id, start-pin-id, end-pin-id, color
 
-    // Callback when link positions change (forwarded from overlay)
+    // Callback when link positions change (forwarded from editor)
     callback link-positions-updated();
 
-    // Implement report-link to forward to overlay
+    // Implement report-link to forward to editor
     report-link(id, start-pin, end-pin, col) => {
-        overlay.reporting-link-id = id;
-        overlay.reporting-link-start-pin-id = start-pin;
-        overlay.reporting-link-end-pin-id = end-pin;
-        overlay.reporting-link-color = col;
+        editor.reporting-link-id = id;
+        editor.reporting-link-start-pin-id = start-pin;
+        editor.reporting-link-end-pin-id = end-pin;
+        editor.reporting-link-color = col;
     }
 
     // Node dimensions (must match Node component)
@@ -393,162 +364,31 @@ export component MainWindow inherits Window {
         return world-y * 1px * zoom + pan-y + (8px + 24px + 8px) * zoom + pin-radius;
     }
 
-    // The three-layer node editor structure
-    // Background layer with grid (NodeEditorBackground generates grid-commands, Path renders them)
-    background-layer := NodeEditorBackground {
+    // The composite NodeEditor handles all three layers:
+    // 1. Background with grid
+    // 2. Children (nodes and links) - placed via @children
+    // 3. Overlay for input handling
+    // Plus selection box and link preview rendering
+    editor := NodeEditor {
         width: 100%;
         height: 100%;
+        pan-x <=> root.pan-x;
+        pan-y <=> root.pan-y;
+        zoom <=> root.zoom;
+        min-zoom: 0.25;
+        max-zoom: 4.0;
         background-color: #1a1a1a;
         grid-spacing: 24px;
         grid-color: #333333;
-        zoom: zoom;
-        pan-x <=> pan-x;
-        pan-y <=> pan-y;
 
-        // Background fill
-        Rectangle {
-            width: 100%;
-            height: 100%;
-            background: parent.background-color;
-        }
-
-        // Grid rendered as Path, bound to generated commands from NodeEditorBackground
-        Path {
-            width: 100%;
-            height: 100%;
-            stroke: parent.grid-color;
-            stroke-width: 1px;
-            fill: transparent;
-            viewbox-x: 0;
-            viewbox-y: 0;
-            viewbox-width: max(self.width / 1px, 1);
-            viewbox-height: max(self.height / 1px, 1);
-            commands: parent.grid-commands;
-        }
-    }
-
-    // Link creation now uses overlay's state machine (is-creating-link, link-start-x/y, link-end-x/y)
-    // See overlay.pending-link-* for triggering link creation
-
-    // Pin hit-testing is now handled by core's find_pin_at() using reported pin positions
-    // No more 16-node limit!
-
-    // Link drag offset is now handled by core:
-    // - is-dragging, drag-offset-x/y are bound to overlay
-    // - Core applies offset to selected nodes' link positions in regenerate_link_positions()
-    // - No more 16-node limit for link drag offset!
-
-    // Link creation is now handled by the core overlay:
-    // - Pin drag-started: sets overlay.pending-link-* and triggers link creation
-    // - Pin drag-moved: updates overlay.link-end-x/y
-    // - Pin drag-ended: sets overlay.complete-link-creation = true
-    // - Core uses find_pin_at() for hit-testing (no node limit)
-    // - Core fires link-created or link-dropped callback
-
-    // Nodes layer - iterate over model from Rust
-    // During drag, apply visual offset. Model is only updated on drag-end.
-    // Selection state comes from core via is-node-selected callback (not stored in model)
-    for node-data in nodes: Node {
-        title: node-data.title;
-        node-id: node-data.id;
-        selected: root.is-node-selected(node-data.id);
-        world-x: node-data.world-x * 1px;
-        world-y: node-data.world-y * 1px;
-        // Pass drag offset to selected nodes
-        drag-offset-x: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-x : 0px;
-        drag-offset-y: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-y : 0px;
-        zoom: zoom;
-        pan-x: pan-x;
-        pan-y: pan-y;
-        clicked(id, shift) => {
-            overlay.clicked-node-id = id;
-            overlay.clicked-shift-held = shift;
-            root.selection-changed(overlay.current-selected-ids);
-        }
-        drag-started(id, already-selected) => {
-            // Only change selection if the node is not already selected
-            // This preserves multi-selection when dragging a selected node
-            if !already-selected {
-                overlay.clicked-node-id = id;
-                overlay.clicked-shift-held = false;
-                root.selection-changed(overlay.current-selected-ids);
-            }
-
-            is-dragging = true;
-            visual-drag-offset-x = 0px;
-            visual-drag-offset-y = 0px;
-        }
-        drag-moved(id, offset-x, offset-y) => {
-            // Update visual offset for all selected nodes
-            visual-drag-offset-x = offset-x;
-            visual-drag-offset-y = offset-y;
-        }
-        drag-ended(id, delta-x, delta-y) => {
-            // Commit to model
-            root.commit-drag(delta-x / 1px, delta-y / 1px, grid-snap-enabled);
-            is-dragging = false;
-            visual-drag-offset-x = 0px;
-            visual-drag-offset-y = 0px;
-        }
-        pin-drag-started(pin-id, x, y) => {
-            // Start link creation using core's state machine
-            overlay.pending-link-pin-id = pin-id;
-            overlay.pending-link-x = x;
-            overlay.pending-link-y = y;
-            overlay.start-link();  // Trigger core to start link creation
-        }
-        pin-drag-moved(pin-id, x, y) => {
-            // Update link preview end position via overlay
-            overlay.link-end-x = x;
-            overlay.link-end-y = y;
-        }
-        pin-drag-ended(pin-id, x, y) => {
-            // Complete link creation - core will use find_pin_at() to find target
-            overlay.link-end-x = x;
-            overlay.link-end-y = y;
-            overlay.complete-link-creation = true;
-            // Core handles validation and fires link-created or link-dropped callback
-        }
-        report-rect(id, x, y, w, h) => {
-            // Append to batch (format: "id,x,y,w,h;...")
-            // Convert lengths to floats by dividing by 1px
-            overlay.pending-node-rects-batch = overlay.pending-node-rects-batch +
-                (overlay.pending-node-rects-batch == "" ? "" : ";") +
-                id + "," + (x / 1px) + "," + (y / 1px) + "," + (w / 1px) + "," + (h / 1px);
-        }
-    }
-
-    // Links layer (between nodes and overlay) - iterates over Rust-owned model
-    // Uses core-generated bezier path commands (hybrid architecture)
-    // Path commands are looked up from core via pure callback (not from model)
-    for link-data in links: Link {
-        path-commands: get-link-path-commands(link-data.id);
-        // Highlight link when selected (cyan) or hovered (white)
-        link-color: is-link-selected(link-data.id) ? #00ffff :
-                    link-data.id == hovered-link-id ? #ffffff : link-data.color;
-        line-width: is-link-selected(link-data.id) ? 4px * zoom :
-                    link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
-        zoom: zoom;
-    }
-
-    // Overlay layer (on top)
-    overlay := NodeEditorOverlay {
-        width: 100%;
-        height: 100%;
-        pan-x <=> pan-x;
-        pan-y <=> pan-y;
-        zoom <=> zoom;
-        min-zoom: 0.25;
-        max-zoom: 4.0;
-
-        // Drag state - core applies offset to link positions when dragging
+        // Drag state - editor applies offset to link positions when dragging
         is-dragging: is-dragging;
         drag-offset-x: visual-drag-offset-x;
         drag-offset-y: visual-drag-offset-y;
 
         link-created => {
-            // Create link using the overlay's output properties
-            root.create-link(overlay.created-link-start-pin, overlay.created-link-end-pin);
+            // Create link using the editor's output properties
+            root.create-link(editor.created-link-start-pin, editor.created-link-end-pin);
         }
 
         link-dropped => {
@@ -556,16 +396,16 @@ export component MainWindow inherits Window {
         }
 
         context-menu-requested => {
-            debug("Context menu at: " + overlay.context-menu-x / 1px + ", " + overlay.context-menu-y / 1px);
+            debug("Context menu at: " + editor.context-menu-x / 1px + ", " + editor.context-menu-y / 1px);
         }
 
         selection-changed => {
-            // Overlay has computed intersecting node IDs and updated selection - notify Rust
-            root.selection-changed(overlay.current-selected-ids);
+            // Editor has computed intersecting node IDs and updated selection - notify Rust
+            root.selection-changed(editor.current-selected-ids);
         }
 
         viewport-changed => {
-            // Update link positions when pan or zoom changes (grid is handled by NodeEditorBackground)
+            // Update link positions when pan or zoom changes
             root.update-viewport(zoom, pan-x / 1px, pan-y / 1px);
         }
 
@@ -581,36 +421,93 @@ export component MainWindow inherits Window {
         }
 
         link-positions-changed => {
-            // Overlay has updated link positions - notify Rust to sync
+            // Editor has updated link positions - notify Rust to sync
             root.link-positions-updated();
         }
-    }
 
-    // Selection box (rendered based on overlay state)
-    Rectangle {
-        visible: overlay.is-selecting;
-        x: overlay.selection-x;
-        y: overlay.selection-y;
-        width: overlay.selection-width;
-        height: overlay.selection-height;
-        background: #4488ff20;
-        border-color: #4488ff;
-        border-width: 1px;
-    }
+        // Nodes - children of NodeEditor
+        // Selection state comes from core via is-node-selected callback (not stored in model)
+        for node-data in nodes: Node {
+            title: node-data.title;
+            node-id: node-data.id;
+            selected: root.is-node-selected(node-data.id);
+            world-x: node-data.world-x * 1px;
+            world-y: node-data.world-y * 1px;
+            // Pass drag offset to selected nodes
+            drag-offset-x: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-x : 0px;
+            drag-offset-y: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-y : 0px;
+            zoom: zoom;
+            pan-x: pan-x;
+            pan-y: pan-y;
+            clicked(id, shift) => {
+                editor.clicked-node-id = id;
+                editor.clicked-shift-held = shift;
+                root.selection-changed(editor.current-selected-ids);
+            }
+            drag-started(id, already-selected) => {
+                // Only change selection if the node is not already selected
+                // This preserves multi-selection when dragging a selected node
+                if !already-selected {
+                    editor.clicked-node-id = id;
+                    editor.clicked-shift-held = false;
+                    root.selection-changed(editor.current-selected-ids);
+                }
 
-    // Active link preview (rendered during link creation, using core-generated bezier path)
-    Path {
-        visible: overlay.is-creating-link;
-        width: 100%;
-        height: 100%;
-        commands: overlay.link-preview-path-commands;
-        stroke: #ffffff80;
-        stroke-width: 2px * zoom;
-        fill: transparent;
-        viewbox-x: 0;
-        viewbox-y: 0;
-        viewbox-width: max(self.width / 1px, 1);
-        viewbox-height: max(self.height / 1px, 1);
+                is-dragging = true;
+                visual-drag-offset-x = 0px;
+                visual-drag-offset-y = 0px;
+            }
+            drag-moved(id, offset-x, offset-y) => {
+                // Update visual offset for all selected nodes
+                visual-drag-offset-x = offset-x;
+                visual-drag-offset-y = offset-y;
+            }
+            drag-ended(id, delta-x, delta-y) => {
+                // Commit to model
+                root.commit-drag(delta-x / 1px, delta-y / 1px, grid-snap-enabled);
+                is-dragging = false;
+                visual-drag-offset-x = 0px;
+                visual-drag-offset-y = 0px;
+            }
+            pin-drag-started(pin-id, x, y) => {
+                // Start link creation using editor's state machine
+                editor.pending-link-pin-id = pin-id;
+                editor.pending-link-x = x;
+                editor.pending-link-y = y;
+                editor.start-link();  // Trigger editor to start link creation
+            }
+            pin-drag-moved(pin-id, x, y) => {
+                // Update link preview end position via editor
+                editor.link-end-x = x;
+                editor.link-end-y = y;
+            }
+            pin-drag-ended(pin-id, x, y) => {
+                // Complete link creation - editor will use find_pin_at() to find target
+                editor.link-end-x = x;
+                editor.link-end-y = y;
+                editor.complete-link-creation = true;
+                // Editor handles validation and fires link-created or link-dropped callback
+            }
+            report-rect(id, x, y, w, h) => {
+                // Append to batch (format: "id,x,y,w,h;...")
+                // Convert lengths to floats by dividing by 1px
+                editor.pending-node-rects-batch = editor.pending-node-rects-batch +
+                    (editor.pending-node-rects-batch == "" ? "" : ";") +
+                    id + "," + (x / 1px) + "," + (y / 1px) + "," + (w / 1px) + "," + (h / 1px);
+            }
+        }
+
+        // Links - children of NodeEditor
+        // Uses core-generated bezier path commands (hybrid architecture)
+        // Path commands are looked up from core via pure callback (not from model)
+        for link-data in links: Link {
+            path-commands: get-link-path-commands(link-data.id);
+            // Highlight link when selected (cyan) or hovered (white)
+            link-color: is-link-selected(link-data.id) ? #00ffff :
+                        link-data.id == hovered-link-id ? #ffffff : link-data.color;
+            line-width: is-link-selected(link-data.id) ? 4px * zoom :
+                        link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
+        }
     }
 
     // Instructions overlay
@@ -684,7 +581,7 @@ export component MainWindow inherits Window {
         border-radius: 4px;
 
         Text {
-            text: "Pins: " + overlay.debug-pin-count + " Links: " + overlay.debug-link-count;
+            text: "Pins: " + editor.debug-pin-count + " Links: " + editor.debug-link-count;
             color: #aaa;
             font-size: 11px;
             horizontal-alignment: center;
