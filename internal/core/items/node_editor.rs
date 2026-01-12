@@ -1350,13 +1350,12 @@ impl NodeEditorOverlay {
         if clicked_node > 0 {
             let shift_held = self.clicked_shift_held();
 
-            let mut state = self.data.state.borrow_mut();
-
             // Clear link selection when clicking on a node (unless shift is held)
-            let had_link_selection = !state.selected_link_ids.is_empty();
             if !shift_held {
-                state.selected_link_ids.clear();
+                self.clear_link_selection();
             }
+
+            let mut state = self.data.state.borrow_mut();
 
             if shift_held {
                 // Multi-select: toggle the clicked node
@@ -1384,15 +1383,6 @@ impl NodeEditorOverlay {
                 .current_selected_ids
                 .apply_pin(self)
                 .set(SharedString::from(&ids_str));
-
-            // Clear link selection property if it changed
-            if had_link_selection && !shift_held {
-                Self::FIELD_OFFSETS
-                    .current_selected_link_ids
-                    .apply_pin(self)
-                    .set(SharedString::default());
-                self.link_selection_changed.call(&());
-            }
 
             // Clear the click trigger
             Self::FIELD_OFFSETS.clicked_node_id.apply_pin(self).set(0);
@@ -1524,6 +1514,9 @@ impl NodeEditorOverlay {
                     state.box_select_current = position;
                     drop(state);
 
+                    // Clear link selection when starting box selection
+                    self.clear_link_selection();
+
                     // Update selection properties for Slint rendering
                     Self::FIELD_OFFSETS.is_selecting.apply_pin(self).set(true);
                     Self::FIELD_OFFSETS.selection_x.apply_pin(self).set(LogicalLength::new(position.x));
@@ -1548,6 +1541,7 @@ impl NodeEditorOverlay {
                             InputEventResult::EventAccepted
                         } else {
                             // Pass through left clicks to allow node interaction
+                            // Background click deselection is handled in mouse released
                             InputEventResult::EventIgnored
                         }
                     }
