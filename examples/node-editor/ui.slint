@@ -290,7 +290,7 @@ export component MainWindow inherits Window {
 
     // Callbacks to Rust for state changes
     callback selection-changed(string);  // comma-separated node IDs
-    callback commit-drag(float, float, bool);  // delta-world-x, delta-world-y, snap-to-grid
+    callback commit-drag(float, float);  // delta-world-x, delta-world-y (already snapped if enabled)
     callback update-viewport(float, float, float);  // zoom, pan-x, pan-y (for link position updates)
     callback create-link(int, int);  // start-pin-id, end-pin-id
     callback delete-selected-nodes();  // delete all selected nodes
@@ -313,8 +313,8 @@ export component MainWindow inherits Window {
         return editor.snap-to-grid(value);
     }
 
-    // Grid snap setting
-    in-out property <bool> grid-snap-enabled: true;
+    // Grid snap toggle (bound to editor.grid-snapping)
+    property <bool> grid-snap-enabled: true;
 
     // Visual drag offset (tracked in Slint, not affecting model until drag ends)
     property <bool> is-dragging: false;
@@ -511,6 +511,7 @@ export component MainWindow inherits Window {
         max-zoom: 4.0;
         background-color: #1a1a1a;
         grid-spacing: 24px;
+        grid-snapping <=> grid-snap-enabled;  // Bind to toggle
         grid-color: #333333;
 
         // Set pin hit radius from globals (eliminates hardcoded default in core)
@@ -537,6 +538,11 @@ export component MainWindow inherits Window {
         selection-changed => {
             // Editor has computed intersecting node IDs and updated selection - notify Rust
             root.selection-changed(editor.current-selected-ids);
+        }
+
+        node-drag-ended(delta-x, delta-y) => {
+            // Editor has applied snapping - just commit to model
+            root.commit-drag(delta-x, delta-y);
         }
 
         viewport-changed => {
@@ -598,8 +604,8 @@ export component MainWindow inherits Window {
                 visual-drag-offset-y = offset-y;
             }
             drag-ended(id, delta-x, delta-y) => {
-                // Commit to model
-                root.commit-drag(delta-x / 1px, delta-y / 1px, grid-snap-enabled);
+                // Let editor handle snapping and fire callback
+                editor.handle-node-drag(delta-x, delta-y);
                 is-dragging = false;
                 visual-drag-offset-x = 0px;
                 visual-drag-offset-y = 0px;
@@ -668,7 +674,8 @@ export component MainWindow inherits Window {
                 visual-drag-offset-y = offset-y;
             }
             drag-ended(id, delta-x, delta-y) => {
-                root.commit-drag(delta-x / 1px, delta-y / 1px, grid-snap-enabled);
+                // Let editor handle snapping and fire callback
+                editor.handle-node-drag(delta-x, delta-y);
                 is-dragging = false;
                 visual-drag-offset-x = 0px;
                 visual-drag-offset-y = 0px;

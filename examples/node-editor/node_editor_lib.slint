@@ -69,6 +69,8 @@ export component NodeEditor {
     // === Grid properties ===
     /// Spacing between grid lines
     in property <length> grid-spacing: 24px;
+    /// Enable grid snapping for node positions
+    in property <bool> grid-snapping: true;
     /// Color of grid lines
     in property <color> grid-color: #404040;
     /// Background color of the canvas
@@ -212,6 +214,10 @@ export component NodeEditor {
     callback delete-selected <=> overlay.delete-selected;
     callback add-node-requested <=> overlay.add-node-requested;
 
+    /// Node drag ended - delta is automatically snapped if grid-snapping is enabled
+    /// Applications should connect node drag-ended callbacks to this
+    callback node-drag-ended(/* delta-x */ float, /* delta-y */ float);
+
     // === Helper Functions ===
     /// Snaps a coordinate value to the nearest grid position
     /// Uses the grid-spacing property automatically
@@ -220,6 +226,16 @@ export component NodeEditor {
             return round(value / (root.grid-spacing / 1px)) * (root.grid-spacing / 1px);
         }
         return value;
+    }
+
+    /// Call this from node drag-ended handlers - applies snapping and fires node-drag-ended callback
+    /// Applications should wire: drag-ended(id, dx, dy) => { editor.handle-node-drag(dx, dy); }
+    public function handle-node-drag(delta-x: length, delta-y: length) {
+        // Apply snapping if enabled, then fire callback
+        root.node-drag-ended(
+            root.grid-snapping ? root.snap-to-grid(delta-x / 1px) : delta-x / 1px,
+            root.grid-snapping ? root.snap-to-grid(delta-y / 1px) : delta-y / 1px
+        );
     }
 
     // === Layer 1: Background ===

@@ -466,10 +466,11 @@ fn main() {
     // Node selection is now handled by the overlay (overlay.clicked-node-id)
 
     // Handle drag commit - apply delta to all selected nodes when drag ends
+    // Delta is already snapped if grid-snapping is enabled
     let nodes_for_drag = nodes.clone();
     let filter_nodes_for_drag = filter_nodes.clone();
     let window_for_drag = window.as_weak();
-    window.on_commit_drag(move |delta_x, delta_y, snap_enabled| {
+    window.on_commit_drag(move |delta_x, delta_y| {
         // Get window reference and selected node IDs from overlay
         let window = match window_for_drag.upgrade() {
             Some(w) => w,
@@ -481,27 +482,23 @@ fn main() {
             .filter_map(|s| s.trim().parse::<i32>().ok())
             .collect();
 
-        // Apply delta to all selected simple nodes
+        // Apply delta to all selected simple nodes (delta is already snapped)
         for i in 0..nodes_for_drag.row_count() {
             if let Some(mut node) = nodes_for_drag.row_data(i) {
                 if selected_ids.contains(&node.id) {
-                    let new_x = node.world_x + delta_x;
-                    let new_y = node.world_y + delta_y;
-                    node.world_x = if snap_enabled { window.invoke_snap_to_grid(new_x) } else { new_x };
-                    node.world_y = if snap_enabled { window.invoke_snap_to_grid(new_y) } else { new_y };
+                    node.world_x += delta_x;
+                    node.world_y += delta_y;
                     nodes_for_drag.set_row_data(i, node);
                 }
             }
         }
 
-        // Apply delta to all selected filter nodes
+        // Apply delta to all selected filter nodes (delta is already snapped)
         for i in 0..filter_nodes_for_drag.row_count() {
             if let Some(mut node) = filter_nodes_for_drag.row_data(i) {
                 if selected_ids.contains(&node.id) {
-                    let new_x = node.world_x + delta_x;
-                    let new_y = node.world_y + delta_y;
-                    node.world_x = if snap_enabled { window.invoke_snap_to_grid(new_x) } else { new_x };
-                    node.world_y = if snap_enabled { window.invoke_snap_to_grid(new_y) } else { new_y };
+                    node.world_x += delta_x;
+                    node.world_y += delta_y;
                     filter_nodes_for_drag.set_row_data(i, node);
                 }
             }
