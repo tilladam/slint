@@ -460,6 +460,9 @@ export component MainWindow inherits Window {
         grid-spacing: 24px;
         grid-color: #333333;
 
+        // Set pin hit radius from globals (eliminates hardcoded default in core)
+        pin-hit-radius: NodeConstants.pin-size * zoom * 0.66;
+
         // Drag state - editor applies offset to link positions when dragging
         is-dragging: is-dragging;
         drag-offset-x: visual-drag-offset-x;
