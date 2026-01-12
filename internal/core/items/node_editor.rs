@@ -1116,6 +1116,9 @@ impl NodeEditorOverlay {
     /// Process pending reports from pins, nodes, and links
     /// This is called from render() to ensure reports are processed even without input events
     fn process_pending_reports(self: Pin<&Self>) {
+        // Track whether we need to regenerate link positions at the end
+        let mut needs_link_regeneration = false;
+
         // Check if a Pin component is reporting its position
         let reporting_pin = self.reporting_pin_id();
         if reporting_pin > 0 {
@@ -1182,14 +1185,13 @@ impl NodeEditorOverlay {
             // Clear the reporting trigger
             Self::FIELD_OFFSETS.reporting_node_id.apply_pin(self).set(0);
 
-            // Regenerate link positions since node moved
-            self.regenerate_link_positions();
+            // Mark for link regeneration since node moved
+            needs_link_regeneration = true;
         }
 
         // Check for batch node rect reports (format: "id,x,y,w,h;...")
         let node_batch = self.pending_node_rects_batch();
         if !node_batch.is_empty() {
-            let mut rects_added = false;
             let mut state = self.data.state.borrow_mut();
 
             for rect_str in node_batch.split(';') {
@@ -1214,7 +1216,7 @@ impl NodeEditorOverlay {
                                 height: h,
                             },
                         );
-                        rects_added = true;
+                        needs_link_regeneration = true;
                     }
                 }
             }
@@ -1223,11 +1225,6 @@ impl NodeEditorOverlay {
 
             // Clear the batch
             Self::FIELD_OFFSETS.pending_node_rects_batch.apply_pin(self).set(SharedString::default());
-
-            // Regenerate link positions if any rects were added
-            if rects_added {
-                self.regenerate_link_positions();
-            }
         }
 
         // Check if a Link is being reported (single link)
@@ -1252,14 +1249,13 @@ impl NodeEditorOverlay {
             // Clear the reporting trigger
             Self::FIELD_OFFSETS.reporting_link_id.apply_pin(self).set(0);
 
-            // Regenerate all link positions now that we have a new link
-            self.regenerate_link_positions();
+            // Mark for link regeneration now that we have a new link
+            needs_link_regeneration = true;
         }
 
         // Check for batch link reports (format: "id,start_pin,end_pin,color_argb;...")
         let batch = self.pending_links_batch();
         if !batch.is_empty() {
-            let mut links_added = false;
             let mut state = self.data.state.borrow_mut();
 
             for link_str in batch.split(';') {
@@ -1283,7 +1279,7 @@ impl NodeEditorOverlay {
                                 color,
                             },
                         );
-                        links_added = true;
+                        needs_link_regeneration = true;
                     }
                 }
             }
@@ -1292,11 +1288,6 @@ impl NodeEditorOverlay {
 
             // Clear the batch
             Self::FIELD_OFFSETS.pending_links_batch.apply_pin(self).set(SharedString::default());
-
-            // Regenerate link positions if any links were added
-            if links_added {
-                self.regenerate_link_positions();
-            }
         }
 
         // Check if a node is being clicked (for selection)
@@ -1353,6 +1344,12 @@ impl NodeEditorOverlay {
 
             // Notify that selection changed
             self.selection_changed.call(&());
+        }
+
+        // Regenerate link positions once at the end if any relevant data changed
+        // This ensures all batches (pins, node rects, links) are processed before regeneration
+        if needs_link_regeneration {
+            self.regenerate_link_positions();
         }
     }
 

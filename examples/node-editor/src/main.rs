@@ -441,5 +441,9 @@ fn main() {
     // Link positions are synced automatically via link-positions-changed callback
     // when nodes report their rects during initialization
 
+    // Request a redraw to ensure initial link positions are computed
+    // (the overlay processes batches in render(), which needs to be triggered)
+    window.window().request_redraw();
+
     window.run().unwrap();
 }
