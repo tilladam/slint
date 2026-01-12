@@ -825,6 +825,9 @@ export component NodeEditorOverlay inherits Empty {
     in-out property <length> link-end-y;
     /// ID of the pin from which link creation started
     out property <int> link-start-pin-id: -1;
+    /// Core-generated SVG bezier path command for link preview
+    /// Format: "M x0 y0 C x1 y1 x2 y2 x3 y3"
+    out property <string> link-preview-path-commands;
 
     // === Link creation trigger (set properties then call callback) ===
     /// Pin ID to start link from (set before calling start-link)
@@ -899,6 +902,10 @@ export component NodeEditorOverlay inherits Empty {
     /// Formatted string containing link position data for all registered links
     /// Format: "id,start_x,start_y,end_x,end_y,color_argb;id,start_x,start_y,end_x,end_y,color_argb;..."
     out property <string> link-positions-data;
+    /// Core-generated bezier path commands for all registered links (hybrid architecture)
+    /// Format: "id|path_commands|color_argb;id|path_commands|color_argb;..." (uses | separator since path contains spaces)
+    /// Each path_commands is an SVG path string like "M x0 y0 C x1 y1 x2 y2 x3 y3"
+    out property <string> link-bezier-paths;
     /// Callback when link positions have been updated (fired after regenerate)
     callback link-positions-changed();
 

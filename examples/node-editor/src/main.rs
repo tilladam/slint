@@ -201,6 +201,7 @@ fn main() {
             start_pin_id: 12,
             end_pin_id: 21,
             color: link_colors[0],
+            path_commands: SharedString::default(), // Will be computed by core
             start_x: 0.0, start_y: 0.0, end_x: 0.0, end_y: 0.0, // Will be computed below
         },
         // Process (pin 22) -> Output (pin 31)
@@ -209,6 +210,7 @@ fn main() {
             start_pin_id: 22,
             end_pin_id: 31,
             color: link_colors[1],
+            path_commands: SharedString::default(), // Will be computed by core
             start_x: 0.0, start_y: 0.0, end_x: 0.0, end_y: 0.0, // Will be computed below
         },
     ]));
@@ -340,6 +342,7 @@ fn main() {
             start_pin_id: start_pin,
             end_pin_id: end_pin,
             color,
+            path_commands: SharedString::default(), // Will be computed by core
             start_x: 0.0,
             start_y: 0.0,
             end_x: 0.0,
