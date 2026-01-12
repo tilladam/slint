@@ -860,8 +860,8 @@ export component NodeEditorOverlay inherits Empty {
     in property <length> reporting-pin-x;
     /// Y position of pin being reported (in screen coordinates)
     in property <length> reporting-pin-y;
-    /// Hit radius for pin detection
-    in property <length> pin-hit-radius: 15px;
+    /// Hit radius for pin detection (0 = auto-compute based on pin size and zoom)
+    in property <length> pin-hit-radius;
     /// Callback when a pin reports its position - set reporting-pin-* properties first
     callback pin-position-changed();
     /// Batch of pending pin positions to register (format: "id,x,y;...")
@@ -948,6 +948,12 @@ export component NodeEditorOverlay inherits Empty {
     callback link-hovered();
     /// Callback when link selection changes (check current-selected-link-ids for selected links)
     callback link-selection-changed();
+
+    // === Debug properties ===
+    /// Number of registered pins (for debugging)
+    out property <int> debug-pin-count;
+    /// Number of registered links (for debugging)
+    out property <int> debug-link-count;
     /// Callback when a link is dropped on empty space (can be used to create nodes)
     callback link-dropped();
     /// Callback when link creation is cancelled

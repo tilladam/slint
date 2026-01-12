@@ -658,6 +658,24 @@ export component MainWindow inherits Window {
         }
     }
 
+    // Debug info
+    Rectangle {
+        x: parent.width - 160px;
+        y: parent.height - 40px;
+        width: 150px;
+        height: 30px;
+        background: #00000080;
+        border-radius: 4px;
+
+        Text {
+            text: "Pins: " + overlay.debug-pin-count + " Links: " + overlay.debug-link-count;
+            color: #aaa;
+            font-size: 11px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
     // Zoom indicator
     Rectangle {
         x: parent.width - 110px;

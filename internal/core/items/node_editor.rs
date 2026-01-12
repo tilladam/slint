@@ -768,6 +768,12 @@ pub struct NodeEditorOverlay {
     /// Callback when link selection changes
     pub link_selection_changed: Callback<()>,
 
+    // === Debug properties ===
+    /// Number of registered pins (for debugging)
+    pub debug_pin_count: Property<i32>,
+    /// Number of registered links (for debugging)
+    pub debug_link_count: Property<i32>,
+
     /// Internal state
     data: NodeEditorDataBox,
 
@@ -823,9 +829,13 @@ impl Item for NodeEditorOverlay {
                         return InputEventFilterResult::Intercept;
                     }
                     // Check if clicking on a link - if so, intercept for link selection
+                    // BUT: pins have priority over links (so you can drag from connected pins)
                     if let MouseEvent::Pressed { position, .. } = _event {
-                        drop(state); // Release borrow before calling find_link_at
-                        if self.find_link_at(*position) >= 0 {
+                        drop(state); // Release borrow before calling find_pin_at/find_link_at
+                        // Only check for link hit if NOT clicking on a pin
+                        // (pins have priority so you can drag from connected pins)
+                        let pin_at = self.find_pin_at(*position);
+                        if pin_at == 0 && self.find_link_at(*position) >= 0 {
                             return InputEventFilterResult::Intercept;
                         }
                     }
@@ -1155,7 +1165,11 @@ impl NodeEditorOverlay {
                 }
             }
 
+            // Update debug count
+            let pin_count = state.pin_positions.len() as i32;
             drop(state);
+
+            Self::FIELD_OFFSETS.debug_pin_count.apply_pin(self).set(pin_count);
 
             // Clear the batch
             Self::FIELD_OFFSETS.pending_pins_batch.apply_pin(self).set(SharedString::default());
@@ -1284,7 +1298,11 @@ impl NodeEditorOverlay {
                 }
             }
 
+            // Update debug count
+            let link_count = state.links.len() as i32;
             drop(state);
+
+            Self::FIELD_OFFSETS.debug_link_count.apply_pin(self).set(link_count);
 
             // Clear the batch
             Self::FIELD_OFFSETS.pending_links_batch.apply_pin(self).set(SharedString::default());
@@ -1476,15 +1494,23 @@ impl NodeEditorOverlay {
 
                     InputEventResult::GrabMouse
                 } else {
-                    // Check if clicking on a link
-                    let clicked_link = self.find_link_at(position);
-                    if clicked_link >= 0 {
-                        // Handle link selection
-                        self.handle_link_click(clicked_link, modifiers.shift());
-                        InputEventResult::EventAccepted
-                    } else {
-                        // Pass through left clicks to allow node interaction
+                    // Check if clicking on a pin first - pins have priority over links
+                    // so users can drag from connected pins
+                    let pin_at = self.find_pin_at(position);
+                    if pin_at != 0 {
+                        // Pass through to allow pin interaction
                         InputEventResult::EventIgnored
+                    } else {
+                        // Check if clicking on a link
+                        let clicked_link = self.find_link_at(position);
+                        if clicked_link >= 0 {
+                            // Handle link selection
+                            self.handle_link_click(clicked_link, modifiers.shift());
+                            InputEventResult::EventAccepted
+                        } else {
+                            // Pass through left clicks to allow node interaction
+                            InputEventResult::EventIgnored
+                        }
                     }
                 }
             }
@@ -1751,17 +1777,37 @@ impl NodeEditorOverlay {
     }
 
     /// Find a pin at the given position, returns pin ID or 0 if no pin found
+    /// Computes pin positions from node_rects to ensure consistency with link rendering
     fn find_pin_at(self: Pin<&Self>, position: LogicalPoint) -> i32 {
-        let hit_radius = self.pin_hit_radius().get();
+        let zoom = self.zoom();
+        // Use explicit hit radius if set, otherwise default to ~66% of pin diameter
+        let explicit_radius = self.pin_hit_radius().get();
+        let hit_radius = if explicit_radius > 0.0 {
+            explicit_radius
+        } else {
+            BASE_PIN_SIZE * zoom * 0.66
+        };
         let hit_radius_sq = hit_radius * hit_radius;
         let state = self.data.state.borrow();
 
-        for (&pin_id, &pin_pos) in state.pin_positions.iter() {
-            let dx = position.x - pin_pos.x;
-            let dy = position.y - pin_pos.y;
-            let dist_sq = dx * dx + dy * dy;
-            if dist_sq <= hit_radius_sq {
-                return pin_id;
+        // Check all nodes' pins by computing positions from node rects
+        for (&node_id, node_rect) in state.node_rects.iter() {
+            // Input pin (node_id * 10 + 1)
+            let input_pin_id = node_id * 10 + 1;
+            let (input_x, input_y) = compute_pin_screen_position(input_pin_id, node_rect, zoom);
+            let dx = position.x - input_x;
+            let dy = position.y - input_y;
+            if dx * dx + dy * dy <= hit_radius_sq {
+                return input_pin_id;
+            }
+
+            // Output pin (node_id * 10 + 2)
+            let output_pin_id = node_id * 10 + 2;
+            let (output_x, output_y) = compute_pin_screen_position(output_pin_id, node_rect, zoom);
+            let dx = position.x - output_x;
+            let dy = position.y - output_y;
+            if dx * dx + dy * dy <= hit_radius_sq {
+                return output_pin_id;
             }
         }
 
