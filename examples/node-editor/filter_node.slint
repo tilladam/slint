@@ -7,6 +7,7 @@
 // - Labels showing state
 
 import { ComboBox, Button } from "std-widgets.slint";
+import { Pin } from "pin.slint";
 
 // Filter node data passed from Rust
 export struct FilterNodeData {
@@ -107,12 +108,12 @@ export component FilterNode inherits Rectangle {
     property <length> row-2-center: (content-padding + title-height + content-padding + row-height + row-height / 2) * zoom;
 
     // Expose pin positions (center of each pin in screen coordinates)
-    out property <length> data-input-pin-x: screen-x + data-input-pin.x + pin-radius;
-    out property <length> data-input-pin-y: screen-y + data-input-pin.y + pin-radius;
-    out property <length> data-output-pin-x: screen-x + data-output-pin.x + pin-radius;
-    out property <length> data-output-pin-y: screen-y + data-output-pin.y + pin-radius;
-    out property <length> control-input-pin-x: screen-x + control-input-pin.x + pin-radius;
-    out property <length> control-input-pin-y: screen-y + control-input-pin.y + pin-radius;
+    out property <length> data-input-pin-x: screen-x + data-input-pin.center-x;
+    out property <length> data-input-pin-y: screen-y + data-input-pin.center-y;
+    out property <length> data-output-pin-x: screen-x + data-output-pin.center-x;
+    out property <length> data-output-pin-y: screen-y + data-output-pin.center-y;
+    out property <length> control-input-pin-x: screen-x + control-input-pin.center-x;
+    out property <length> control-input-pin-y: screen-y + control-input-pin.center-y;
 
     x: screen-x;
     y: screen-y;
@@ -330,92 +331,44 @@ export component FilterNode inherits Rectangle {
     }
 
     // Data Input pin (green, left side, row 1)
-    data-input-pin := Rectangle {
+    data-input-pin := Pin {
         x: pin-margin * zoom;
         y: row-1-center - pin-radius;
-        width: pin-size;
-        height: pin-size;
-        background: data-input-touch.has-hover ? #66BB6A : #4CAF50;
-        border-radius: pin-radius;
-
-        data-input-touch := TouchArea {
-            property <bool> drag-active: false;
-
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                    drag-active = true;
-                    pin-drag-started(data-input-pin-id, data-input-pin-x, data-input-pin-y);
-                }
-                if event.kind == PointerEventKind.up && drag-active {
-                    drag-active = false;
-                    pin-drag-ended(data-input-pin-id, data-input-pin-x + self.mouse-x - pin-radius, data-input-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-            moved => {
-                if drag-active {
-                    pin-drag-moved(data-input-pin-id, data-input-pin-x + self.mouse-x - pin-radius, data-input-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-        }
+        pin-id: data-input-pin-id;
+        zoom: zoom;
+        base-color: #4CAF50;
+        hover-color: #66BB6A;
+        base-size: base-pin-size;
+        drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
     }
 
     // Control Input pin (yellow, left side, row 2)
-    control-input-pin := Rectangle {
+    control-input-pin := Pin {
         x: pin-margin * zoom;
         y: row-2-center - pin-radius;
-        width: pin-size;
-        height: pin-size;
-        background: control-input-touch.has-hover ? #FFD54F : #FFC107;
-        border-radius: pin-radius;
-
-        control-input-touch := TouchArea {
-            property <bool> drag-active: false;
-
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                    drag-active = true;
-                    pin-drag-started(control-input-pin-id, control-input-pin-x, control-input-pin-y);
-                }
-                if event.kind == PointerEventKind.up && drag-active {
-                    drag-active = false;
-                    pin-drag-ended(control-input-pin-id, control-input-pin-x + self.mouse-x - pin-radius, control-input-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-            moved => {
-                if drag-active {
-                    pin-drag-moved(control-input-pin-id, control-input-pin-x + self.mouse-x - pin-radius, control-input-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-        }
+        pin-id: control-input-pin-id;
+        zoom: zoom;
+        base-color: #FFC107;
+        hover-color: #FFD54F;
+        base-size: base-pin-size;
+        drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
     }
 
     // Data Output pin (blue, right side, row 1)
-    data-output-pin := Rectangle {
+    data-output-pin := Pin {
         x: parent.width - pin-margin * zoom - pin-size;
         y: row-1-center - pin-radius;
-        width: pin-size;
-        height: pin-size;
-        background: data-output-touch.has-hover ? #42A5F5 : #2196F3;
-        border-radius: pin-radius;
-
-        data-output-touch := TouchArea {
-            property <bool> drag-active: false;
-
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                    drag-active = true;
-                    pin-drag-started(data-output-pin-id, data-output-pin-x, data-output-pin-y);
-                }
-                if event.kind == PointerEventKind.up && drag-active {
-                    drag-active = false;
-                    pin-drag-ended(data-output-pin-id, data-output-pin-x + self.mouse-x - pin-radius, data-output-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-            moved => {
-                if drag-active {
-                    pin-drag-moved(data-output-pin-id, data-output-pin-x + self.mouse-x - pin-radius, data-output-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-        }
+        pin-id: data-output-pin-id;
+        zoom: zoom;
+        base-color: #2196F3;
+        hover-color: #42A5F5;
+        base-size: base-pin-size;
+        drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
     }
 }

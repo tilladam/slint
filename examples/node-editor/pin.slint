@@ -1,0 +1,60 @@
+// Pin Component - Reusable pin for node editor
+//
+// This component encapsulates the rendering and interaction logic for pins.
+// Pins are the connection points on nodes where links can be attached.
+//
+// Standard pin colors:
+// - Input pins (data): #4CAF50 (green), hover: #66BB6A
+// - Output pins: #2196F3 (blue), hover: #42A5F5
+// - Control/parameter inputs: #FFC107 (yellow), hover: #FFD54F
+
+export component Pin inherits Rectangle {
+    // Required inputs
+    in property <int> pin-id;
+    in property <float> zoom: 1.0;
+    in property <color> base-color;
+    in property <color> hover-color;
+    in property <length> base-size: 12px;
+
+    // Computed properties
+    property <length> pin-size: base-size * zoom;
+    property <length> pin-radius: pin-size / 2;
+
+    // Center position in parent coordinates (for link attachment)
+    out property <length> center-x: self.x + pin-radius;
+    out property <length> center-y: self.y + pin-radius;
+
+    // Callbacks for drag-to-link (bubbled to parent node)
+    callback drag-started(int, length, length);  // pin-id, x, y
+    callback drag-moved(int, length, length);    // pin-id, x, y
+    callback drag-ended(int, length, length);    // pin-id, x, y
+
+    // Rectangle styling
+    width: pin-size;
+    height: pin-size;
+    background: touch.has-hover ? hover-color : base-color;
+    border-radius: pin-radius;
+
+    // Drag interaction
+    touch := TouchArea {
+        property <bool> drag-active: false;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                drag-active = true;
+                root.drag-started(pin-id, center-x, center-y);
+            }
+            if event.kind == PointerEventKind.up && drag-active {
+                drag-active = false;
+                // Calculate cursor position in parent coordinates
+                root.drag-ended(pin-id, center-x + self.mouse-x - pin-radius, center-y + self.mouse-y - pin-radius);
+            }
+        }
+        moved => {
+            if drag-active {
+                // Update link preview with cursor position
+                root.drag-moved(pin-id, center-x + self.mouse-x - pin-radius, center-y + self.mouse-y - pin-radius);
+            }
+        }
+    }
+}

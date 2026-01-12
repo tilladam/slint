@@ -17,6 +17,7 @@
 // 3. Handle callbacks for link creation, selection changes, etc.
 
 import { NodeEditor, Link } from "node_editor_lib.slint";
+import { Pin } from "pin.slint";
 
 // Node layout constants - single source of truth
 // These are exported so Rust can access them
@@ -123,10 +124,10 @@ component Node inherits Rectangle {
     property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
 
     // Expose pin positions (center of pin circles, in parent coordinates)
-    out property <length> input-pin-x: screen-x + input-pin.x + pin-radius;
-    out property <length> input-pin-y: screen-y + input-pin.y + pin-radius;
-    out property <length> output-pin-x: screen-x + output-pin.x + pin-radius;
-    out property <length> output-pin-y: screen-y + output-pin.y + pin-radius;
+    out property <length> input-pin-x: screen-x + input-pin.center-x;
+    out property <length> input-pin-y: screen-y + input-pin.center-y;
+    out property <length> output-pin-x: screen-x + output-pin.center-x;
+    out property <length> output-pin-y: screen-y + output-pin.center-y;
 
     x: screen-x;
     y: screen-y;
@@ -208,67 +209,31 @@ component Node inherits Rectangle {
     }
 
     // Input pin (green) - with drag-to-link support (on top of body TouchArea)
-    input-pin := Rectangle {
+    input-pin := Pin {
         x: 8px * zoom;
         y: (8px + 24px + 8px) * zoom;  // below title bar
-        width: pin-size;
-        height: pin-size;
-        background: input-pin-touch.has-hover ? #66BB6A : #4CAF50;
-        border-radius: pin-radius;
-
-        input-pin-touch := TouchArea {
-            property <bool> drag-active: false;
-
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                    drag-active = true;
-                    pin-drag-started(input-pin-id, input-pin-x, input-pin-y);
-                }
-                if event.kind == PointerEventKind.up && drag-active {
-                    drag-active = false;
-                    // Calculate position in parent (window) coordinates
-                    pin-drag-ended(input-pin-id, input-pin-x + self.mouse-x - pin-radius, input-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-            moved => {
-                if drag-active {
-                    // Calculate position in parent (window) coordinates
-                    pin-drag-moved(input-pin-id, input-pin-x + self.mouse-x - pin-radius, input-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-        }
+        pin-id: input-pin-id;
+        zoom: zoom;
+        base-color: #4CAF50;
+        hover-color: #66BB6A;
+        base-size: NodeConstants.pin-size;
+        drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
     }
 
     // Output pin (blue) - with drag-to-link support (on top of body TouchArea)
-    output-pin := Rectangle {
+    output-pin := Pin {
         x: parent.width - 8px * zoom - pin-size;
         y: (8px + 24px + 8px) * zoom;  // below title bar
-        width: pin-size;
-        height: pin-size;
-        background: output-pin-touch.has-hover ? #42A5F5 : #2196F3;
-        border-radius: pin-radius;
-
-        output-pin-touch := TouchArea {
-            property <bool> drag-active: false;
-
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                    drag-active = true;
-                    pin-drag-started(output-pin-id, output-pin-x, output-pin-y);
-                }
-                if event.kind == PointerEventKind.up && drag-active {
-                    drag-active = false;
-                    // Calculate position in parent (window) coordinates
-                    pin-drag-ended(output-pin-id, output-pin-x + self.mouse-x - pin-radius, output-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-            moved => {
-                if drag-active {
-                    // Calculate position in parent (window) coordinates
-                    pin-drag-moved(output-pin-id, output-pin-x + self.mouse-x - pin-radius, output-pin-y + self.mouse-y - pin-radius);
-                }
-            }
-        }
+        pin-id: output-pin-id;
+        zoom: zoom;
+        base-color: #2196F3;
+        hover-color: #42A5F5;
+        base-size: NodeConstants.pin-size;
+        drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
     }
 
 }
