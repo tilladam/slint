@@ -80,23 +80,29 @@ export component FilterNode inherits Rectangle {
     }
 
     // Pin dimensions
-    property <length> base-pin-size: 12px;
-    property <length> pin-size: base-pin-size * zoom;
+    property <length> pin-size: 12px;
     property <length> pin-radius: pin-size / 2;
+    property <length> pin-margin: 4px;
 
-    // Base dimensions (larger than simple node)
-    property <length> base-width: 200px;
-    property <length> base-height: 160px;
+    // Layout constants
+    property <length> title-height: 28px;
+    property <length> row-height: 32px;
+    property <length> content-padding: 8px;
+    property <length> pin-area-width: 24px;  // Space for pins on each side
+
+    // Base dimensions - sized to fit content
+    property <length> base-width: 220px;
+    property <length> base-height: title-height + content-padding + (row-height * 3) + content-padding;
 
     // Screen position
     property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
     property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
 
-    // Pin Y positions
-    property <length> pin-row-1-y: (8px + 24px + 12px) * zoom;  // First row after title
-    property <length> pin-row-2-y: (8px + 24px + 12px + 36px) * zoom;  // Second row
+    // Pin Y positions - centered on each content row
+    property <length> row-1-center: (title-height + content-padding + row-height / 2) * zoom;
+    property <length> row-2-center: (title-height + content-padding + row-height + row-height / 2) * zoom;
 
-    // Expose pin positions
+    // Expose pin positions (center of each pin in screen coordinates)
     out property <length> data-input-pin-x: screen-x + data-input-pin.x + pin-radius;
     out property <length> data-input-pin-y: screen-y + data-input-pin.y + pin-radius;
     out property <length> data-output-pin-x: screen-x + data-output-pin.x + pin-radius;
@@ -113,21 +119,166 @@ export component FilterNode inherits Rectangle {
     border-width: selected ? 2px * zoom : 1px * zoom;
     border-color: selected ? #4a9eff : #555;
 
-    // Title bar with different color for filter nodes
-    Rectangle {
-        x: 8px * zoom;
-        y: 8px * zoom;
-        width: parent.width - 16px * zoom;
-        height: 24px * zoom;
-        background: selected ? #6a4a9a : #4a3d5d;
-        border-radius: 4px * zoom;
+    // Main layout
+    VerticalLayout {
+        padding: root.content-padding * zoom;
+        spacing: 0px;
 
-        Text {
-            text: title;
-            color: white;
-            font-size: 14px * zoom;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        // Title bar
+        Rectangle {
+            height: title-height * zoom;
+            background: selected ? #6a4a9a : #4a3d5d;
+            border-radius: 4px * zoom;
+
+            Text {
+                text: title;
+                color: white;
+                font-size: 14px * zoom;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Content area with left/right margins for pins
+        HorizontalLayout {
+            padding-top: root.content-padding * zoom;
+
+            // Left pin labels column
+            VerticalLayout {
+                width: pin-area-width * zoom;
+                spacing: 0px;
+
+                // Row 1: Data input label
+                Rectangle {
+                    height: row-height * zoom;
+                    Text {
+                        x: 16px * zoom;
+                        text: "In";
+                        color: #888;
+                        font-size: 10px * zoom;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Row 2: Control input label
+                Rectangle {
+                    height: row-height * zoom;
+                    Text {
+                        x: 16px * zoom;
+                        text: "Ctrl";
+                        color: #888;
+                        font-size: 10px * zoom;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Row 3: empty
+                Rectangle {
+                    height: row-height * zoom;
+                }
+            }
+
+            // Center content
+            VerticalLayout {
+                spacing: 4px * zoom;
+                horizontal-stretch: 1;
+
+                // Row 1: Filter type selector
+                HorizontalLayout {
+                    height: row-height * zoom;
+                    spacing: 8px * zoom;
+                    alignment: stretch;
+                    padding-top: 4px * zoom;
+                    padding-bottom: 4px * zoom;
+
+                    Text {
+                        text: "Type:";
+                        color: #aaa;
+                        font-size: 11px * zoom;
+                        vertical-alignment: center;
+                    }
+
+                    filter-combo := ComboBox {
+                        horizontal-stretch: 1;
+                        model: ["Low Pass", "High Pass", "Band Pass", "Notch"];
+                        current-index <=> filter-type-index;
+                        selected(_value) => {
+                            root.filter-type-changed(node-id, filter-type-index);
+                        }
+                    }
+                }
+
+                // Row 2: Status row
+                HorizontalLayout {
+                    height: row-height * zoom;
+                    spacing: 12px * zoom;
+                    alignment: start;
+                    padding-top: 4px * zoom;
+                    padding-bottom: 4px * zoom;
+
+                    Text {
+                        text: enabled ? "Active" : "Bypassed";
+                        color: enabled ? #8f8 : #f88;
+                        font-size: 12px * zoom;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "Count: " + processed-count;
+                        color: #888;
+                        font-size: 11px * zoom;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Row 3: Button row
+                HorizontalLayout {
+                    height: row-height * zoom;
+                    spacing: 8px * zoom;
+                    alignment: start;
+                    padding-top: 2px * zoom;
+                    padding-bottom: 2px * zoom;
+
+                    Button {
+                        text: enabled ? "Bypass" : "Enable";
+                        clicked => {
+                            root.toggle-enabled(node-id);
+                        }
+                    }
+
+                    Button {
+                        text: "Reset";
+                        clicked => {
+                            root.reset-clicked(node-id);
+                        }
+                    }
+                }
+            }
+
+            // Right pin labels column
+            VerticalLayout {
+                width: pin-area-width * zoom;
+                spacing: 0px;
+
+                // Row 1: Data output label
+                Rectangle {
+                    height: row-height * zoom;
+                    Text {
+                        x: 0px;
+                        width: parent.width - 16px * zoom;
+                        text: "Out";
+                        color: #888;
+                        font-size: 10px * zoom;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                    }
+                }
+
+                // Rows 2-3: empty
+                Rectangle {
+                    height: row-height * zoom * 2;
+                }
+            }
         }
     }
 
@@ -174,80 +325,10 @@ export component FilterNode inherits Rectangle {
         }
     }
 
-    // Content area with widgets
-    VerticalLayout {
-        x: 28px * zoom;  // Leave space for left pins
-        y: (8px + 24px + 8px) * zoom;
-        width: parent.width - 56px * zoom;  // Leave space for both sides
-        spacing: 4px * zoom;
-        padding: 4px * zoom;
-
-        // Filter type selector
-        HorizontalLayout {
-            spacing: 4px * zoom;
-            alignment: stretch;
-
-            Text {
-                text: "Type:";
-                color: #aaa;
-                font-size: 11px * zoom;
-                vertical-alignment: center;
-            }
-
-            filter-combo := ComboBox {
-                model: ["Low Pass", "High Pass", "Band Pass", "Notch"];
-                current-index <=> filter-type-index;
-                selected(_value) => {
-                    root.filter-type-changed(node-id, filter-type-index);
-                }
-            }
-        }
-
-        // Status row
-        HorizontalLayout {
-            spacing: 8px * zoom;
-            alignment: start;
-
-            Text {
-                text: enabled ? "Active" : "Bypassed";
-                color: enabled ? #8f8 : #f88;
-                font-size: 11px * zoom;
-                vertical-alignment: center;
-            }
-
-            Text {
-                text: "Count: " + processed-count;
-                color: #888;
-                font-size: 10px * zoom;
-                vertical-alignment: center;
-            }
-        }
-
-        // Button row
-        HorizontalLayout {
-            spacing: 4px * zoom;
-            alignment: start;
-
-            Button {
-                text: enabled ? "Bypass" : "Enable";
-                clicked => {
-                    root.toggle-enabled(node-id);
-                }
-            }
-
-            Button {
-                text: "Reset";
-                clicked => {
-                    root.reset-clicked(node-id);
-                }
-            }
-        }
-    }
-
     // Data Input pin (green, left side, row 1)
     data-input-pin := Rectangle {
-        x: 8px * zoom;
-        y: pin-row-1-y;
+        x: pin-margin * zoom;
+        y: row-1-center - pin-radius;
         width: pin-size;
         height: pin-size;
         background: data-input-touch.has-hover ? #66BB6A : #4CAF50;
@@ -276,8 +357,8 @@ export component FilterNode inherits Rectangle {
 
     // Control Input pin (yellow, left side, row 2)
     control-input-pin := Rectangle {
-        x: 8px * zoom;
-        y: pin-row-2-y;
+        x: pin-margin * zoom;
+        y: row-2-center - pin-radius;
         width: pin-size;
         height: pin-size;
         background: control-input-touch.has-hover ? #FFD54F : #FFC107;
@@ -304,10 +385,10 @@ export component FilterNode inherits Rectangle {
         }
     }
 
-    // Data Output pin (blue, right side)
+    // Data Output pin (blue, right side, row 1)
     data-output-pin := Rectangle {
-        x: parent.width - 8px * zoom - pin-size;
-        y: pin-row-1-y;
+        x: parent.width - pin-margin * zoom - pin-size;
+        y: row-1-center - pin-radius;
         width: pin-size;
         height: pin-size;
         background: data-output-touch.has-hover ? #42A5F5 : #2196F3;
@@ -332,35 +413,5 @@ export component FilterNode inherits Rectangle {
                 }
             }
         }
-    }
-
-    // Pin labels
-    Text {
-        x: (8px + 14px) * zoom;
-        y: pin-row-1-y;
-        text: "In";
-        color: #888;
-        font-size: 9px * zoom;
-        vertical-alignment: center;
-    }
-
-    Text {
-        x: (8px + 14px) * zoom;
-        y: pin-row-2-y;
-        text: "Ctrl";
-        color: #888;
-        font-size: 9px * zoom;
-        vertical-alignment: center;
-    }
-
-    Text {
-        x: parent.width - (8px + 14px + 20px) * zoom;
-        y: pin-row-1-y;
-        text: "Out";
-        color: #888;
-        font-size: 9px * zoom;
-        vertical-alignment: center;
-        horizontal-alignment: right;
-        width: 20px * zoom;
     }
 }
