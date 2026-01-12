@@ -191,7 +191,7 @@ impl ItemTree for ErasedItemTreeBox {
     }
 
     fn get_item_tree(self: Pin<&Self>) -> Slice<'_, ItemTreeNode> {
-        get_item_tree(self.get_ref().borrow())
+        unsafe { get_item_tree(self.get_ref().borrow()) }
     }
 
     fn get_item_ref(self: Pin<&Self>, index: u32) -> Pin<ItemRef<'_>> {
@@ -721,7 +721,7 @@ impl ItemTreeDescription<'_> {
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn visit_children_item(
+unsafe extern "C" fn visit_children_item(
     component: ItemTreeRefPin,
     index: isize,
     order: TraversalOrder,
@@ -733,7 +733,7 @@ extern "C" fn visit_children_item(
     i_slint_core::item_tree::visit_item_tree(
         instance_ref.instance,
         &vtable::VRc::into_dyn(comp_rc),
-        get_item_tree(component).as_slice(),
+        unsafe { get_item_tree(component) }.as_slice(),
         index,
         order,
         v,
@@ -1008,6 +1008,8 @@ fn generate_rtti() -> HashMap<&'static str, Rc<ItemRTTI>> {
             rtti_for::<DropArea>(),
             rtti_for::<ContextMenu>(),
             rtti_for::<MenuItem>(),
+            rtti_for::<NodeEditorBackground>(),
+            rtti_for::<NodeEditorOverlay>(),
         ]
         .iter()
         .cloned(),
@@ -1955,7 +1957,7 @@ pub fn get_repeater_by_name<'a, 'id>(
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn layout_info(component: ItemTreeRefPin, orientation: Orientation) -> LayoutInfo {
+unsafe extern "C" fn layout_info(component: ItemTreeRefPin, orientation: Orientation) -> LayoutInfo {
     generativity::make_guard!(guard);
     // This is fine since we can only be called with a component that with our vtable which is a ItemTreeDescription
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
@@ -1987,7 +1989,7 @@ extern "C" fn layout_info(component: ItemTreeRefPin, orientation: Orientation) -
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
 unsafe extern "C" fn get_item_ref(component: ItemTreeRefPin, index: u32) -> Pin<ItemRef> {
-    let tree = get_item_tree(component);
+    let tree = unsafe { get_item_tree(component) };
     match &tree[index as usize] {
         ItemTreeNode::Item { item_array_index, .. } => unsafe {
             generativity::make_guard!(guard);
@@ -2002,7 +2004,7 @@ unsafe extern "C" fn get_item_ref(component: ItemTreeRefPin, index: u32) -> Pin<
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn get_subtree_range(component: ItemTreeRefPin, index: u32) -> IndexRange {
+unsafe extern "C" fn get_subtree_range(component: ItemTreeRefPin, index: u32) -> IndexRange {
     generativity::make_guard!(guard);
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
     if index as usize >= instance_ref.description.repeater.len() {
@@ -2032,7 +2034,7 @@ extern "C" fn get_subtree_range(component: ItemTreeRefPin, index: u32) -> IndexR
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn get_subtree(
+unsafe extern "C" fn get_subtree(
     component: ItemTreeRefPin,
     index: u32,
     subtree_index: usize,
@@ -2071,7 +2073,7 @@ extern "C" fn get_subtree(
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn get_item_tree(component: ItemTreeRefPin) -> Slice<ItemTreeNode> {
+unsafe extern "C" fn get_item_tree(component: ItemTreeRefPin) -> Slice<ItemTreeNode> {
     generativity::make_guard!(guard);
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
     let tree = instance_ref.description.item_tree.as_slice();
@@ -2079,7 +2081,7 @@ extern "C" fn get_item_tree(component: ItemTreeRefPin) -> Slice<ItemTreeNode> {
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn subtree_index(component: ItemTreeRefPin) -> usize {
+unsafe extern "C" fn subtree_index(component: ItemTreeRefPin) -> usize {
     generativity::make_guard!(guard);
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
     if let Ok(value) = instance_ref.description.get_property(component, SPECIAL_PROPERTY_INDEX) {
@@ -2161,7 +2163,7 @@ unsafe extern "C" fn embed_component(
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn item_geometry(component: ItemTreeRefPin, item_index: u32) -> LogicalRect {
+unsafe extern "C" fn item_geometry(component: ItemTreeRefPin, item_index: u32) -> LogicalRect {
     generativity::make_guard!(guard);
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
 
@@ -2184,7 +2186,7 @@ extern "C" fn item_geometry(component: ItemTreeRefPin, item_index: u32) -> Logic
 // silence the warning despite `AccessibleRole` is a `#[non_exhaustive]` enum from another crate.
 #[allow(improper_ctypes_definitions)]
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn accessible_role(component: ItemTreeRefPin, item_index: u32) -> AccessibleRole {
+unsafe extern "C" fn accessible_role(component: ItemTreeRefPin, item_index: u32) -> AccessibleRole {
     generativity::make_guard!(guard);
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
     let nr = instance_ref.description.original_elements[item_index as usize]
@@ -2203,7 +2205,7 @@ extern "C" fn accessible_role(component: ItemTreeRefPin, item_index: u32) -> Acc
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn accessible_string_property(
+unsafe extern "C" fn accessible_string_property(
     component: ItemTreeRefPin,
     item_index: u32,
     what: AccessibleStringProperty,
@@ -2233,7 +2235,7 @@ extern "C" fn accessible_string_property(
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn accessibility_action(
+unsafe extern "C" fn accessibility_action(
     component: ItemTreeRefPin,
     item_index: u32,
     action: &AccessibilityAction,
@@ -2271,7 +2273,7 @@ extern "C" fn accessibility_action(
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn supported_accessibility_actions(
+unsafe extern "C" fn supported_accessibility_actions(
     component: ItemTreeRefPin,
     item_index: u32,
 ) -> SupportedAccessibilityAction {
@@ -2293,7 +2295,7 @@ extern "C" fn supported_accessibility_actions(
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn item_element_infos(
+unsafe extern "C" fn item_element_infos(
     component: ItemTreeRefPin,
     item_index: u32,
     result: &mut SharedString,
@@ -2308,7 +2310,7 @@ extern "C" fn item_element_infos(
 }
 
 #[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
-extern "C" fn window_adapter(
+unsafe extern "C" fn window_adapter(
     component: ItemTreeRefPin,
     do_create: bool,
     result: &mut Option<WindowAdapterRc>,
