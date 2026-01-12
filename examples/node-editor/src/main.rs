@@ -14,85 +14,12 @@ const NODE_BASE_WIDTH: f32 = 150.0;
 const NODE_BASE_HEIGHT: f32 = 80.0;
 const GRID_SPACING: f32 = 24.0;
 
-// Pin dimensions for computing pin positions (must match ui.slint and core)
-const BASE_PIN_SIZE: f32 = 12.0;
-const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
-const PIN_MARGIN: f32 = 8.0;
-
 /// Snap a value to the nearest grid position
 fn snap_to_grid(value: f32) -> f32 {
     (value / GRID_SPACING).round() * GRID_SPACING
 }
 
-/// Compute screen position for a pin given node world position and viewport
-/// Pin ID format: node_id * 10 + pin_type (1 = input, 2 = output)
-fn compute_pin_position(
-    pin_id: i32,
-    node_world_x: f32,
-    node_world_y: f32,
-    zoom: f32,
-    pan_x: f32,
-    pan_y: f32,
-) -> (f32, f32) {
-    let pin_type = pin_id % 10;
-    let pin_size = BASE_PIN_SIZE * zoom;
-    let pin_radius = pin_size / 2.0;
 
-    // Node screen position
-    let node_x = node_world_x * zoom + pan_x;
-    let node_y = node_world_y * zoom + pan_y;
-    let node_width = NODE_BASE_WIDTH * zoom;
-
-    if pin_type == 1 {
-        // Input pin: left side
-        let x = node_x + PIN_MARGIN * zoom + pin_radius;
-        let y = node_y + PIN_Y_OFFSET * zoom + pin_radius;
-        (x, y)
-    } else {
-        // Output pin: right side
-        let x = node_x + node_width - PIN_MARGIN * zoom - pin_size + pin_radius;
-        let y = node_y + PIN_Y_OFFSET * zoom + pin_radius;
-        (x, y)
-    }
-}
-
-/// Compute link positions from node data
-fn compute_link_positions(
-    links: &VecModel<LinkData>,
-    nodes: &VecModel<NodeData>,
-    zoom: f32,
-    pan_x: f32,
-    pan_y: f32,
-) {
-    // Build a map of node_id -> (world_x, world_y)
-    let node_positions: std::collections::HashMap<i32, (f32, f32)> = (0..nodes.row_count())
-        .filter_map(|i| nodes.row_data(i))
-        .map(|n| (n.id, (n.world_x, n.world_y)))
-        .collect();
-
-    // Update each link's positions
-    for i in 0..links.row_count() {
-        if let Some(mut link) = links.row_data(i) {
-            let start_node_id = link.start_pin_id / 10;
-            let end_node_id = link.end_pin_id / 10;
-
-            if let (Some(&(start_wx, start_wy)), Some(&(end_wx, end_wy))) =
-                (node_positions.get(&start_node_id), node_positions.get(&end_node_id))
-            {
-                let (start_x, start_y) =
-                    compute_pin_position(link.start_pin_id, start_wx, start_wy, zoom, pan_x, pan_y);
-                let (end_x, end_y) =
-                    compute_pin_position(link.end_pin_id, end_wx, end_wy, zoom, pan_x, pan_y);
-
-                link.start_x = start_x;
-                link.start_y = start_y;
-                link.end_x = end_x;
-                link.end_y = end_y;
-                links.set_row_data(i, link);
-            }
-        }
-    }
-}
 
 /// Build node rects batch string from model data and current viewport
 /// Format: "id,screen_x,screen_y,width,height;..."
@@ -202,7 +129,6 @@ fn main() {
             end_pin_id: 21,
             color: link_colors[0],
             path_commands: SharedString::default(), // Will be computed by core
-            start_x: 0.0, start_y: 0.0, end_x: 0.0, end_y: 0.0, // Will be computed below
         },
         // Process (pin 22) -> Output (pin 31)
         LinkData {
@@ -211,14 +137,11 @@ fn main() {
             end_pin_id: 31,
             color: link_colors[1],
             path_commands: SharedString::default(), // Will be computed by core
-            start_x: 0.0, start_y: 0.0, end_x: 0.0, end_y: 0.0, // Will be computed below
         },
     ]));
     window.set_links(ModelRc::from(links.clone()));
 
-    // Compute initial link positions so they're visible immediately
-    // (don't wait for the callback chain which doesn't work on the first frame)
-    compute_link_positions(&links, &nodes, 1.0, 0.0, 0.0);
+    // Note: Link path-commands are computed by core after pins are reported
 
     // Report links to overlay for core-based position computation (using batch)
     // Format: "id,start_pin,end_pin,color_argb;..."
@@ -268,35 +191,31 @@ fn main() {
 
     // Handle link position updates from core
     // This is called whenever the core regenerates link positions (viewport changes, node moves, etc.)
+    // Now uses link-bezier-paths which contains core-generated SVG path commands
     let links_for_sync = links.clone();
     let window_for_sync = window.as_weak();
     window.on_link_positions_updated(move || {
         if let Some(window) = window_for_sync.upgrade() {
-            let link_data_str = window.get_link_positions_data();
+            // Parse core-generated bezier paths
+            // Format: "id|path_commands|color_argb;..."
+            let bezier_paths_str = window.get_link_bezier_paths();
 
-            // Parse format: "id,start_x,start_y,end_x,end_y,color_argb;..."
-            for link_str in link_data_str.split(';') {
+            for link_str in bezier_paths_str.split(';') {
                 if link_str.is_empty() {
                     continue;
                 }
 
-                let parts: Vec<&str> = link_str.split(',').collect();
-                if parts.len() >= 5 {
-                    if let (Ok(id), Ok(start_x), Ok(start_y), Ok(end_x), Ok(end_y)) = (
-                        parts[0].parse::<i32>(),
-                        parts[1].parse::<f32>(),
-                        parts[2].parse::<f32>(),
-                        parts[3].parse::<f32>(),
-                        parts[4].parse::<f32>(),
-                    ) {
+                // Split by '|' since path_commands contains spaces
+                let parts: Vec<&str> = link_str.split('|').collect();
+                if parts.len() >= 2 {
+                    if let Ok(id) = parts[0].parse::<i32>() {
+                        let path_commands = parts[1];
+
                         // Find and update the link in the model
                         for i in 0..links_for_sync.row_count() {
                             if let Some(mut link) = links_for_sync.row_data(i) {
                                 if link.id == id {
-                                    link.start_x = start_x;
-                                    link.start_y = start_y;
-                                    link.end_x = end_x;
-                                    link.end_y = end_y;
+                                    link.path_commands = SharedString::from(path_commands);
                                     links_for_sync.set_row_data(i, link);
                                     break;
                                 }
@@ -336,17 +255,13 @@ fn main() {
 
         let color = link_colors[idx];
 
-        // Add link to model (positions will be computed by core)
+        // Add link to model (path_commands will be computed by core)
         links_for_create.push(LinkData {
             id,
             start_pin_id: start_pin,
             end_pin_id: end_pin,
             color,
             path_commands: SharedString::default(), // Will be computed by core
-            start_x: 0.0,
-            start_y: 0.0,
-            end_x: 0.0,
-            end_y: 0.0,
         });
 
         // Report link to overlay for position computation (append to batch)

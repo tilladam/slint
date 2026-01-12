@@ -953,6 +953,22 @@ export component NodeEditorOverlay inherits Empty {
     //-default_size_binding:expands_to_parent_geometry
 }
 
+// Note: A standard NodeEditorLink component is not included in builtins because
+// components here can only inherit from Empty, not from Path. Users should create
+// their own Link component using Path directly. Example:
+//
+//   component Link inherits Path {
+//       in property <string> path-commands;
+//       in property <color> link-color: #888888;
+//       in property <length> line-width: 2px;
+//       width: 100%; height: 100%;
+//       stroke: link-color; stroke-width: line-width; fill: transparent;
+//       viewbox-x: 0; viewbox-y: 0;
+//       viewbox-width: max(self.width / 1px, 1);
+//       viewbox-height: max(self.height / 1px, 1);
+//       commands: path-commands;
+//   }
+
 export component NativeTab {
     in property <string> title;
     in property <image> icon;
