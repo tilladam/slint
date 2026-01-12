@@ -916,7 +916,7 @@ export component NodeEditorOverlay inherits Empty {
     /// Core-generated bezier path commands for all registered links (hybrid architecture)
     /// Format: "id|path_commands|color_argb;id|path_commands|color_argb;..." (uses | separator since path contains spaces)
     /// Each path_commands is an SVG path string like "M x0 y0 C x1 y1 x2 y2 x3 y3"
-    out property <string> link-bezier-paths;
+    in-out property <string> link-bezier-paths;
     /// Callback when link positions have been updated (fired after regenerate)
     callback link-positions-changed();
 

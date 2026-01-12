@@ -38,6 +38,80 @@ fn build_node_rects_batch(nodes: &VecModel<NodeData>, zoom: f32, pan_x: f32, pan
         .join(";")
 }
 
+/// Get pin screen position for a given pin ID
+fn get_pin_position(nodes: &VecModel<NodeData>, pin_id: i32, zoom: f32, pan_x: f32, pan_y: f32) -> Option<(f32, f32)> {
+    const PIN_MARGIN: f32 = 8.0;
+    const PIN_SIZE: f32 = 12.0;
+    const TITLE_HEIGHT: f32 = 24.0;
+
+    let node_id = pin_id / 10;
+    let pin_type = pin_id % 10;
+    let pin_radius = PIN_SIZE / 2.0;
+    let pin_y_offset = PIN_MARGIN + TITLE_HEIGHT + PIN_MARGIN + pin_radius;
+
+    for i in 0..nodes.row_count() {
+        if let Some(node) = nodes.row_data(i) {
+            if node.id == node_id {
+                let node_screen_x = node.world_x * zoom + pan_x;
+                let node_screen_y = node.world_y * zoom + pan_y;
+
+                let x = if pin_type == 1 {
+                    // Input pin: left side
+                    node_screen_x + (PIN_MARGIN + pin_radius) * zoom
+                } else {
+                    // Output pin: right side
+                    node_screen_x + (NODE_BASE_WIDTH - PIN_MARGIN - PIN_SIZE + pin_radius) * zoom
+                };
+                let y = node_screen_y + pin_y_offset * zoom;
+
+                return Some((x, y));
+            }
+        }
+    }
+    None
+}
+
+/// Build bezier path commands for all links
+/// Format: "id|path_commands|color_argb;..."
+fn build_link_bezier_paths(
+    nodes: &VecModel<NodeData>,
+    links: &VecModel<LinkData>,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+) -> String {
+    links
+        .iter()
+        .filter_map(|link| {
+            let start_pos = get_pin_position(nodes, link.start_pin_id, zoom, pan_x, pan_y)?;
+            let end_pos = get_pin_position(nodes, link.end_pin_id, zoom, pan_x, pan_y)?;
+
+            // Generate bezier path command
+            let (start_x, start_y) = start_pos;
+            let (end_x, end_y) = end_pos;
+
+            // Horizontal distance determines control point offset
+            let dx = (end_x - start_x).abs();
+            let offset = (dx * 0.5).max(50.0 * zoom);
+
+            // Output pin (start) curves right, input pin (end) curves left
+            let ctrl1_x = start_x + offset;
+            let ctrl1_y = start_y;
+            let ctrl2_x = end_x - offset;
+            let ctrl2_y = end_y;
+
+            let path_cmd = format!(
+                "M {} {} C {} {} {} {} {} {}",
+                start_x, start_y, ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, end_x, end_y
+            );
+
+            let color_argb = link.color.as_argb_encoded();
+            Some(format!("{}|{}|{}", link.id, path_cmd, color_argb))
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 /// Build pin positions batch string from model data and current viewport
 /// Format: "pin_id,screen_x,screen_y;..."
 /// Pin IDs: node_id * 10 + 1 for input, node_id * 10 + 2 for output
@@ -156,13 +230,18 @@ fn main() {
         .collect();
     window.set_pending_links_batch(SharedString::from(batch.join(";").as_str()));
 
-    // Report initial node rects and pin positions to overlay (using batch)
+    // Report initial node rects, pin positions, and link bezier paths
     // Initial zoom=1.0, pan_x=0, pan_y=0
     let initial_zoom = 1.0f32;
     let initial_pan_x = 0.0f32;
     let initial_pan_y = 0.0f32;
     let node_rects_batch = build_node_rects_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
     window.set_pending_node_rects_batch(SharedString::from(node_rects_batch.as_str()));
+
+    // Set initial bezier paths directly so links are visible on first render
+    // (The overlay processes batches during render, which is too late for initial display)
+    let bezier_paths = build_link_bezier_paths(&nodes, &links, initial_zoom, initial_pan_x, initial_pan_y);
+    window.set_link_bezier_paths(SharedString::from(bezier_paths.as_str()));
     let pins_batch = build_pins_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
     window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
 
@@ -196,6 +275,30 @@ fn main() {
         } else {
             false
         }
+    });
+
+    // Pure callback to get link path commands from core's link-bezier-paths
+    // This is called during rendering to get bezier paths directly from core
+    // Format of link-bezier-paths: "id|path_commands|color_argb;..."
+    let window_for_path = window.as_weak();
+    window.on_get_link_path_commands(move |link_id| {
+        if let Some(window) = window_for_path.upgrade() {
+            let bezier_paths_str = window.get_link_bezier_paths();
+            for link_str in bezier_paths_str.split(';') {
+                if link_str.is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = link_str.split('|').collect();
+                if parts.len() >= 2 {
+                    if let Ok(id) = parts[0].parse::<i32>() {
+                        if id == link_id {
+                            return SharedString::from(parts[1]);
+                        }
+                    }
+                }
+            }
+        }
+        SharedString::default()
     });
 
     // Handle link position updates from core
