@@ -9,13 +9,13 @@ use std::rc::Rc;
 
 slint::include_modules!();
 
-// Node dimensions (must match ui.slint)
+// Node dimensions (must match NodeConstants in ui.slint)
 const NODE_BASE_WIDTH: f32 = 150.0;
 const NODE_BASE_HEIGHT: f32 = 80.0;
 const GRID_SPACING: f32 = 24.0;
 
-// Filter node dimensions (must match filter_node.slint)
-const FILTER_NODE_BASE_WIDTH: f32 = 220.0;
+// Filter node dimensions (must match FilterNodeConstants in ui.slint)
+const FILTER_NODE_BASE_WIDTH: f32 = 260.0;
 const FILTER_NODE_BASE_HEIGHT: f32 = 148.0;  // 8 + 28 + 8 + 32*3 + 8
 
 /// Snap a value to the nearest grid position

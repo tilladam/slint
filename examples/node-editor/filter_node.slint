@@ -92,8 +92,9 @@ export component FilterNode inherits Rectangle {
     property <length> pin-area-width: 24px;  // Space for pins on each side
 
     // Base dimensions - sized to fit content
+    // Width must accommodate: pin areas (24px×2) + padding (8px×2) + "Type:" label + ComboBox
     // Height = VL-padding + title + HL-padding-top + 3*rows + VL-padding
-    property <length> base-width: 220px;
+    property <length> base-width: 260px;
     property <length> base-height: content-padding + title-height + content-padding + (row-height * 3) + content-padding;
 
     // Screen position

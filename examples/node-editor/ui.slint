@@ -17,6 +17,26 @@
 // 3. Handle callbacks for link creation, selection changes, etc.
 
 import { NodeEditor, Link } from "node_editor_lib.slint";
+
+// Node layout constants - single source of truth
+// These are exported so Rust can access them
+export global NodeConstants {
+    out property <length> node-base-width: 150px;
+    out property <length> node-base-height: 80px;
+    out property <length> pin-size: 12px;
+    out property <length> pin-margin: 8px;
+    out property <length> title-height: 24px;
+}
+
+export global FilterNodeConstants {
+    out property <length> base-width: 260px;
+    out property <length> base-height: 148px;  // 8 + 28 + 8 + 32*3 + 8
+    out property <length> pin-size: 12px;
+    out property <length> pin-margin: 4px;
+    out property <length> content-padding: 8px;
+    out property <length> title-height: 28px;
+    out property <length> row-height: 32px;
+}
 import { FilterNode, FilterNodeData } from "filter_node.slint";
 
 // Data structure for nodes - exported to Rust
@@ -90,13 +110,12 @@ component Node inherits Rectangle {
     }
 
     // Pin dimensions (scaled by zoom)
-    property <length> base-pin-size: 12px;
-    property <length> pin-size: base-pin-size * zoom;
+    property <length> pin-size: NodeConstants.pin-size * zoom;
     property <length> pin-radius: pin-size / 2;
 
-    // Base dimensions
-    property <length> base-width: 150px;
-    property <length> base-height: 80px;
+    // Base dimensions (from global constants)
+    property <length> base-width: NodeConstants.node-base-width;
+    property <length> base-height: NodeConstants.node-base-height;
 
     // Screen position calculated from world position + drag offset
     property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
@@ -353,27 +372,19 @@ export component MainWindow inherits Window {
         editor.reporting-link-color = col;
     }
 
-    // Node dimensions (must match Node component)
-    property <length> node-base-width: 150px;
-    property <length> node-base-height: 80px;
-    property <length> base-pin-size: 12px;
-    property <length> pin-size: base-pin-size * zoom;
-    property <length> pin-radius: pin-size / 2;
-
     // Compute pin positions from node world coordinates
-    // Input pin: left side, below title bar
+    // Using global constants from NodeConstants
     pure function compute-input-pin-x(world-x: float) -> length {
-        return world-x * 1px * zoom + pan-x + 8px * zoom + pin-radius;
+        return world-x * 1px * zoom + pan-x + (NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
     }
     pure function compute-input-pin-y(world-y: float) -> length {
-        return world-y * 1px * zoom + pan-y + (8px + 24px + 8px) * zoom + pin-radius;
+        return world-y * 1px * zoom + pan-y + (NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
     }
-    // Output pin: right side, below title bar
     pure function compute-output-pin-x(world-x: float) -> length {
-        return world-x * 1px * zoom + pan-x + node-base-width * zoom - 8px * zoom - pin-size + pin-radius;
+        return world-x * 1px * zoom + pan-x + (NodeConstants.node-base-width - NodeConstants.pin-margin - NodeConstants.pin-size / 2) * zoom;
     }
     pure function compute-output-pin-y(world-y: float) -> length {
-        return world-y * 1px * zoom + pan-y + (8px + 24px + 8px) * zoom + pin-radius;
+        return world-y * 1px * zoom + pan-y + (NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
     }
 
     // The composite NodeEditor handles all three layers:
