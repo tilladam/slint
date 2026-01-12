@@ -310,6 +310,9 @@ export component MainWindow inherits Window {
     // Selection state (managed by overlay)
     out property <string> current-selected-ids <=> overlay.current-selected-ids;
 
+    // Link hover state (managed by overlay)
+    out property <int> hovered-link-id <=> overlay.hovered-link-id;
+
     // Link position data (managed by overlay, updated when viewport/nodes change)
     out property <string> link-positions-data <=> overlay.link-positions-data;
 
@@ -495,8 +498,9 @@ export component MainWindow inherits Window {
     // Uses core-generated bezier path commands (hybrid architecture)
     for link-data in links: Link {
         path-commands: link-data.path-commands;
-        link-color: link-data.color;
-        line-width: 3px * zoom;
+        // Highlight link when hovered (brighter color)
+        link-color: link-data.id == hovered-link-id ? #ffffff : link-data.color;
+        line-width: link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
         zoom: zoom;
     }
 

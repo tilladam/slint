@@ -145,6 +145,86 @@ const BASE_PIN_SIZE: f32 = 12.0;
 const PIN_Y_OFFSET: f32 = 8.0 + 24.0 + 8.0; // Margin + title height + margin
 const PIN_MARGIN: f32 = 8.0; // Horizontal margin from node edge
 
+/// Cubic bezier curve control points
+struct CubicBezier {
+    p0: (f32, f32), // Start point
+    p1: (f32, f32), // Control point 1
+    p2: (f32, f32), // Control point 2
+    p3: (f32, f32), // End point
+}
+
+impl CubicBezier {
+    /// Evaluate the bezier curve at parameter t (0.0 to 1.0)
+    fn eval(&self, t: f32) -> (f32, f32) {
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let mt = 1.0 - t;
+        let mt2 = mt * mt;
+        let mt3 = mt2 * mt;
+
+        let x = mt3 * self.p0.0
+            + 3.0 * mt2 * t * self.p1.0
+            + 3.0 * mt * t2 * self.p2.0
+            + t3 * self.p3.0;
+        let y = mt3 * self.p0.1
+            + 3.0 * mt2 * t * self.p1.1
+            + 3.0 * mt * t2 * self.p2.1
+            + t3 * self.p3.1;
+
+        (x, y)
+    }
+}
+
+/// Calculate the minimum distance from a point to a cubic bezier curve
+/// Uses subdivision approach: sample curve at regular intervals and find closest point
+fn distance_to_bezier(point: (f32, f32), bezier: &CubicBezier) -> f32 {
+    const NUM_SAMPLES: usize = 20; // Number of line segments to approximate curve
+
+    let mut min_dist_sq = f32::MAX;
+
+    // Sample the curve and check distance to each line segment
+    let mut prev_point = bezier.eval(0.0);
+
+    for i in 1..=NUM_SAMPLES {
+        let t = i as f32 / NUM_SAMPLES as f32;
+        let curr_point = bezier.eval(t);
+
+        // Find distance from point to line segment (prev_point, curr_point)
+        let dist_sq = distance_to_line_segment_sq(point, prev_point, curr_point);
+        if dist_sq < min_dist_sq {
+            min_dist_sq = dist_sq;
+        }
+
+        prev_point = curr_point;
+    }
+
+    min_dist_sq.sqrt()
+}
+
+/// Calculate squared distance from a point to a line segment
+fn distance_to_line_segment_sq(point: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+    let ab = (b.0 - a.0, b.1 - a.1);
+    let ap = (point.0 - a.0, point.1 - a.1);
+
+    let ab_len_sq = ab.0 * ab.0 + ab.1 * ab.1;
+
+    if ab_len_sq < f32::EPSILON {
+        // Degenerate segment (a == b)
+        return ap.0 * ap.0 + ap.1 * ap.1;
+    }
+
+    // Project point onto line, clamped to segment
+    let t = ((ap.0 * ab.0 + ap.1 * ab.1) / ab_len_sq).clamp(0.0, 1.0);
+
+    // Closest point on segment
+    let closest = (a.0 + t * ab.0, a.1 + t * ab.1);
+
+    // Distance squared from point to closest point
+    let dx = point.0 - closest.0;
+    let dy = point.1 - closest.1;
+    dx * dx + dy * dy
+}
+
 /// Generate SVG path command for a bezier link between two pin positions
 /// Uses horizontal control points for a smooth curve
 /// Returns an SVG path string like "M x0 y0 C x1 y1 x2 y2 x3 y3"
@@ -173,6 +253,25 @@ fn generate_bezier_path_command(
         ctrl2_x, ctrl2_y,
         end_x, end_y
     )
+}
+
+/// Create a CubicBezier from start/end points using the same logic as generate_bezier_path_command
+fn create_bezier_from_endpoints(
+    start_x: f32,
+    start_y: f32,
+    end_x: f32,
+    end_y: f32,
+    zoom: f32,
+) -> CubicBezier {
+    let dx = (end_x - start_x).abs();
+    let offset = (dx * 0.5).max(50.0 * zoom);
+
+    CubicBezier {
+        p0: (start_x, start_y),
+        p1: (start_x + offset, start_y),
+        p2: (end_x - offset, end_y),
+        p3: (end_x, end_y),
+    }
 }
 
 /// Compute screen position for a pin given its ID, node rect, and zoom
@@ -651,6 +750,14 @@ pub struct NodeEditorOverlay {
     /// Comma-separated list of currently selected node IDs (output)
     /// Format: "1,2,3" or empty string if none
     pub current_selected_ids: Property<SharedString>,
+
+    // === Link hover state ===
+    /// ID of the link currently being hovered, or -1 if none
+    pub hovered_link_id: Property<i32>,
+    /// Hit distance threshold for link hover detection (in screen pixels)
+    pub link_hover_distance: Property<LogicalLength>,
+    /// Callback when hovered link changes (check hovered_link_id property for value)
+    pub link_hovered: Callback<()>,
 
     /// Internal state
     data: NodeEditorDataBox,
@@ -1508,6 +1615,11 @@ impl NodeEditorOverlay {
             return InputEventResult::GrabMouse;
         }
 
+        drop(state);
+
+        // When not in any interaction mode, check for link hover
+        self.update_hovered_link(position);
+
         InputEventResult::EventIgnored
     }
 
@@ -1575,6 +1687,13 @@ impl NodeEditorOverlay {
         }
         drop(state);
 
+        // Clear hovered link on exit
+        let current_hovered = self.hovered_link_id();
+        if current_hovered != -1 {
+            Self::FIELD_OFFSETS.hovered_link_id.apply_pin(self).set(-1);
+            self.link_hovered.call(&());
+        }
+
         // Update properties and call callbacks after releasing the borrow
         if was_box_selecting {
             Self::FIELD_OFFSETS.is_selecting.apply_pin(self).set(false);
@@ -1625,6 +1744,76 @@ impl NodeEditorOverlay {
         let end_type = end_pin % 10;
         // One must be input (1) and one must be output (2)
         (start_type == 1 && end_type == 2) || (start_type == 2 && end_type == 1)
+    }
+
+    /// Find a link at the given position, returns link ID or -1 if no link found
+    /// Uses distance-to-bezier algorithm to check proximity to link curves
+    fn find_link_at(self: Pin<&Self>, position: LogicalPoint) -> i32 {
+        let hover_distance = self.link_hover_distance().get();
+        let zoom = self.zoom();
+        let state = self.data.state.borrow();
+
+        // Get drag state for applying offset to selected nodes
+        let is_dragging = self.is_dragging();
+        let drag_offset_x = if is_dragging { self.drag_offset_x().get() } else { 0.0 };
+        let drag_offset_y = if is_dragging { self.drag_offset_y().get() } else { 0.0 };
+
+        let mut closest_link_id: i32 = -1;
+        let mut closest_distance = hover_distance;
+
+        for (&link_id, link) in state.links.iter() {
+            // Get node IDs from pin IDs
+            let start_node_id = link.start_pin_id / 10;
+            let end_node_id = link.end_pin_id / 10;
+
+            // Find node rects
+            let start_node_rect = state.node_rects.get(&start_node_id);
+            let end_node_rect = state.node_rects.get(&end_node_id);
+
+            if let (Some(start_rect), Some(end_rect)) = (start_node_rect, end_node_rect) {
+                // Compute pin positions
+                let (mut start_x, mut start_y) =
+                    compute_pin_screen_position(link.start_pin_id, start_rect, zoom);
+                let (mut end_x, mut end_y) =
+                    compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
+
+                // Apply drag offset to selected nodes
+                if is_dragging {
+                    if state.selected_node_ids.contains(&start_node_id) {
+                        start_x += drag_offset_x;
+                        start_y += drag_offset_y;
+                    }
+                    if state.selected_node_ids.contains(&end_node_id) {
+                        end_x += drag_offset_x;
+                        end_y += drag_offset_y;
+                    }
+                }
+
+                // Create bezier curve
+                let bezier = create_bezier_from_endpoints(start_x, start_y, end_x, end_y, zoom);
+
+                // Calculate distance from mouse to bezier
+                let distance = distance_to_bezier((position.x, position.y), &bezier);
+
+                if distance < closest_distance {
+                    closest_distance = distance;
+                    closest_link_id = link_id;
+                }
+            }
+        }
+
+        closest_link_id
+    }
+
+    /// Update the hovered link state and fire callback if changed
+    fn update_hovered_link(self: Pin<&Self>, position: LogicalPoint) {
+        let new_hovered = self.find_link_at(position);
+        let current_hovered = self.hovered_link_id();
+
+        if new_hovered != current_hovered {
+            Self::FIELD_OFFSETS.hovered_link_id.apply_pin(self).set(new_hovered);
+            self.link_hovered.call(&());
+        }
     }
 }
 
