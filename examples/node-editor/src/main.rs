@@ -157,20 +157,20 @@ fn main() {
         NodeData {
             id: 1,
             title: SharedString::from("Input"),
-            world_x: 96.0,  // Grid-aligned (4 * 24)
-            world_y: 192.0, // Grid-aligned (8 * 24)
+            world_x: 144.0,  // Grid-aligned (6 * 24)
+            world_y: 264.0,  // Grid-aligned (11 * 24)
         },
         NodeData {
             id: 2,
             title: SharedString::from("Process"),
-            world_x: 360.0, // Grid-aligned (15 * 24)
-            world_y: 144.0, // Grid-aligned (6 * 24)
+            world_x: 408.0, // Grid-aligned (17 * 24)
+            world_y: 216.0, // Grid-aligned (9 * 24)
         },
         NodeData {
             id: 3,
             title: SharedString::from("Output"),
-            world_x: 600.0, // Grid-aligned (25 * 24)
-            world_y: 192.0, // Grid-aligned (8 * 24)
+            world_x: 648.0, // Grid-aligned (27 * 24)
+            world_y: 264.0, // Grid-aligned (11 * 24)
         },
     ]));
 
