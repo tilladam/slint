@@ -16,7 +16,7 @@ const GRID_SPACING: f32 = 24.0;
 
 // Filter node dimensions (must match filter_node.slint)
 const FILTER_NODE_BASE_WIDTH: f32 = 220.0;
-const FILTER_NODE_BASE_HEIGHT: f32 = 140.0;  // 28 + 8 + 32*3 + 8
+const FILTER_NODE_BASE_HEIGHT: f32 = 148.0;  // 8 + 28 + 8 + 32*3 + 8
 
 /// Snap a value to the nearest grid position
 fn snap_to_grid(value: f32) -> f32 {

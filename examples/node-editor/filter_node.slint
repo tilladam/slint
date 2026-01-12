@@ -92,8 +92,9 @@ export component FilterNode inherits Rectangle {
     property <length> pin-area-width: 24px;  // Space for pins on each side
 
     // Base dimensions - sized to fit content
+    // Height = VL-padding + title + HL-padding-top + 3*rows + VL-padding
     property <length> base-width: 220px;
-    property <length> base-height: title-height + content-padding + (row-height * 3) + content-padding;
+    property <length> base-height: content-padding + title-height + content-padding + (row-height * 3) + content-padding;
 
     // Screen position
     property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
