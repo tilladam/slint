@@ -1957,9 +1957,15 @@ impl NodeEditorOverlay {
                 state.selected_link_ids.insert(link_id);
             }
         } else {
-            // Single select: clear all and select only clicked link
-            state.selected_link_ids.clear();
-            state.selected_link_ids.insert(link_id);
+            // Single select: toggle if clicking on the only selected link, otherwise select only this link
+            if state.selected_link_ids.len() == 1 && state.selected_link_ids.contains(&link_id) {
+                // Deselect if clicking on the only selected link
+                state.selected_link_ids.clear();
+            } else {
+                // Select only the clicked link
+                state.selected_link_ids.clear();
+                state.selected_link_ids.insert(link_id);
+            }
         }
 
         // Build output strings
