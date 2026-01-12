@@ -384,23 +384,37 @@ export component MainWindow inherits Window {
     pure callback compute-node-screen-width() -> length;
     pure callback compute-node-screen-height() -> length;
 
-    // Compute pin positions from node world coordinates
+    // Compute pin positions from node world coordinates (absolute screen coords)
     pure callback compute-input-pin-x(float) -> length;
     pure callback compute-input-pin-y(float) -> length;
     pure callback compute-output-pin-x(float) -> length;
     pure callback compute-output-pin-y(float) -> length;
 
+    // Compute pin offsets from node origin (relative, unscaled, for core recomputation)
+    pure callback compute-input-pin-relative-x() -> length;
+    pure callback compute-input-pin-relative-y() -> length;
+    pure callback compute-output-pin-relative-x() -> length;
+    pure callback compute-output-pin-relative-y() -> length;
+
     // Filter node position computation
     pure callback compute-filter-screen-width() -> length;
     pure callback compute-filter-screen-height() -> length;
 
-    // Filter node pin positions
+    // Filter node pin positions (absolute screen coords)
     pure callback compute-filter-data-input-pin-x(float) -> length;
     pure callback compute-filter-data-input-pin-y(float) -> length;
     pure callback compute-filter-data-output-pin-x(float) -> length;
     pure callback compute-filter-data-output-pin-y(float) -> length;
     pure callback compute-filter-control-input-pin-x(float) -> length;
     pure callback compute-filter-control-input-pin-y(float) -> length;
+
+    // Filter node pin relative offsets (unscaled, from node origin)
+    pure callback compute-filter-data-input-pin-relative-x() -> length;
+    pure callback compute-filter-data-input-pin-relative-y() -> length;
+    pure callback compute-filter-data-output-pin-relative-x() -> length;
+    pure callback compute-filter-data-output-pin-relative-y() -> length;
+    pure callback compute-filter-control-input-pin-relative-x() -> length;
+    pure callback compute-filter-control-input-pin-relative-y() -> length;
 
     // Implement the callbacks using Slint globals
     compute-node-screen-x(world-x) => { return world-x * 1px * zoom + pan-x; }
@@ -419,6 +433,20 @@ export component MainWindow inherits Window {
     }
     compute-output-pin-y(world-y) => {
         return world-y * 1px * zoom + pan-y + (NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
+    }
+
+    // Relative offsets (unscaled, from node top-left)
+    compute-input-pin-relative-x => {
+        return NodeConstants.pin-margin + NodeConstants.pin-size / 2;
+    }
+    compute-input-pin-relative-y => {
+        return NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2;
+    }
+    compute-output-pin-relative-x => {
+        return NodeConstants.node-base-width - NodeConstants.pin-margin - NodeConstants.pin-size / 2;
+    }
+    compute-output-pin-relative-y => {
+        return NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2;
     }
 
     compute-filter-screen-width => { return FilterNodeConstants.base-width * zoom; }
@@ -441,6 +469,26 @@ export component MainWindow inherits Window {
     }
     compute-filter-control-input-pin-y(world-y) => {
         return world-y * 1px * zoom + pan-y + (FilterNodeConstants.content-padding + FilterNodeConstants.title-height + FilterNodeConstants.content-padding + FilterNodeConstants.row-height + FilterNodeConstants.row-height / 2) * zoom;
+    }
+
+    // Filter node relative offsets (unscaled, from node top-left)
+    compute-filter-data-input-pin-relative-x => {
+        return FilterNodeConstants.pin-margin + FilterNodeConstants.pin-size / 2;
+    }
+    compute-filter-data-input-pin-relative-y => {
+        return FilterNodeConstants.content-padding + FilterNodeConstants.title-height + FilterNodeConstants.content-padding + FilterNodeConstants.row-height / 2;
+    }
+    compute-filter-data-output-pin-relative-x => {
+        return FilterNodeConstants.base-width - FilterNodeConstants.pin-margin - FilterNodeConstants.pin-size / 2;
+    }
+    compute-filter-data-output-pin-relative-y => {
+        return FilterNodeConstants.content-padding + FilterNodeConstants.title-height + FilterNodeConstants.content-padding + FilterNodeConstants.row-height / 2;
+    }
+    compute-filter-control-input-pin-relative-x => {
+        return FilterNodeConstants.pin-margin + FilterNodeConstants.pin-size / 2;
+    }
+    compute-filter-control-input-pin-relative-y => {
+        return FilterNodeConstants.content-padding + FilterNodeConstants.title-height + FilterNodeConstants.content-padding + FilterNodeConstants.row-height + FilterNodeConstants.row-height / 2;
     }
 
     // The composite NodeEditor handles all three layers:

@@ -120,6 +120,8 @@ fn build_filter_node_rects_batch(window: &MainWindow, filter_nodes: &VecModel<Fi
 
 /// Build filter node pins batch string using Slint-computed positions
 /// Filter nodes have 3 pins: data-input (1), data-output (2), control-input (3)
+///
+/// NOTE: Slint also provides relative offset callbacks that could eliminate core constants.
 fn build_filter_pins_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNodeData>) -> String {
     (0..filter_nodes.row_count())
         .filter_map(|i| filter_nodes.row_data(i))
@@ -152,7 +154,10 @@ fn build_filter_pins_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNo
 /// Build pin positions batch string from model data using Slint-computed positions
 /// Format: "pin_id,screen_x,screen_y;..."
 /// Pin IDs: node_id * 10 + 1 for input, node_id * 10 + 2 for output
-/// Slint computes positions using globals - Rust just queries
+///
+/// NOTE: Slint also provides relative offset callbacks (compute-*-pin-relative-*) that
+/// could be used by the core to eliminate hardcoded constants. This would require core
+/// changes to accept format "pin_id,rel_x,rel_y" and compute absolute positions on-demand.
 fn build_pins_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> String {
     (0..nodes.row_count())
         .filter_map(|i| nodes.row_data(i))
