@@ -531,6 +531,7 @@ fn main() {
 
     // Handle deleting selected nodes
     let nodes_for_delete = nodes.clone();
+    let filter_nodes_for_delete = filter_nodes.clone();
     let links_for_delete = links.clone();
     let window_for_delete = window.as_weak();
     window.on_delete_selected_nodes(move || {
@@ -562,6 +563,22 @@ fn main() {
         // Remove nodes in reverse order to maintain valid indices
         for &i in indices_to_remove.iter().rev() {
             nodes_for_delete.remove(i);
+        }
+
+        // Also check and delete from filter nodes
+        let mut filter_indices_to_remove: Vec<usize> = Vec::new();
+        for i in 0..filter_nodes_for_delete.row_count() {
+            if let Some(filter_node) = filter_nodes_for_delete.row_data(i) {
+                if selected_ids.contains(&filter_node.id) {
+                    filter_indices_to_remove.push(i);
+                    deleted_node_ids.push(filter_node.id);
+                }
+            }
+        }
+
+        // Remove filter nodes in reverse order
+        for &i in filter_indices_to_remove.iter().rev() {
+            filter_nodes_for_delete.remove(i);
         }
 
         // Also remove any links connected to deleted nodes
