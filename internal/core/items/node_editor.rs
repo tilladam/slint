@@ -500,6 +500,14 @@ pub struct NodeEditorOverlay {
     /// Selection box height
     pub selection_height: Property<LogicalLength>,
 
+    // === Node drag state (for applying offset to link positions) ===
+    /// Whether nodes are currently being dragged
+    pub is_dragging: Property<bool>,
+    /// X offset of dragged nodes (in screen coordinates, applied to selected nodes)
+    pub drag_offset_x: Property<LogicalLength>,
+    /// Y offset of dragged nodes (in screen coordinates, applied to selected nodes)
+    pub drag_offset_y: Property<LogicalLength>,
+
     // === Context menu state ===
     /// X coordinate where context menu was requested
     pub context_menu_x: Property<LogicalLength>,
@@ -854,6 +862,12 @@ impl Item for NodeEditorOverlay {
             self.update_link_preview_path();
         }
 
+        // Regenerate link positions during drag (drag offset changes every frame)
+        // This ensures link bezier paths follow the dragged nodes
+        if self.is_dragging() {
+            self.regenerate_link_positions();
+        }
+
         // Selection box, active link preview, and minimap are rendered
         // in Slint using Rectangle and Path components bound to this
         // overlay's properties (is-selecting, selection-x/y/width/height,
@@ -1206,9 +1220,15 @@ impl NodeEditorOverlay {
 
     /// Regenerate all link positions and bezier paths based on current node rects and viewport state
     /// Updates both link_positions_data (for backwards compat) and link_bezier_paths (for core-based rendering)
+    /// Applies drag offset to selected nodes when is_dragging is true
     fn regenerate_link_positions(self: Pin<&Self>) {
         let state = self.data.state.borrow();
         let zoom = self.zoom();
+
+        // Get drag state for applying offset to selected nodes
+        let is_dragging = self.is_dragging();
+        let drag_offset_x = if is_dragging { self.drag_offset_x().get() } else { 0.0 };
+        let drag_offset_y = if is_dragging { self.drag_offset_y().get() } else { 0.0 };
 
         // Build formatted strings for both position data and bezier paths
         let mut position_results = alloc::vec::Vec::new();
@@ -1224,9 +1244,22 @@ impl NodeEditorOverlay {
             let end_node_rect = state.node_rects.get(&end_node_id);
 
             if let (Some(start_rect), Some(end_rect)) = (start_node_rect, end_node_rect) {
-                // Compute pin positions
-                let (start_x, start_y) = compute_pin_screen_position(link.start_pin_id, start_rect, zoom);
-                let (end_x, end_y) = compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
+                // Compute base pin positions
+                let (mut start_x, mut start_y) = compute_pin_screen_position(link.start_pin_id, start_rect, zoom);
+                let (mut end_x, mut end_y) = compute_pin_screen_position(link.end_pin_id, end_rect, zoom);
+
+                // Apply drag offset to selected nodes
+                if is_dragging {
+                    if state.selected_node_ids.contains(&start_node_id) {
+                        start_x += drag_offset_x;
+                        start_y += drag_offset_y;
+                    }
+                    if state.selected_node_ids.contains(&end_node_id) {
+                        end_x += drag_offset_x;
+                        end_y += drag_offset_y;
+                    }
+                }
+
                 let color_argb = link.color.as_argb_encoded();
 
                 // Format for position data: id,start_x,start_y,end_x,end_y,color_argb

@@ -806,6 +806,14 @@ export component NodeEditorOverlay inherits Empty {
     /// Selection box height
     out property <length> selection-height;
 
+    // === Node drag state (for applying offset to link positions) ===
+    /// Whether nodes are currently being dragged (set by Slint during drag)
+    in property <bool> is-dragging: false;
+    /// X offset of dragged nodes in screen coordinates (applied to selected nodes' link endpoints)
+    in property <length> drag-offset-x;
+    /// Y offset of dragged nodes in screen coordinates (applied to selected nodes' link endpoints)
+    in property <length> drag-offset-y;
+
     // === Context menu state ===
     /// X coordinate where context menu was requested
     out property <length> context-menu-x;

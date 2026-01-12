@@ -524,37 +524,10 @@ export component MainWindow inherits Window {
     // Pin hit-testing is now handled by core's find_pin_at() using reported pin positions
     // No more 16-node limit!
 
-    // Helper: check if a node (given its ID) is selected (used for link drag offset)
-    pure function is-node-selected(node-id: int) -> bool {
-        if nodes.length > 0 && nodes[0].id == node-id { return nodes[0].selected; }
-        if nodes.length > 1 && nodes[1].id == node-id { return nodes[1].selected; }
-        if nodes.length > 2 && nodes[2].id == node-id { return nodes[2].selected; }
-        if nodes.length > 3 && nodes[3].id == node-id { return nodes[3].selected; }
-        if nodes.length > 4 && nodes[4].id == node-id { return nodes[4].selected; }
-        if nodes.length > 5 && nodes[5].id == node-id { return nodes[5].selected; }
-        if nodes.length > 6 && nodes[6].id == node-id { return nodes[6].selected; }
-        if nodes.length > 7 && nodes[7].id == node-id { return nodes[7].selected; }
-        if nodes.length > 8 && nodes[8].id == node-id { return nodes[8].selected; }
-        if nodes.length > 9 && nodes[9].id == node-id { return nodes[9].selected; }
-        if nodes.length > 10 && nodes[10].id == node-id { return nodes[10].selected; }
-        if nodes.length > 11 && nodes[11].id == node-id { return nodes[11].selected; }
-        if nodes.length > 12 && nodes[12].id == node-id { return nodes[12].selected; }
-        if nodes.length > 13 && nodes[13].id == node-id { return nodes[13].selected; }
-        if nodes.length > 14 && nodes[14].id == node-id { return nodes[14].selected; }
-        if nodes.length > 15 && nodes[15].id == node-id { return nodes[15].selected; }
-        return false;
-    }
-
-    // Helper: get drag offset for a link endpoint during dragging
-    // Returns the visual drag offset if the pin's node is selected and being dragged
-    pure function get-link-drag-offset-x(pin-id: int) -> length {
-        if !is-dragging { return 0px; }
-        return is-node-selected(floor(pin-id / 10)) ? visual-drag-offset-x : 0px;
-    }
-    pure function get-link-drag-offset-y(pin-id: int) -> length {
-        if !is-dragging { return 0px; }
-        return is-node-selected(floor(pin-id / 10)) ? visual-drag-offset-y : 0px;
-    }
+    // Link drag offset is now handled by core:
+    // - is-dragging, drag-offset-x/y are bound to overlay
+    // - Core applies offset to selected nodes' link positions in regenerate_link_positions()
+    // - No more 16-node limit for link drag offset!
 
     // Link creation is now handled by the core overlay:
     // - Pin drag-started: sets overlay.pending-link-* and triggers link creation
@@ -636,12 +609,12 @@ export component MainWindow inherits Window {
     }
 
     // Links layer (between nodes and overlay) - iterates over Rust-owned model
+    // Positions come from core which applies drag offset to selected nodes automatically
     for link-data in links: Link {
-        // Use pre-computed positions from Rust, applying visual drag offset during dragging
-        start-x: link-data.start-x * 1px + get-link-drag-offset-x(link-data.start-pin-id);
-        start-y: link-data.start-y * 1px + get-link-drag-offset-y(link-data.start-pin-id);
-        end-x: link-data.end-x * 1px + get-link-drag-offset-x(link-data.end-pin-id);
-        end-y: link-data.end-y * 1px + get-link-drag-offset-y(link-data.end-pin-id);
+        start-x: link-data.start-x * 1px;
+        start-y: link-data.start-y * 1px;
+        end-x: link-data.end-x * 1px;
+        end-y: link-data.end-y * 1px;
         link-color: link-data.color;
         line-width: 3px * zoom;
         zoom: zoom;
@@ -656,6 +629,11 @@ export component MainWindow inherits Window {
         zoom <=> zoom;
         min-zoom: 0.25;
         max-zoom: 4.0;
+
+        // Drag state - core applies offset to link positions when dragging
+        is-dragging: is-dragging;
+        drag-offset-x: visual-drag-offset-x;
+        drag-offset-y: visual-drag-offset-y;
 
         link-created => {
             // Create link using the overlay's output properties
