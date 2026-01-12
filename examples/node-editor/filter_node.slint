@@ -1,0 +1,366 @@
+// Filter Node - A complex node demonstrating widgets inside nodes
+//
+// This node represents a data filter with:
+// - Multiple input/output pins
+// - ComboBox for filter type selection
+// - Buttons for actions
+// - Labels showing state
+
+import { ComboBox, Button } from "std-widgets.slint";
+
+// Filter node data passed from Rust
+export struct FilterNodeData {
+    id: int,
+    title: string,
+    world-x: float,
+    world-y: float,
+    filter-type-index: int,
+    enabled: bool,
+    processed-count: int,
+}
+
+// A complex node with multiple widgets
+export component FilterNode inherits Rectangle {
+    in property <string> title: "Filter";
+    in property <int> node-id;
+
+    // Pin IDs: node_id * 10 + pin_number
+    // Pin 1: Data input
+    // Pin 2: Data output
+    // Pin 3: Control input
+    in property <int> data-input-pin-id: node-id * 10 + 1;
+    in property <int> data-output-pin-id: node-id * 10 + 2;
+    in property <int> control-input-pin-id: node-id * 10 + 3;
+
+    // Selection state
+    in property <bool> selected: false;
+
+    // World coordinates (grid space)
+    in property <length> world-x;
+    in property <length> world-y;
+
+    // Transform parameters
+    in property <float> zoom: 1.0;
+    in property <length> pan-x: 0px;
+    in property <length> pan-y: 0px;
+
+    // External drag offset
+    in property <length> drag-offset-x: 0px;
+    in property <length> drag-offset-y: 0px;
+
+    // Node-specific state
+    in-out property <int> filter-type-index: 0;
+    in-out property <bool> enabled: true;
+    in property <int> processed-count: 0;
+
+    // Callbacks for pin drag-to-link
+    callback pin-drag-started(int, length, length);
+    callback pin-drag-moved(int, length, length);
+    callback pin-drag-ended(int, length, length);
+
+    // Callback when node is clicked
+    callback clicked(int, bool);
+
+    // Callbacks for node dragging
+    callback drag-started(int, bool);
+    callback drag-moved(int, length, length);
+    callback drag-ended(int, length, length);
+
+    // Callback to report node rectangle
+    callback report-rect(int, length, length, length, length);
+
+    // Callbacks for widget interactions
+    callback filter-type-changed(int, int);  // node-id, new-index
+    callback toggle-enabled(int);             // node-id
+    callback reset-clicked(int);              // node-id
+
+    // Report rect on init
+    init => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+
+    // Pin dimensions
+    property <length> base-pin-size: 12px;
+    property <length> pin-size: base-pin-size * zoom;
+    property <length> pin-radius: pin-size / 2;
+
+    // Base dimensions (larger than simple node)
+    property <length> base-width: 200px;
+    property <length> base-height: 160px;
+
+    // Screen position
+    property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
+    property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
+
+    // Pin Y positions
+    property <length> pin-row-1-y: (8px + 24px + 12px) * zoom;  // First row after title
+    property <length> pin-row-2-y: (8px + 24px + 12px + 36px) * zoom;  // Second row
+
+    // Expose pin positions
+    out property <length> data-input-pin-x: screen-x + data-input-pin.x + pin-radius;
+    out property <length> data-input-pin-y: screen-y + data-input-pin.y + pin-radius;
+    out property <length> data-output-pin-x: screen-x + data-output-pin.x + pin-radius;
+    out property <length> data-output-pin-y: screen-y + data-output-pin.y + pin-radius;
+    out property <length> control-input-pin-x: screen-x + control-input-pin.x + pin-radius;
+    out property <length> control-input-pin-y: screen-y + control-input-pin.y + pin-radius;
+
+    x: screen-x;
+    y: screen-y;
+    width: base-width * zoom;
+    height: base-height * zoom;
+    background: selected ? #3a3a4a : #2d2d2d;
+    border-radius: 8px * zoom;
+    border-width: selected ? 2px * zoom : 1px * zoom;
+    border-color: selected ? #4a9eff : #555;
+
+    // Title bar with different color for filter nodes
+    Rectangle {
+        x: 8px * zoom;
+        y: 8px * zoom;
+        width: parent.width - 16px * zoom;
+        height: 24px * zoom;
+        background: selected ? #6a4a9a : #4a3d5d;
+        border-radius: 4px * zoom;
+
+        Text {
+            text: title;
+            color: white;
+            font-size: 14px * zoom;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Drag handling (covers whole node, but widgets on top will capture their own events)
+    TouchArea {
+        property <bool> shift-held: false;
+        property <bool> was-dragged: false;
+        property <length> drag-threshold: 5px;
+        property <length> press-abs-x: 0px;
+        property <length> press-abs-y: 0px;
+        property <length> current-offset-x: self.absolute-position.x + self.mouse-x - press-abs-x;
+        property <length> current-offset-y: self.absolute-position.y + self.mouse-y - press-abs-y;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                shift-held = event.modifiers.shift;
+                was-dragged = false;
+                press-abs-x = self.absolute-position.x + self.pressed-x;
+                press-abs-y = self.absolute-position.y + self.pressed-y;
+            }
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                if !was-dragged {
+                    root.clicked(node-id, shift-held);
+                } else {
+                    root.drag-ended(node-id, current-offset-x / zoom, current-offset-y / zoom);
+                }
+            }
+        }
+        moved => {
+            if self.pressed {
+                if !was-dragged {
+                    if current-offset-x > drag-threshold ||
+                       (-current-offset-x) > drag-threshold ||
+                       current-offset-y > drag-threshold ||
+                       (-current-offset-y) > drag-threshold {
+                        was-dragged = true;
+                        root.drag-started(node-id, selected);
+                    }
+                }
+                if was-dragged {
+                    root.drag-moved(node-id, current-offset-x / zoom, current-offset-y / zoom);
+                }
+            }
+        }
+    }
+
+    // Content area with widgets
+    VerticalLayout {
+        x: 28px * zoom;  // Leave space for left pins
+        y: (8px + 24px + 8px) * zoom;
+        width: parent.width - 56px * zoom;  // Leave space for both sides
+        spacing: 4px * zoom;
+        padding: 4px * zoom;
+
+        // Filter type selector
+        HorizontalLayout {
+            spacing: 4px * zoom;
+            alignment: stretch;
+
+            Text {
+                text: "Type:";
+                color: #aaa;
+                font-size: 11px * zoom;
+                vertical-alignment: center;
+            }
+
+            filter-combo := ComboBox {
+                model: ["Low Pass", "High Pass", "Band Pass", "Notch"];
+                current-index <=> filter-type-index;
+                selected(_value) => {
+                    root.filter-type-changed(node-id, filter-type-index);
+                }
+            }
+        }
+
+        // Status row
+        HorizontalLayout {
+            spacing: 8px * zoom;
+            alignment: start;
+
+            Text {
+                text: enabled ? "Active" : "Bypassed";
+                color: enabled ? #8f8 : #f88;
+                font-size: 11px * zoom;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "Count: " + processed-count;
+                color: #888;
+                font-size: 10px * zoom;
+                vertical-alignment: center;
+            }
+        }
+
+        // Button row
+        HorizontalLayout {
+            spacing: 4px * zoom;
+            alignment: start;
+
+            Button {
+                text: enabled ? "Bypass" : "Enable";
+                clicked => {
+                    root.toggle-enabled(node-id);
+                }
+            }
+
+            Button {
+                text: "Reset";
+                clicked => {
+                    root.reset-clicked(node-id);
+                }
+            }
+        }
+    }
+
+    // Data Input pin (green, left side, row 1)
+    data-input-pin := Rectangle {
+        x: 8px * zoom;
+        y: pin-row-1-y;
+        width: pin-size;
+        height: pin-size;
+        background: data-input-touch.has-hover ? #66BB6A : #4CAF50;
+        border-radius: pin-radius;
+
+        data-input-touch := TouchArea {
+            property <bool> drag-active: false;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    drag-active = true;
+                    pin-drag-started(data-input-pin-id, data-input-pin-x, data-input-pin-y);
+                }
+                if event.kind == PointerEventKind.up && drag-active {
+                    drag-active = false;
+                    pin-drag-ended(data-input-pin-id, data-input-pin-x + self.mouse-x - pin-radius, data-input-pin-y + self.mouse-y - pin-radius);
+                }
+            }
+            moved => {
+                if drag-active {
+                    pin-drag-moved(data-input-pin-id, data-input-pin-x + self.mouse-x - pin-radius, data-input-pin-y + self.mouse-y - pin-radius);
+                }
+            }
+        }
+    }
+
+    // Control Input pin (yellow, left side, row 2)
+    control-input-pin := Rectangle {
+        x: 8px * zoom;
+        y: pin-row-2-y;
+        width: pin-size;
+        height: pin-size;
+        background: control-input-touch.has-hover ? #FFD54F : #FFC107;
+        border-radius: pin-radius;
+
+        control-input-touch := TouchArea {
+            property <bool> drag-active: false;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    drag-active = true;
+                    pin-drag-started(control-input-pin-id, control-input-pin-x, control-input-pin-y);
+                }
+                if event.kind == PointerEventKind.up && drag-active {
+                    drag-active = false;
+                    pin-drag-ended(control-input-pin-id, control-input-pin-x + self.mouse-x - pin-radius, control-input-pin-y + self.mouse-y - pin-radius);
+                }
+            }
+            moved => {
+                if drag-active {
+                    pin-drag-moved(control-input-pin-id, control-input-pin-x + self.mouse-x - pin-radius, control-input-pin-y + self.mouse-y - pin-radius);
+                }
+            }
+        }
+    }
+
+    // Data Output pin (blue, right side)
+    data-output-pin := Rectangle {
+        x: parent.width - 8px * zoom - pin-size;
+        y: pin-row-1-y;
+        width: pin-size;
+        height: pin-size;
+        background: data-output-touch.has-hover ? #42A5F5 : #2196F3;
+        border-radius: pin-radius;
+
+        data-output-touch := TouchArea {
+            property <bool> drag-active: false;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    drag-active = true;
+                    pin-drag-started(data-output-pin-id, data-output-pin-x, data-output-pin-y);
+                }
+                if event.kind == PointerEventKind.up && drag-active {
+                    drag-active = false;
+                    pin-drag-ended(data-output-pin-id, data-output-pin-x + self.mouse-x - pin-radius, data-output-pin-y + self.mouse-y - pin-radius);
+                }
+            }
+            moved => {
+                if drag-active {
+                    pin-drag-moved(data-output-pin-id, data-output-pin-x + self.mouse-x - pin-radius, data-output-pin-y + self.mouse-y - pin-radius);
+                }
+            }
+        }
+    }
+
+    // Pin labels
+    Text {
+        x: (8px + 14px) * zoom;
+        y: pin-row-1-y;
+        text: "In";
+        color: #888;
+        font-size: 9px * zoom;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: (8px + 14px) * zoom;
+        y: pin-row-2-y;
+        text: "Ctrl";
+        color: #888;
+        font-size: 9px * zoom;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: parent.width - (8px + 14px + 20px) * zoom;
+        y: pin-row-1-y;
+        text: "Out";
+        color: #888;
+        font-size: 9px * zoom;
+        vertical-alignment: center;
+        horizontal-alignment: right;
+        width: 20px * zoom;
+    }
+}

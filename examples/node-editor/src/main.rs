@@ -14,6 +14,10 @@ const NODE_BASE_WIDTH: f32 = 150.0;
 const NODE_BASE_HEIGHT: f32 = 80.0;
 const GRID_SPACING: f32 = 24.0;
 
+// Filter node dimensions (must match filter_node.slint)
+const FILTER_NODE_BASE_WIDTH: f32 = 200.0;
+const FILTER_NODE_BASE_HEIGHT: f32 = 160.0;
+
 /// Snap a value to the nearest grid position
 fn snap_to_grid(value: f32) -> f32 {
     (value / GRID_SPACING).round() * GRID_SPACING
@@ -112,6 +116,65 @@ fn build_link_bezier_paths(
         .join(";")
 }
 
+/// Build filter node rects batch string
+/// Format: "id,screen_x,screen_y,width,height;..."
+fn build_filter_node_rects_batch(filter_nodes: &VecModel<FilterNodeData>, zoom: f32, pan_x: f32, pan_y: f32) -> String {
+    (0..filter_nodes.row_count())
+        .filter_map(|i| filter_nodes.row_data(i))
+        .map(|node| {
+            let screen_x = node.world_x * zoom + pan_x;
+            let screen_y = node.world_y * zoom + pan_y;
+            let width = FILTER_NODE_BASE_WIDTH * zoom;
+            let height = FILTER_NODE_BASE_HEIGHT * zoom;
+            format!("{},{},{},{},{}", node.id, screen_x, screen_y, width, height)
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// Build filter node pins batch string
+/// Filter nodes have 3 pins: data-input (1), data-output (2), control-input (3)
+fn build_filter_pins_batch(filter_nodes: &VecModel<FilterNodeData>, zoom: f32, pan_x: f32, pan_y: f32) -> String {
+    const PIN_MARGIN: f32 = 8.0;
+    const PIN_SIZE: f32 = 12.0;
+    const TITLE_HEIGHT: f32 = 24.0;
+
+    let pin_radius = PIN_SIZE / 2.0;
+    // Pin row positions (must match filter_node.slint)
+    let pin_row_1_y = PIN_MARGIN + TITLE_HEIGHT + 12.0 + pin_radius;  // First row
+    let pin_row_2_y = PIN_MARGIN + TITLE_HEIGHT + 12.0 + 36.0 + pin_radius;  // Second row
+
+    (0..filter_nodes.row_count())
+        .filter_map(|i| filter_nodes.row_data(i))
+        .flat_map(|node| {
+            let node_screen_x = node.world_x * zoom + pan_x;
+            let node_screen_y = node.world_y * zoom + pan_y;
+
+            // Data input pin (pin 1): left side, row 1
+            let data_input_pin_id = node.id * 10 + 1;
+            let data_input_x = node_screen_x + (PIN_MARGIN + pin_radius) * zoom;
+            let data_input_y = node_screen_y + pin_row_1_y * zoom;
+
+            // Data output pin (pin 2): right side, row 1
+            let data_output_pin_id = node.id * 10 + 2;
+            let data_output_x = node_screen_x + (FILTER_NODE_BASE_WIDTH - PIN_MARGIN - PIN_SIZE + pin_radius) * zoom;
+            let data_output_y = node_screen_y + pin_row_1_y * zoom;
+
+            // Control input pin (pin 3): left side, row 2
+            let control_input_pin_id = node.id * 10 + 3;
+            let control_input_x = node_screen_x + (PIN_MARGIN + pin_radius) * zoom;
+            let control_input_y = node_screen_y + pin_row_2_y * zoom;
+
+            vec![
+                format!("{},{},{}", data_input_pin_id, data_input_x, data_input_y),
+                format!("{},{},{}", data_output_pin_id, data_output_x, data_output_y),
+                format!("{},{},{}", control_input_pin_id, control_input_x, control_input_y),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 /// Build pin positions batch string from model data and current viewport
 /// Format: "pin_id,screen_x,screen_y;..."
 /// Pin IDs: node_id * 10 + 1 for input, node_id * 10 + 2 for output
@@ -177,8 +240,22 @@ fn main() {
     // Set the model on the window
     window.set_nodes(ModelRc::from(nodes.clone()));
 
+    // Create the filter nodes model (complex nodes with widgets)
+    let filter_nodes: Rc<VecModel<FilterNodeData>> = Rc::new(VecModel::from(vec![
+        FilterNodeData {
+            id: 100,  // Use higher IDs to avoid conflicts with simple nodes
+            title: SharedString::from("Filter"),
+            world_x: 408.0,  // Between Input and Output nodes
+            world_y: 384.0,  // Below the main chain
+            filter_type_index: 0,
+            enabled: true,
+            processed_count: 42,
+        },
+    ]));
+    window.set_filter_nodes(ModelRc::from(filter_nodes.clone()));
+
     // Track next node ID for creating new nodes
-    let next_node_id = Rc::new(RefCell::new(4)); // Start after initial nodes (1, 2, 3)
+    let next_node_id = Rc::new(RefCell::new(4)); // Start after initial simple nodes (1, 2, 3)
 
     // Create the links model with initial connections
     // Link colors for variety
@@ -235,14 +312,34 @@ fn main() {
     let initial_zoom = 1.0f32;
     let initial_pan_x = 0.0f32;
     let initial_pan_y = 0.0f32;
-    let node_rects_batch = build_node_rects_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
+
+    // Build combined node rects batch (simple nodes + filter nodes)
+    let simple_node_rects = build_node_rects_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
+    let filter_node_rects = build_filter_node_rects_batch(&filter_nodes, initial_zoom, initial_pan_x, initial_pan_y);
+    let node_rects_batch = if simple_node_rects.is_empty() {
+        filter_node_rects
+    } else if filter_node_rects.is_empty() {
+        simple_node_rects
+    } else {
+        format!("{};{}", simple_node_rects, filter_node_rects)
+    };
     window.set_pending_node_rects_batch(SharedString::from(node_rects_batch.as_str()));
 
     // Set initial bezier paths directly so links are visible on first render
     // (The overlay processes batches during render, which is too late for initial display)
     let bezier_paths = build_link_bezier_paths(&nodes, &links, initial_zoom, initial_pan_x, initial_pan_y);
     window.set_link_bezier_paths(SharedString::from(bezier_paths.as_str()));
-    let pins_batch = build_pins_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
+
+    // Build combined pins batch (simple nodes + filter nodes)
+    let simple_pins = build_pins_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
+    let filter_pins = build_filter_pins_batch(&filter_nodes, initial_zoom, initial_pan_x, initial_pan_y);
+    let pins_batch = if simple_pins.is_empty() {
+        filter_pins
+    } else if filter_pins.is_empty() {
+        simple_pins
+    } else {
+        format!("{};{}", simple_pins, filter_pins)
+    };
     window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
 
     // Pure callback to check if a node is selected (queries core's selection state)
@@ -341,14 +438,32 @@ fn main() {
 
     // Handle viewport changes - update node rects and pin positions when pan/zoom changes
     let nodes_for_viewport = nodes.clone();
+    let filter_nodes_for_viewport = filter_nodes.clone();
     let window_for_viewport = window.as_weak();
     window.on_update_viewport(move |zoom, pan_x, pan_y| {
         // Rebuild node rects and pin positions with new viewport parameters
         if let Some(window) = window_for_viewport.upgrade() {
-            let node_batch = build_node_rects_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
+            // Combine simple nodes and filter nodes
+            let simple_rects = build_node_rects_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
+            let filter_rects = build_filter_node_rects_batch(&filter_nodes_for_viewport, zoom, pan_x, pan_y);
+            let node_batch = if simple_rects.is_empty() {
+                filter_rects
+            } else if filter_rects.is_empty() {
+                simple_rects
+            } else {
+                format!("{};{}", simple_rects, filter_rects)
+            };
             window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
 
-            let pins_batch = build_pins_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
+            let simple_pins = build_pins_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
+            let filter_pins = build_filter_pins_batch(&filter_nodes_for_viewport, zoom, pan_x, pan_y);
+            let pins_batch = if simple_pins.is_empty() {
+                filter_pins
+            } else if filter_pins.is_empty() {
+                simple_pins
+            } else {
+                format!("{};{}", simple_pins, filter_pins)
+            };
             window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
         }
     });
@@ -393,6 +508,7 @@ fn main() {
 
     // Handle drag commit - apply delta to all selected nodes when drag ends
     let nodes_for_drag = nodes.clone();
+    let filter_nodes_for_drag = filter_nodes.clone();
     let window_for_drag = window.as_weak();
     window.on_commit_drag(move |delta_x, delta_y, snap_enabled| {
         // Get selected node IDs from overlay
@@ -405,7 +521,7 @@ fn main() {
             std::collections::HashSet::new()
         };
 
-        // Apply delta to all selected nodes, optionally snapping to grid
+        // Apply delta to all selected simple nodes
         for i in 0..nodes_for_drag.row_count() {
             if let Some(mut node) = nodes_for_drag.row_data(i) {
                 if selected_ids.contains(&node.id) {
@@ -418,14 +534,46 @@ fn main() {
             }
         }
 
+        // Apply delta to all selected filter nodes
+        for i in 0..filter_nodes_for_drag.row_count() {
+            if let Some(mut node) = filter_nodes_for_drag.row_data(i) {
+                if selected_ids.contains(&node.id) {
+                    let new_x = node.world_x + delta_x;
+                    let new_y = node.world_y + delta_y;
+                    node.world_x = if snap_enabled { snap_to_grid(new_x) } else { new_x };
+                    node.world_y = if snap_enabled { snap_to_grid(new_y) } else { new_y };
+                    filter_nodes_for_drag.set_row_data(i, node);
+                }
+            }
+        }
+
         // Update node rects and pin positions in core so link positions are recomputed
         if let Some(window) = window_for_drag.upgrade() {
             let zoom = window.get_zoom();
             let pan_x = window.get_pan_x();
             let pan_y = window.get_pan_y();
-            let node_batch = build_node_rects_batch(&nodes_for_drag, zoom, pan_x, pan_y);
+
+            // Combine simple nodes and filter nodes
+            let simple_rects = build_node_rects_batch(&nodes_for_drag, zoom, pan_x, pan_y);
+            let filter_rects = build_filter_node_rects_batch(&filter_nodes_for_drag, zoom, pan_x, pan_y);
+            let node_batch = if simple_rects.is_empty() {
+                filter_rects
+            } else if filter_rects.is_empty() {
+                simple_rects
+            } else {
+                format!("{};{}", simple_rects, filter_rects)
+            };
             window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
-            let pins_batch = build_pins_batch(&nodes_for_drag, zoom, pan_x, pan_y);
+
+            let simple_pins = build_pins_batch(&nodes_for_drag, zoom, pan_x, pan_y);
+            let filter_pins = build_filter_pins_batch(&filter_nodes_for_drag, zoom, pan_x, pan_y);
+            let pins_batch = if simple_pins.is_empty() {
+                filter_pins
+            } else if filter_pins.is_empty() {
+                simple_pins
+            } else {
+                format!("{};{}", simple_pins, filter_pins)
+            };
             window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
         }
     });
@@ -567,6 +715,52 @@ fn main() {
 
     // Link positions are synced automatically via link-positions-changed callback
     // when nodes report their rects during initialization
+
+    // Filter node callbacks
+    let filter_nodes_for_type = filter_nodes.clone();
+    window.on_filter_type_changed(move |node_id, new_index| {
+        for i in 0..filter_nodes_for_type.row_count() {
+            if let Some(mut node) = filter_nodes_for_type.row_data(i) {
+                if node.id == node_id {
+                    node.filter_type_index = new_index;
+                    filter_nodes_for_type.set_row_data(i, node);
+                    println!("Filter {} type changed to: {}", node_id, new_index);
+                    break;
+                }
+            }
+        }
+    });
+
+    let filter_nodes_for_enable = filter_nodes.clone();
+    window.on_filter_toggle_enabled(move |node_id| {
+        for i in 0..filter_nodes_for_enable.row_count() {
+            if let Some(mut node) = filter_nodes_for_enable.row_data(i) {
+                if node.id == node_id {
+                    node.enabled = !node.enabled;
+                    let enabled = node.enabled;
+                    filter_nodes_for_enable.set_row_data(i, node);
+                    println!("Filter {} enabled: {}", node_id, enabled);
+                    break;
+                }
+            }
+        }
+    });
+
+    let filter_nodes_for_reset = filter_nodes.clone();
+    window.on_filter_reset(move |node_id| {
+        for i in 0..filter_nodes_for_reset.row_count() {
+            if let Some(mut node) = filter_nodes_for_reset.row_data(i) {
+                if node.id == node_id {
+                    node.processed_count = 0;
+                    node.filter_type_index = 0;
+                    node.enabled = true;
+                    filter_nodes_for_reset.set_row_data(i, node);
+                    println!("Filter {} reset", node_id);
+                    break;
+                }
+            }
+        }
+    });
 
     // Request a redraw to ensure initial link positions are computed
     // (the overlay processes batches in render(), which needs to be triggered)
