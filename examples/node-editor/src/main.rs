@@ -182,6 +182,22 @@ fn main() {
         }
     });
 
+    // Pure callback to check if a link is selected (queries core's selection state)
+    // This is called by Slint during rendering to determine link highlight state
+    let window_for_link_selection = window.as_weak();
+    window.on_is_link_selected(move |link_id| {
+        if let Some(window) = window_for_link_selection.upgrade() {
+            let selected_ids_str = window.get_current_selected_link_ids();
+            // Parse the comma-separated string and check if link_id is present
+            selected_ids_str
+                .split(',')
+                .filter_map(|s| s.trim().parse::<i32>().ok())
+                .any(|id| id == link_id)
+        } else {
+            false
+        }
+    });
+
     // Handle link position updates from core
     // This is called whenever the core regenerates link positions (viewport changes, node moves, etc.)
     // Now uses link-bezier-paths which contains core-generated SVG path commands
@@ -362,6 +378,43 @@ fn main() {
         // Remove links in reverse order
         for &i in link_indices_to_remove.iter().rev() {
             links_for_delete.remove(i);
+        }
+    });
+
+    // Handle deleting selected links
+    let links_for_link_delete = links.clone();
+    let window_for_link_delete = window.as_weak();
+    window.on_delete_selected_links(move || {
+        // Get selected link IDs from overlay
+        let selected_link_ids: std::collections::HashSet<i32> =
+            if let Some(window) = window_for_link_delete.upgrade() {
+                window
+                    .get_current_selected_link_ids()
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<i32>().ok())
+                    .collect()
+            } else {
+                std::collections::HashSet::new()
+            };
+
+        if selected_link_ids.is_empty() {
+            return;
+        }
+
+        // Collect indices of selected links (in reverse order for safe removal)
+        let mut indices_to_remove: Vec<usize> = Vec::new();
+
+        for i in 0..links_for_link_delete.row_count() {
+            if let Some(link) = links_for_link_delete.row_data(i) {
+                if selected_link_ids.contains(&link.id) {
+                    indices_to_remove.push(i);
+                }
+            }
+        }
+
+        // Remove links in reverse order to maintain valid indices
+        for &i in indices_to_remove.iter().rev() {
+            links_for_link_delete.remove(i);
         }
     });
 

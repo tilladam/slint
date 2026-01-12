@@ -313,6 +313,15 @@ export component MainWindow inherits Window {
     // Link hover state (managed by overlay)
     out property <int> hovered-link-id <=> overlay.hovered-link-id;
 
+    // Link selection state (managed by overlay)
+    out property <string> current-selected-link-ids <=> overlay.current-selected-link-ids;
+
+    // Pure callback to check if a link is selected (parses current-selected-link-ids)
+    pure callback is-link-selected(int) -> bool;
+
+    // Callback to delete selected links (called from Rust)
+    callback delete-selected-links();
+
     // Link position data (managed by overlay, updated when viewport/nodes change)
     out property <string> link-positions-data <=> overlay.link-positions-data;
 
@@ -498,9 +507,11 @@ export component MainWindow inherits Window {
     // Uses core-generated bezier path commands (hybrid architecture)
     for link-data in links: Link {
         path-commands: link-data.path-commands;
-        // Highlight link when hovered (brighter color)
-        link-color: link-data.id == hovered-link-id ? #ffffff : link-data.color;
-        line-width: link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
+        // Highlight link when selected (cyan) or hovered (white)
+        link-color: is-link-selected(link-data.id) ? #00ffff :
+                    link-data.id == hovered-link-id ? #ffffff : link-data.color;
+        line-width: is-link-selected(link-data.id) ? 4px * zoom :
+                    link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
         zoom: zoom;
     }
 
@@ -543,8 +554,9 @@ export component MainWindow inherits Window {
         }
 
         delete-selected => {
-            // Delete selected nodes
+            // Delete selected nodes and links
             root.delete-selected-nodes();
+            root.delete-selected-links();
         }
 
         add-node-requested => {

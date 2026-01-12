@@ -355,6 +355,8 @@ struct NodeEditorState {
     node_rects: BTreeMap<i32, NodeRect>,
     /// Set of selected node IDs (owned by core)
     selected_node_ids: BTreeSet<i32>,
+    /// Set of selected link IDs (owned by core)
+    selected_link_ids: BTreeSet<i32>,
     /// Known links (link_id -> link record)
     links: BTreeMap<i32, LinkRecord>,
 }
@@ -759,6 +761,13 @@ pub struct NodeEditorOverlay {
     /// Callback when hovered link changes (check hovered_link_id property for value)
     pub link_hovered: Callback<()>,
 
+    // === Link selection state ===
+    /// Comma-separated list of currently selected link IDs (output)
+    /// Format: "1,2,3" or empty string if none
+    pub current_selected_link_ids: Property<SharedString>,
+    /// Callback when link selection changes
+    pub link_selection_changed: Callback<()>,
+
     /// Internal state
     data: NodeEditorDataBox,
 
@@ -812,6 +821,13 @@ impl Item for NodeEditorOverlay {
                     let modifiers = _window_adapter.window().0.modifiers.get();
                     if modifiers.control() {
                         return InputEventFilterResult::Intercept;
+                    }
+                    // Check if clicking on a link - if so, intercept for link selection
+                    if let MouseEvent::Pressed { position, .. } = _event {
+                        drop(state); // Release borrow before calling find_link_at
+                        if self.find_link_at(*position) >= 0 {
+                            return InputEventFilterResult::Intercept;
+                        }
                     }
                 }
                 PointerEventButton::Right => {
@@ -1290,6 +1306,12 @@ impl NodeEditorOverlay {
 
             let mut state = self.data.state.borrow_mut();
 
+            // Clear link selection when clicking on a node (unless shift is held)
+            let had_link_selection = !state.selected_link_ids.is_empty();
+            if !shift_held {
+                state.selected_link_ids.clear();
+            }
+
             if shift_held {
                 // Multi-select: toggle the clicked node
                 if state.selected_node_ids.contains(&clicked_node) {
@@ -1316,6 +1338,15 @@ impl NodeEditorOverlay {
                 .current_selected_ids
                 .apply_pin(self)
                 .set(SharedString::from(&ids_str));
+
+            // Clear link selection property if it changed
+            if had_link_selection && !shift_held {
+                Self::FIELD_OFFSETS
+                    .current_selected_link_ids
+                    .apply_pin(self)
+                    .set(SharedString::default());
+                self.link_selection_changed.call(&());
+            }
 
             // Clear the click trigger
             Self::FIELD_OFFSETS.clicked_node_id.apply_pin(self).set(0);
@@ -1448,10 +1479,16 @@ impl NodeEditorOverlay {
 
                     InputEventResult::GrabMouse
                 } else {
-                    // TODO: Implement proper hit testing for pins and nodes
-                    // For now, pass through left clicks to allow node interaction.
-                    // Without node registration, we can't distinguish background from node clicks.
-                    InputEventResult::EventIgnored
+                    // Check if clicking on a link
+                    let clicked_link = self.find_link_at(position);
+                    if clicked_link >= 0 {
+                        // Handle link selection
+                        self.handle_link_click(clicked_link, modifiers.shift());
+                        InputEventResult::EventAccepted
+                    } else {
+                        // Pass through left clicks to allow node interaction
+                        InputEventResult::EventIgnored
+                    }
                 }
             }
             _ => InputEventResult::EventIgnored,
@@ -1814,6 +1851,76 @@ impl NodeEditorOverlay {
             Self::FIELD_OFFSETS.hovered_link_id.apply_pin(self).set(new_hovered);
             self.link_hovered.call(&());
         }
+    }
+
+    /// Handle a click on a link (selection logic)
+    fn handle_link_click(self: Pin<&Self>, link_id: i32, shift_held: bool) {
+        let mut state = self.data.state.borrow_mut();
+
+        // Clear node selection when clicking a link (unless shift is held)
+        if !shift_held {
+            state.selected_node_ids.clear();
+        }
+
+        if shift_held {
+            // Multi-select: toggle the clicked link
+            if state.selected_link_ids.contains(&link_id) {
+                state.selected_link_ids.remove(&link_id);
+            } else {
+                state.selected_link_ids.insert(link_id);
+            }
+        } else {
+            // Single select: clear all and select only clicked link
+            state.selected_link_ids.clear();
+            state.selected_link_ids.insert(link_id);
+        }
+
+        // Build output strings
+        let link_ids_str = state
+            .selected_link_ids
+            .iter()
+            .map(|id| alloc::format!("{}", id))
+            .collect::<alloc::vec::Vec<_>>()
+            .join(",");
+
+        let node_ids_str = state
+            .selected_node_ids
+            .iter()
+            .map(|id| alloc::format!("{}", id))
+            .collect::<alloc::vec::Vec<_>>()
+            .join(",");
+
+        drop(state);
+
+        // Update output properties
+        Self::FIELD_OFFSETS
+            .current_selected_link_ids
+            .apply_pin(self)
+            .set(SharedString::from(&link_ids_str));
+        Self::FIELD_OFFSETS
+            .current_selected_ids
+            .apply_pin(self)
+            .set(SharedString::from(&node_ids_str));
+
+        // Notify that selection changed
+        self.link_selection_changed.call(&());
+        self.selection_changed.call(&());
+    }
+
+    /// Clear link selection (called when clicking on nodes or background)
+    fn clear_link_selection(self: Pin<&Self>) {
+        let mut state = self.data.state.borrow_mut();
+        if state.selected_link_ids.is_empty() {
+            return;
+        }
+        state.selected_link_ids.clear();
+        drop(state);
+
+        Self::FIELD_OFFSETS
+            .current_selected_link_ids
+            .apply_pin(self)
+            .set(SharedString::default());
+        self.link_selection_changed.call(&());
     }
 }
 
