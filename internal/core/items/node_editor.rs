@@ -318,6 +318,11 @@ impl NodeRect {
             && self.y < sel_y + sel_height
             && self.y + self.height > sel_y
     }
+
+    /// Check if a point is inside this rect
+    fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x <= self.x + self.width && y >= self.y && y <= self.y + self.height
+    }
 }
 
 /// A link between two pins
@@ -1653,6 +1658,52 @@ impl NodeEditorOverlay {
                         self.link_dropped.call(&());
                     }
                     return InputEventResult::EventAccepted;
+                }
+
+                // If we reach here, it's a left button release with no ongoing operation
+                // Check if it's a background click (not on a node, pin, or link)
+                // This is called from input_event (AFTER children), so if the click reached here,
+                // children passed it through. We check if the click hit any interactive element.
+                drop(state);
+
+                // Check if clicking on a pin or link
+                let pin_at = self.find_pin_at(position);
+                let link_at = self.find_link_at(position);
+
+                if pin_at == 0 && link_at < 0 {
+                    // Not on a pin or link - check if on a node
+                    let state = self.data.state.borrow();
+                    let on_node = state.node_rects.values().any(|rect| rect.contains(position.x, position.y));
+                    drop(state);
+
+                    if !on_node {
+                        // True background click - clear all selections
+                        let mut state = self.data.state.borrow_mut();
+                        let had_node_selection = !state.selected_node_ids.is_empty();
+                        let had_link_selection = !state.selected_link_ids.is_empty();
+
+                        state.selected_node_ids.clear();
+                        state.selected_link_ids.clear();
+                        drop(state);
+
+                        // Update properties if anything changed
+                        if had_node_selection {
+                            Self::FIELD_OFFSETS
+                                .current_selected_ids
+                                .apply_pin(self)
+                                .set(SharedString::default());
+                        }
+                        if had_link_selection {
+                            Self::FIELD_OFFSETS
+                                .current_selected_link_ids
+                                .apply_pin(self)
+                                .set(SharedString::default());
+                            self.link_selection_changed.call(&());
+                        }
+                        if had_node_selection || had_link_selection {
+                            self.selection_changed.call(&());
+                        }
+                    }
                 }
             }
             _ => {}
