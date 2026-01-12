@@ -23,12 +23,12 @@
 // 6. Rust's on_create_link callback adds the link to the model
 
 // Data structure for nodes - exported to Rust
+// Note: Selection state is owned by core (overlay.current-selected-ids), not stored here
 export struct NodeData {
     id: int,
     title: string,
     world-x: float,
     world-y: float,
-    selected: bool,
 }
 
 // Data structure for links - exported to Rust
@@ -291,6 +291,9 @@ export component MainWindow inherits Window {
     callback delete-selected-nodes();  // delete all selected nodes
     callback add-node();  // add a new node
 
+    // Pure callback to check if a node is selected (checks core's selection state)
+    pure callback is-node-selected(int) -> bool;
+
     // Grid snap setting
     in-out property <bool> grid-snap-enabled: true;
 
@@ -363,113 +366,6 @@ export component MainWindow inherits Window {
         return world-y * 1px * zoom + pan-y + (8px + 24px + 8px) * zoom + pin-radius;
     }
 
-    // Get node world position from model by ID (includes visual drag offset if dragging)
-    // Note: Slint doesn't support computed array indexing or loops in pure functions,
-    // so we check each index explicitly and return when we find a match.
-    // This supports up to 16 nodes.
-    pure function get-node-world-x(node-id: int) -> float {
-        if nodes.length > 0 && nodes[0].id == node-id {
-            return nodes[0].world-x + (nodes[0].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 1 && nodes[1].id == node-id {
-            return nodes[1].world-x + (nodes[1].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 2 && nodes[2].id == node-id {
-            return nodes[2].world-x + (nodes[2].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 3 && nodes[3].id == node-id {
-            return nodes[3].world-x + (nodes[3].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 4 && nodes[4].id == node-id {
-            return nodes[4].world-x + (nodes[4].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 5 && nodes[5].id == node-id {
-            return nodes[5].world-x + (nodes[5].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 6 && nodes[6].id == node-id {
-            return nodes[6].world-x + (nodes[6].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 7 && nodes[7].id == node-id {
-            return nodes[7].world-x + (nodes[7].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 8 && nodes[8].id == node-id {
-            return nodes[8].world-x + (nodes[8].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 9 && nodes[9].id == node-id {
-            return nodes[9].world-x + (nodes[9].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 10 && nodes[10].id == node-id {
-            return nodes[10].world-x + (nodes[10].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 11 && nodes[11].id == node-id {
-            return nodes[11].world-x + (nodes[11].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 12 && nodes[12].id == node-id {
-            return nodes[12].world-x + (nodes[12].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 13 && nodes[13].id == node-id {
-            return nodes[13].world-x + (nodes[13].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 14 && nodes[14].id == node-id {
-            return nodes[14].world-x + (nodes[14].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        if nodes.length > 15 && nodes[15].id == node-id {
-            return nodes[15].world-x + (nodes[15].selected && is-dragging ? visual-drag-offset-x / 1px : 0);
-        }
-        return 0;
-    }
-    pure function get-node-world-y(node-id: int) -> float {
-        if nodes.length > 0 && nodes[0].id == node-id {
-            return nodes[0].world-y + (nodes[0].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 1 && nodes[1].id == node-id {
-            return nodes[1].world-y + (nodes[1].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 2 && nodes[2].id == node-id {
-            return nodes[2].world-y + (nodes[2].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 3 && nodes[3].id == node-id {
-            return nodes[3].world-y + (nodes[3].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 4 && nodes[4].id == node-id {
-            return nodes[4].world-y + (nodes[4].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 5 && nodes[5].id == node-id {
-            return nodes[5].world-y + (nodes[5].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 6 && nodes[6].id == node-id {
-            return nodes[6].world-y + (nodes[6].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 7 && nodes[7].id == node-id {
-            return nodes[7].world-y + (nodes[7].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 8 && nodes[8].id == node-id {
-            return nodes[8].world-y + (nodes[8].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 9 && nodes[9].id == node-id {
-            return nodes[9].world-y + (nodes[9].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 10 && nodes[10].id == node-id {
-            return nodes[10].world-y + (nodes[10].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 11 && nodes[11].id == node-id {
-            return nodes[11].world-y + (nodes[11].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 12 && nodes[12].id == node-id {
-            return nodes[12].world-y + (nodes[12].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 13 && nodes[13].id == node-id {
-            return nodes[13].world-y + (nodes[13].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 14 && nodes[14].id == node-id {
-            return nodes[14].world-y + (nodes[14].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        if nodes.length > 15 && nodes[15].id == node-id {
-            return nodes[15].world-y + (nodes[15].selected && is-dragging ? visual-drag-offset-y / 1px : 0);
-        }
-        return 0;
-    }
-
     // The three-layer node editor structure
     // Background layer with grid (NodeEditorBackground generates grid-commands, Path renders them)
     background-layer := NodeEditorBackground {
@@ -524,15 +420,16 @@ export component MainWindow inherits Window {
 
     // Nodes layer - iterate over model from Rust
     // During drag, apply visual offset. Model is only updated on drag-end.
+    // Selection state comes from core via is-node-selected callback (not stored in model)
     for node-data in nodes: Node {
         title: node-data.title;
         node-id: node-data.id;
-        selected: node-data.selected;
+        selected: root.is-node-selected(node-data.id);
         world-x: node-data.world-x * 1px;
         world-y: node-data.world-y * 1px;
         // Pass drag offset to selected nodes
-        drag-offset-x: node-data.selected && is-dragging ? visual-drag-offset-x : 0px;
-        drag-offset-y: node-data.selected && is-dragging ? visual-drag-offset-y : 0px;
+        drag-offset-x: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-x : 0px;
+        drag-offset-y: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-y : 0px;
         zoom: zoom;
         pan-x: pan-x;
         pan-y: pan-y;

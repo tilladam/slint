@@ -85,21 +85,18 @@ fn main() {
             title: SharedString::from("Input"),
             world_x: 96.0,  // Grid-aligned (4 * 24)
             world_y: 192.0, // Grid-aligned (8 * 24)
-            selected: false,
         },
         NodeData {
             id: 2,
             title: SharedString::from("Process"),
             world_x: 360.0, // Grid-aligned (15 * 24)
             world_y: 144.0, // Grid-aligned (6 * 24)
-            selected: false,
         },
         NodeData {
             id: 3,
             title: SharedString::from("Output"),
             world_x: 600.0, // Grid-aligned (25 * 24)
             world_y: 192.0, // Grid-aligned (8 * 24)
-            selected: false,
         },
     ]));
 
@@ -169,23 +166,19 @@ fn main() {
     let pins_batch = build_pins_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
     window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
 
-    // Handle selection changes - sync overlay's selection state to NodeData model
-    let nodes_for_selection = nodes.clone();
-    window.on_selection_changed(move |selected_ids_str| {
-        let selected_ids: std::collections::HashSet<i32> = selected_ids_str
-            .split(',')
-            .filter_map(|s| s.trim().parse::<i32>().ok())
-            .collect();
-
-        // Update the selected field for all nodes
-        for i in 0..nodes_for_selection.row_count() {
-            if let Some(mut node) = nodes_for_selection.row_data(i) {
-                let should_select = selected_ids.contains(&node.id);
-                if node.selected != should_select {
-                    node.selected = should_select;
-                    nodes_for_selection.set_row_data(i, node);
-                }
-            }
+    // Pure callback to check if a node is selected (queries core's selection state)
+    // This is called by Slint during rendering to determine node highlight state
+    let window_for_selection = window.as_weak();
+    window.on_is_node_selected(move |node_id| {
+        if let Some(window) = window_for_selection.upgrade() {
+            let selected_ids_str = window.get_current_selected_ids();
+            // Parse the comma-separated string and check if node_id is present
+            selected_ids_str
+                .split(',')
+                .filter_map(|s| s.trim().parse::<i32>().ok())
+                .any(|id| id == node_id)
+        } else {
+            false
         }
     });
 
@@ -386,7 +379,6 @@ fn main() {
             title: SharedString::from(format!("Node {}", id)),
             world_x: snap_to_grid(192.0 + (id as f32 * 48.0) % 384.0),
             world_y: snap_to_grid(192.0 + (id as f32 * 24.0) % 288.0),
-            selected: false,
         });
     });
 
