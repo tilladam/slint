@@ -79,8 +79,9 @@ export component FilterNode inherits Rectangle {
         report-rect(node-id, screen-x, screen-y, self.width, self.height);
     }
 
-    // Pin dimensions
-    property <length> pin-size: 12px;
+    // Pin dimensions (scaled by zoom)
+    property <length> base-pin-size: 12px;
+    property <length> pin-size: base-pin-size * zoom;
     property <length> pin-radius: pin-size / 2;
     property <length> pin-margin: 4px;
 
