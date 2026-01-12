@@ -304,6 +304,10 @@ export component MainWindow inherits Window {
     // Pure callback to check if a node is selected (checks core's selection state)
     pure callback is-node-selected(int) -> bool;
 
+    // Pure callbacks to get node/pin screen positions (computed by Slint, not Rust)
+    pure callback get-node-screen-rect(int) -> string;  // Returns "x,y,width,height" or empty
+    pure callback get-pin-screen-pos(int) -> string;    // Returns "x,y" or empty
+
     // Grid snap setting
     in-out property <bool> grid-snap-enabled: true;
 
@@ -373,19 +377,70 @@ export component MainWindow inherits Window {
         editor.reporting-link-color = col;
     }
 
+    // Pure callbacks to compute screen positions from world coordinates
+    // These use Slint globals as the single source of truth - callable from Rust
+    pure callback compute-node-screen-x(float) -> length;
+    pure callback compute-node-screen-y(float) -> length;
+    pure callback compute-node-screen-width() -> length;
+    pure callback compute-node-screen-height() -> length;
+
     // Compute pin positions from node world coordinates
-    // Using global constants from NodeConstants
-    pure function compute-input-pin-x(world-x: float) -> length {
+    pure callback compute-input-pin-x(float) -> length;
+    pure callback compute-input-pin-y(float) -> length;
+    pure callback compute-output-pin-x(float) -> length;
+    pure callback compute-output-pin-y(float) -> length;
+
+    // Filter node position computation
+    pure callback compute-filter-screen-width() -> length;
+    pure callback compute-filter-screen-height() -> length;
+
+    // Filter node pin positions
+    pure callback compute-filter-data-input-pin-x(float) -> length;
+    pure callback compute-filter-data-input-pin-y(float) -> length;
+    pure callback compute-filter-data-output-pin-x(float) -> length;
+    pure callback compute-filter-data-output-pin-y(float) -> length;
+    pure callback compute-filter-control-input-pin-x(float) -> length;
+    pure callback compute-filter-control-input-pin-y(float) -> length;
+
+    // Implement the callbacks using Slint globals
+    compute-node-screen-x(world-x) => { return world-x * 1px * zoom + pan-x; }
+    compute-node-screen-y(world-y) => { return world-y * 1px * zoom + pan-y; }
+    compute-node-screen-width => { return NodeConstants.node-base-width * zoom; }
+    compute-node-screen-height => { return NodeConstants.node-base-height * zoom; }
+
+    compute-input-pin-x(world-x) => {
         return world-x * 1px * zoom + pan-x + (NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
     }
-    pure function compute-input-pin-y(world-y: float) -> length {
+    compute-input-pin-y(world-y) => {
         return world-y * 1px * zoom + pan-y + (NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
     }
-    pure function compute-output-pin-x(world-x: float) -> length {
+    compute-output-pin-x(world-x) => {
         return world-x * 1px * zoom + pan-x + (NodeConstants.node-base-width - NodeConstants.pin-margin - NodeConstants.pin-size / 2) * zoom;
     }
-    pure function compute-output-pin-y(world-y: float) -> length {
+    compute-output-pin-y(world-y) => {
         return world-y * 1px * zoom + pan-y + (NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
+    }
+
+    compute-filter-screen-width => { return FilterNodeConstants.base-width * zoom; }
+    compute-filter-screen-height => { return FilterNodeConstants.base-height * zoom; }
+
+    compute-filter-data-input-pin-x(world-x) => {
+        return world-x * 1px * zoom + pan-x + (FilterNodeConstants.pin-margin + FilterNodeConstants.pin-size / 2) * zoom;
+    }
+    compute-filter-data-input-pin-y(world-y) => {
+        return world-y * 1px * zoom + pan-y + (FilterNodeConstants.content-padding + FilterNodeConstants.title-height + FilterNodeConstants.content-padding + FilterNodeConstants.row-height / 2) * zoom;
+    }
+    compute-filter-data-output-pin-x(world-x) => {
+        return world-x * 1px * zoom + pan-x + (FilterNodeConstants.base-width - FilterNodeConstants.pin-margin - FilterNodeConstants.pin-size / 2) * zoom;
+    }
+    compute-filter-data-output-pin-y(world-y) => {
+        return world-y * 1px * zoom + pan-y + (FilterNodeConstants.content-padding + FilterNodeConstants.title-height + FilterNodeConstants.content-padding + FilterNodeConstants.row-height / 2) * zoom;
+    }
+    compute-filter-control-input-pin-x(world-x) => {
+        return world-x * 1px * zoom + pan-x + (FilterNodeConstants.pin-margin + FilterNodeConstants.pin-size / 2) * zoom;
+    }
+    compute-filter-control-input-pin-y(world-y) => {
+        return world-y * 1px * zoom + pan-y + (FilterNodeConstants.content-padding + FilterNodeConstants.title-height + FilterNodeConstants.content-padding + FilterNodeConstants.row-height + FilterNodeConstants.row-height / 2) * zoom;
     }
 
     // The composite NodeEditor handles all three layers:
