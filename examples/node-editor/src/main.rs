@@ -332,15 +332,17 @@ fn main() {
     let links_for_delete = links.clone();
     let window_for_delete = window.as_weak();
     window.on_delete_selected_nodes(move || {
-        // Get selected node IDs from overlay
-        let selected_ids: std::collections::HashSet<i32> = if let Some(window) = window_for_delete.upgrade() {
-            window.get_current_selected_ids()
-                .split(',')
-                .filter_map(|s| s.trim().parse::<i32>().ok())
-                .collect()
-        } else {
-            std::collections::HashSet::new()
+        let window = match window_for_delete.upgrade() {
+            Some(w) => w,
+            None => return,
         };
+
+        // Get selected node IDs from overlay
+        let selected_ids: std::collections::HashSet<i32> = window
+            .get_current_selected_ids()
+            .split(',')
+            .filter_map(|s| s.trim().parse::<i32>().ok())
+            .collect();
 
         // Collect indices of selected nodes (in reverse order for safe removal)
         let mut indices_to_remove: Vec<usize> = Vec::new();
@@ -363,6 +365,7 @@ fn main() {
         // Also remove any links connected to deleted nodes
         // Pin IDs are node_id * 10 + pin_type, so we check if pin's node is deleted
         let mut link_indices_to_remove: Vec<usize> = Vec::new();
+        let mut deleted_link_ids: Vec<i32> = Vec::new();
         for i in 0..links_for_delete.row_count() {
             if let Some(link) = links_for_delete.row_data(i) {
                 let start_node_id = link.start_pin_id / 10;
@@ -371,6 +374,7 @@ fn main() {
                     || deleted_node_ids.contains(&end_node_id)
                 {
                     link_indices_to_remove.push(i);
+                    deleted_link_ids.push(link.id);
                 }
             }
         }
@@ -379,35 +383,47 @@ fn main() {
         for &i in link_indices_to_remove.iter().rev() {
             links_for_delete.remove(i);
         }
+
+        // Report deleted link IDs to core so it can update its registry
+        if !deleted_link_ids.is_empty() {
+            let deleted_ids_str = deleted_link_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            window.set_pending_deleted_link_ids(SharedString::from(deleted_ids_str.as_str()));
+        }
     });
 
     // Handle deleting selected links
     let links_for_link_delete = links.clone();
     let window_for_link_delete = window.as_weak();
     window.on_delete_selected_links(move || {
+        let window = match window_for_link_delete.upgrade() {
+            Some(w) => w,
+            None => return,
+        };
+
         // Get selected link IDs from overlay
-        let selected_link_ids: std::collections::HashSet<i32> =
-            if let Some(window) = window_for_link_delete.upgrade() {
-                window
-                    .get_current_selected_link_ids()
-                    .split(',')
-                    .filter_map(|s| s.trim().parse::<i32>().ok())
-                    .collect()
-            } else {
-                std::collections::HashSet::new()
-            };
+        let selected_link_ids: std::collections::HashSet<i32> = window
+            .get_current_selected_link_ids()
+            .split(',')
+            .filter_map(|s| s.trim().parse::<i32>().ok())
+            .collect();
 
         if selected_link_ids.is_empty() {
             return;
         }
 
-        // Collect indices of selected links (in reverse order for safe removal)
+        // Collect indices and IDs of selected links (in reverse order for safe removal)
         let mut indices_to_remove: Vec<usize> = Vec::new();
+        let mut ids_to_delete: Vec<i32> = Vec::new();
 
         for i in 0..links_for_link_delete.row_count() {
             if let Some(link) = links_for_link_delete.row_data(i) {
                 if selected_link_ids.contains(&link.id) {
                     indices_to_remove.push(i);
+                    ids_to_delete.push(link.id);
                 }
             }
         }
@@ -416,6 +432,14 @@ fn main() {
         for &i in indices_to_remove.iter().rev() {
             links_for_link_delete.remove(i);
         }
+
+        // Report deleted link IDs to core so it can update its registry
+        let deleted_ids_str = ids_to_delete
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        window.set_pending_deleted_link_ids(SharedString::from(deleted_ids_str.as_str()));
     });
 
     // Handle adding new nodes (Ctrl+N)

@@ -905,6 +905,9 @@ export component NodeEditorOverlay inherits Empty {
     /// Batch of pending links to register (format: "id,start_pin,end_pin,color_argb;...")
     /// Used when multiple links need to be reported at once (e.g., during init)
     in-out property <string> pending-links-batch;
+    /// Batch of link IDs to delete (format: "id1,id2,id3,...")
+    /// Used when links are removed from the model
+    in-out property <string> pending-deleted-link-ids;
 
     // === Link position data (output - regenerated when viewport/nodes change) ===
     /// Formatted string containing link position data for all registered links

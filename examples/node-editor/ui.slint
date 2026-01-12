@@ -333,6 +333,10 @@ export component MainWindow inherits Window {
     // Format: "id,start_pin,end_pin,color_argb;id,start_pin,end_pin,color_argb;..."
     in-out property <string> pending-links-batch <=> overlay.pending-links-batch;
 
+    // Batch of link IDs to delete (set from Rust when links are removed)
+    // Format: "id1,id2,id3,..."
+    in-out property <string> pending-deleted-link-ids <=> overlay.pending-deleted-link-ids;
+
     // Batch of pending node rects to register (set from Rust)
     // Format: "id,x,y,w,h;..." where x,y,w,h are screen coordinates
     in-out property <string> pending-node-rects-batch <=> overlay.pending-node-rects-batch;

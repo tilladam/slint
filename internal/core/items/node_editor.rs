@@ -718,6 +718,9 @@ pub struct NodeEditorOverlay {
     /// Batch of pending links to register (format: "id,start_pin,end_pin,color_argb;...")
     /// Used when multiple links need to be reported at once
     pub pending_links_batch: Property<SharedString>,
+    /// Batch of link IDs to delete (format: "id1,id2,id3,...")
+    /// Used when links are removed from the model
+    pub pending_deleted_link_ids: Property<SharedString>,
 
     // === Link position data (output - regenerated when viewport/nodes change) ===
     /// Formatted string containing link position data for all registered links
@@ -1109,12 +1112,22 @@ impl NodeEditorOverlay {
                         (end_pin, start_pin)
                     };
 
-                    // Set the created link properties
-                    Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
-                    Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
+                    // Check if link already exists between these pins
+                    let state = self.data.state.borrow();
+                    let already_exists = Self::link_exists(&state, output_pin, input_pin);
+                    drop(state);
 
-                    // Emit link_created callback
-                    self.link_created.call(&());
+                    if already_exists {
+                        // Don't create duplicate link
+                        self.link_dropped.call(&());
+                    } else {
+                        // Set the created link properties
+                        Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
+                        Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
+
+                        // Emit link_created callback
+                        self.link_created.call(&());
+                    }
                 } else {
                     // Dropped on empty space or incompatible pin
                     self.link_dropped.call(&());
@@ -1306,6 +1319,30 @@ impl NodeEditorOverlay {
 
             // Clear the batch
             Self::FIELD_OFFSETS.pending_links_batch.apply_pin(self).set(SharedString::default());
+        }
+
+        // Check for deleted link IDs (format: "id1,id2,id3,...")
+        let deleted_ids = self.pending_deleted_link_ids();
+        if !deleted_ids.is_empty() {
+            let mut state = self.data.state.borrow_mut();
+
+            for id_str in deleted_ids.split(',') {
+                if let Ok(id) = id_str.trim().parse::<i32>() {
+                    state.links.remove(&id);
+                    state.selected_link_ids.remove(&id);
+                }
+            }
+
+            // Update debug count
+            let link_count = state.links.len() as i32;
+            drop(state);
+
+            Self::FIELD_OFFSETS.debug_link_count.apply_pin(self).set(link_count);
+
+            // Clear the pending deletions
+            Self::FIELD_OFFSETS.pending_deleted_link_ids.apply_pin(self).set(SharedString::default());
+
+            needs_link_regeneration = true;
         }
 
         // Check if a node is being clicked (for selection)
@@ -1599,12 +1636,22 @@ impl NodeEditorOverlay {
                             (end_pin, start_pin)
                         };
 
-                        // Set the created link properties
-                        Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
-                        Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
+                        // Check if link already exists between these pins
+                        let state = self.data.state.borrow();
+                        let already_exists = Self::link_exists(&state, output_pin, input_pin);
+                        drop(state);
 
-                        // Emit link_created callback
-                        self.link_created.call(&());
+                        if already_exists {
+                            // Don't create duplicate link
+                            self.link_dropped.call(&());
+                        } else {
+                            // Set the created link properties
+                            Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
+                            Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
+
+                            // Emit link_created callback
+                            self.link_created.call(&());
+                        }
                     } else {
                         // Dropped on empty space or incompatible pin
                         self.link_dropped.call(&());
@@ -1824,6 +1871,14 @@ impl NodeEditorOverlay {
         let end_type = end_pin % 10;
         // One must be input (1) and one must be output (2)
         (start_type == 1 && end_type == 2) || (start_type == 2 && end_type == 1)
+    }
+
+    /// Check if a link already exists between two pins
+    /// Takes normalized pin IDs (output_pin, input_pin)
+    fn link_exists(state: &NodeEditorState, output_pin: i32, input_pin: i32) -> bool {
+        state.links.values().any(|link| {
+            link.start_pin_id == output_pin && link.end_pin_id == input_pin
+        })
     }
 
     /// Find a link at the given position, returns link ID or -1 if no link found
