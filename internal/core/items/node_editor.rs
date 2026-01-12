@@ -534,6 +534,9 @@ pub struct NodeEditorOverlay {
     pub pin_hit_radius: Property<LogicalLength>,
     /// Callback when a pin reports its position
     pub pin_position_changed: Callback<()>,
+    /// Batch of pending pin positions to register (format: "id,x,y;...")
+    /// Used when multiple pins report positions at once (e.g., on viewport change)
+    pub pending_pins_batch: Property<SharedString>,
 
     // === Link creation result (output when link_created is fired) ===
     /// Start pin ID of the created link (output pin)
@@ -623,77 +626,13 @@ impl Item for NodeEditorOverlay {
         _self_rc: &ItemRc,
     ) -> InputEventFilterResult {
         // Check if a Pin component wants to start link creation
-        // (Pin sets pending_link_pin_id > 0 then we start link creation)
-        let pending_pin = self.pending_link_pin_id();
-        if pending_pin > 0 {
-            let mut state = self.data.state.borrow_mut();
-            if !state.is_creating_link {
-                // Start link creation from the pending properties
-                let start_x = self.pending_link_x().get();
-                let start_y = self.pending_link_y().get();
-
-                state.is_creating_link = true;
-                state.link_start_pin = pending_pin;
-                state.link_current_pos = LogicalPoint::new(start_x, start_y);
-                drop(state);
-
-                // Update link creation properties for Slint rendering
-                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(true);
-                Self::FIELD_OFFSETS.link_start_pin_id.apply_pin(self).set(pending_pin);
-                Self::FIELD_OFFSETS.link_start_x.apply_pin(self).set(LogicalLength::new(start_x));
-                Self::FIELD_OFFSETS.link_start_y.apply_pin(self).set(LogicalLength::new(start_y));
-                Self::FIELD_OFFSETS.link_end_x.apply_pin(self).set(LogicalLength::new(start_x));
-                Self::FIELD_OFFSETS.link_end_y.apply_pin(self).set(LogicalLength::new(start_y));
-
-                // Clear the pending trigger
-                Self::FIELD_OFFSETS.pending_link_pin_id.apply_pin(self).set(0);
-            }
-        }
+        self.check_pending_link_start();
 
         // Process any pending reports from pins, nodes, links, and clicks
         self.process_pending_reports();
 
         // Check if a Pin component is requesting link completion (pin has mouse capture)
-        if self.complete_link_creation() {
-            // Get the target pin ID (pre-computed by Slint's find-pin-at function)
-            let end_pin = self.target_pin_id();
-
-            // Get the start pin from state
-            let mut state = self.data.state.borrow_mut();
-            let start_pin = state.link_start_pin;
-            let was_creating = state.is_creating_link;
-            state.is_creating_link = false;
-            state.link_start_pin = -1;
-            drop(state);
-
-            // Clear the completion trigger and target pin
-            Self::FIELD_OFFSETS.complete_link_creation.apply_pin(self).set(false);
-            Self::FIELD_OFFSETS.target_pin_id.apply_pin(self).set(0);
-
-            if was_creating {
-                // Clear link creation visual
-                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
-
-                if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
-                    // Normalize: output pin first, input pin second
-                    let (output_pin, input_pin) = if start_pin % 10 == 2 {
-                        (start_pin, end_pin)
-                    } else {
-                        (end_pin, start_pin)
-                    };
-
-                    // Set the created link properties
-                    Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
-                    Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
-
-                    // Emit link_created callback
-                    self.link_created.call(&());
-                } else {
-                    // Dropped on empty space or incompatible pin
-                    self.link_dropped.call(&());
-                }
-            }
-        }
+        self.check_pending_link_complete();
 
         // The overlay is on top, so we need to decide whether to handle the event
         // or pass it through to the nodes below
@@ -856,6 +795,12 @@ impl Item for NodeEditorOverlay {
         _self_rc: &ItemRc,
         _size: LogicalSize,
     ) -> RenderingResult {
+        // Check if a Pin component wants to start or complete link creation
+        // (This is checked here because Pin's TouchArea may have mouse capture,
+        // preventing input_event_filter_before_children from being called)
+        self.check_pending_link_start();
+        self.check_pending_link_complete();
+
         // Process any pending reports from pins, nodes, and links
         // This ensures reports are processed even without input events
         self.process_pending_reports();
@@ -882,6 +827,91 @@ impl Item for NodeEditorOverlay {
 }
 
 impl NodeEditorOverlay {
+    /// Check if a Pin component wants to start link creation
+    /// Called from both input_event_filter_before_children and render
+    fn check_pending_link_start(self: Pin<&Self>) {
+        let pending_pin = self.pending_link_pin_id();
+        if pending_pin > 0 {
+            let mut state = self.data.state.borrow_mut();
+            if !state.is_creating_link {
+                // Start link creation from the pending properties
+                let start_x = self.pending_link_x().get();
+                let start_y = self.pending_link_y().get();
+
+                state.is_creating_link = true;
+                state.link_start_pin = pending_pin;
+                state.link_current_pos = LogicalPoint::new(start_x, start_y);
+                drop(state);
+
+                // Update link creation properties for Slint rendering
+                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(true);
+                Self::FIELD_OFFSETS.link_start_pin_id.apply_pin(self).set(pending_pin);
+                Self::FIELD_OFFSETS.link_start_x.apply_pin(self).set(LogicalLength::new(start_x));
+                Self::FIELD_OFFSETS.link_start_y.apply_pin(self).set(LogicalLength::new(start_y));
+                Self::FIELD_OFFSETS.link_end_x.apply_pin(self).set(LogicalLength::new(start_x));
+                Self::FIELD_OFFSETS.link_end_y.apply_pin(self).set(LogicalLength::new(start_y));
+
+                // Clear the pending trigger
+                Self::FIELD_OFFSETS.pending_link_pin_id.apply_pin(self).set(0);
+            }
+        }
+    }
+
+    /// Check if a Pin component is requesting link completion
+    /// Called from both input_event_filter_before_children and render
+    fn check_pending_link_complete(self: Pin<&Self>) {
+        if self.complete_link_creation() {
+            // If target_pin_id is set, use it (backward compatibility / explicit target)
+            // Otherwise, use core's find_pin_at with the current link end position
+            let explicit_target = self.target_pin_id();
+            let end_pin = if explicit_target != 0 {
+                explicit_target
+            } else {
+                let end_pos = LogicalPoint::new(
+                    self.link_end_x().get(),
+                    self.link_end_y().get(),
+                );
+                self.find_pin_at(end_pos)
+            };
+
+            // Get the start pin from state
+            let mut state = self.data.state.borrow_mut();
+            let start_pin = state.link_start_pin;
+            let was_creating = state.is_creating_link;
+            state.is_creating_link = false;
+            state.link_start_pin = -1;
+            drop(state);
+
+            // Clear the completion trigger and target pin
+            Self::FIELD_OFFSETS.complete_link_creation.apply_pin(self).set(false);
+            Self::FIELD_OFFSETS.target_pin_id.apply_pin(self).set(0);
+
+            if was_creating {
+                // Clear link creation visual
+                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
+
+                if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
+                    // Normalize: output pin first, input pin second
+                    let (output_pin, input_pin) = if start_pin % 10 == 2 {
+                        (start_pin, end_pin)
+                    } else {
+                        (end_pin, start_pin)
+                    };
+
+                    // Set the created link properties
+                    Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
+                    Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
+
+                    // Emit link_created callback
+                    self.link_created.call(&());
+                } else {
+                    // Dropped on empty space or incompatible pin
+                    self.link_dropped.call(&());
+                }
+            }
+        }
+    }
+
     /// Process pending reports from pins, nodes, and links
     /// This is called from render() to ensure reports are processed even without input events
     fn process_pending_reports(self: Pin<&Self>) {
@@ -898,6 +928,33 @@ impl NodeEditorOverlay {
 
             // Clear the reporting trigger
             Self::FIELD_OFFSETS.reporting_pin_id.apply_pin(self).set(0);
+        }
+
+        // Check for batch pin position reports (format: "id,x,y;...")
+        let pins_batch = self.pending_pins_batch();
+        if !pins_batch.is_empty() {
+            let mut state = self.data.state.borrow_mut();
+
+            for pin_str in pins_batch.split(';') {
+                if pin_str.is_empty() {
+                    continue;
+                }
+                let parts: alloc::vec::Vec<&str> = pin_str.split(',').collect();
+                if parts.len() >= 3 {
+                    if let (Ok(id), Ok(x), Ok(y)) = (
+                        parts[0].parse::<i32>(),
+                        parts[1].parse::<f32>(),
+                        parts[2].parse::<f32>(),
+                    ) {
+                        state.pin_positions.insert(id, LogicalPoint::new(x, y));
+                    }
+                }
+            }
+
+            drop(state);
+
+            // Clear the batch
+            Self::FIELD_OFFSETS.pending_pins_batch.apply_pin(self).set(SharedString::default());
         }
 
         // Check if a Node component is reporting its rectangle (single)

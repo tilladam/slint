@@ -111,6 +111,43 @@ fn build_node_rects_batch(nodes: &VecModel<NodeData>, zoom: f32, pan_x: f32, pan
         .join(";")
 }
 
+/// Build pin positions batch string from model data and current viewport
+/// Format: "pin_id,screen_x,screen_y;..."
+/// Pin IDs: node_id * 10 + 1 for input, node_id * 10 + 2 for output
+fn build_pins_batch(nodes: &VecModel<NodeData>, zoom: f32, pan_x: f32, pan_y: f32) -> String {
+    // Pin layout constants (must match ui.slint)
+    const PIN_MARGIN: f32 = 8.0;
+    const PIN_SIZE: f32 = 12.0;
+    const TITLE_HEIGHT: f32 = 24.0;
+
+    let pin_radius = PIN_SIZE / 2.0;
+    let pin_y_offset = PIN_MARGIN + TITLE_HEIGHT + PIN_MARGIN + pin_radius;
+
+    (0..nodes.row_count())
+        .filter_map(|i| nodes.row_data(i))
+        .flat_map(|node| {
+            let node_screen_x = node.world_x * zoom + pan_x;
+            let node_screen_y = node.world_y * zoom + pan_y;
+
+            // Input pin: left side
+            let input_pin_id = node.id * 10 + 1;
+            let input_x = node_screen_x + (PIN_MARGIN + pin_radius) * zoom;
+            let input_y = node_screen_y + pin_y_offset * zoom;
+
+            // Output pin: right side
+            let output_pin_id = node.id * 10 + 2;
+            let output_x = node_screen_x + (NODE_BASE_WIDTH - PIN_MARGIN - PIN_SIZE + pin_radius) * zoom;
+            let output_y = node_screen_y + pin_y_offset * zoom;
+
+            vec![
+                format!("{},{},{}", input_pin_id, input_x, input_y),
+                format!("{},{},{}", output_pin_id, output_x, output_y),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 fn main() {
     let window = MainWindow::new().unwrap();
 
@@ -197,13 +234,15 @@ fn main() {
         .collect();
     window.set_pending_links_batch(SharedString::from(batch.join(";").as_str()));
 
-    // Report initial node rects to overlay (using batch)
+    // Report initial node rects and pin positions to overlay (using batch)
     // Initial zoom=1.0, pan_x=0, pan_y=0
     let initial_zoom = 1.0f32;
     let initial_pan_x = 0.0f32;
     let initial_pan_y = 0.0f32;
     let node_rects_batch = build_node_rects_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
     window.set_pending_node_rects_batch(SharedString::from(node_rects_batch.as_str()));
+    let pins_batch = build_pins_batch(&nodes, initial_zoom, initial_pan_x, initial_pan_y);
+    window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
 
     // Handle selection changes - sync overlay's selection state to NodeData model
     let nodes_for_selection = nodes.clone();
@@ -267,14 +306,17 @@ fn main() {
         }
     });
 
-    // Handle viewport changes - update node rects when pan/zoom changes
+    // Handle viewport changes - update node rects and pin positions when pan/zoom changes
     let nodes_for_viewport = nodes.clone();
     let window_for_viewport = window.as_weak();
     window.on_update_viewport(move |zoom, pan_x, pan_y| {
-        // Rebuild node rects with new viewport parameters
+        // Rebuild node rects and pin positions with new viewport parameters
         if let Some(window) = window_for_viewport.upgrade() {
-            let batch = build_node_rects_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
-            window.set_pending_node_rects_batch(SharedString::from(batch.as_str()));
+            let node_batch = build_node_rects_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
+            window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
+
+            let pins_batch = build_pins_batch(&nodes_for_viewport, zoom, pan_x, pan_y);
+            window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
         }
     });
 
@@ -346,13 +388,15 @@ fn main() {
             }
         }
 
-        // Update node rects in core so link positions are recomputed
+        // Update node rects and pin positions in core so link positions are recomputed
         if let Some(window) = window_for_drag.upgrade() {
             let zoom = window.get_zoom();
             let pan_x = window.get_pan_x();
             let pan_y = window.get_pan_y();
-            let batch = build_node_rects_batch(&nodes_for_drag, zoom, pan_x, pan_y);
-            window.set_pending_node_rects_batch(SharedString::from(batch.as_str()));
+            let node_batch = build_node_rects_batch(&nodes_for_drag, zoom, pan_x, pan_y);
+            window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
+            let pins_batch = build_pins_batch(&nodes_for_drag, zoom, pan_x, pan_y);
+            window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
         }
     });
 

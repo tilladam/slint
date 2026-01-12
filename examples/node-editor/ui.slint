@@ -4,22 +4,23 @@
 // native items for building visual node graph editors.
 //
 // Architecture (three-layer approach):
-// 1. NodeEditorBackground - provides viewport properties (pan, zoom)
+// 1. NodeEditorBackground - generates grid geometry, provides viewport (pan, zoom)
 // 2. Node children - application-defined components (Node)
-// 3. NodeEditorOverlay - handles input (pan, zoom, box selection)
+// 3. NodeEditorOverlay - handles input (pan, zoom, box selection, link creation)
 //
-// Rendering is done in Slint (not natively):
-// - Grid: Path component with Rust-generated SVG commands
-// - Links: Path components with bezier curves
+// Rendering (hybrid approach - core provides geometry, Slint provides styling):
+// - Grid: Path component bound to background.grid-commands
+// - Links: Path components with bezier curves (position data from core)
 // - Selection box: Rectangle bound to overlay's is-selecting/selection-* properties
-// - Link preview: Path bound to local link-active/link-start-*/link-end-* properties
+// - Link preview: Path bound to overlay.is-creating-link/link-start-*/link-end-*
 //
-// Link creation flow (handled in Slint, not overlay):
-// 1. Pin TouchArea starts drag -> sets local link-active, link-start-*, link-end-*
-// 2. Link preview becomes visible (bound to link-active)
-// 3. Pin TouchArea moves -> updates local link-end-x/y
-// 4. Pin TouchArea releases -> computes target via find-pin-at(), validates, calls create-link
-// 5. Rust's on_create_link callback adds the link to the model
+// Link creation flow (handled by core overlay):
+// 1. Pin TouchArea starts drag -> sets overlay.pending-link-* properties
+// 2. Core starts link creation, sets is-creating-link = true
+// 3. Pin TouchArea moves -> updates overlay.link-end-x/y
+// 4. Pin TouchArea releases -> sets overlay.complete-link-creation = true
+// 5. Core uses find_pin_at() for hit-testing (no node limit!) and fires link-created callback
+// 6. Rust's on_create_link callback adds the link to the model
 
 // Data structure for nodes - exported to Rust
 export struct NodeData {
@@ -333,6 +334,10 @@ export component MainWindow inherits Window {
     // Format: "id,x,y,w,h;..." where x,y,w,h are screen coordinates
     in-out property <string> pending-node-rects-batch <=> overlay.pending-node-rects-batch;
 
+    // Batch of pending pin positions to register (set from Rust)
+    // Format: "pin_id,x,y;..." where x,y are screen coordinates
+    in-out property <string> pending-pins-batch <=> overlay.pending-pins-batch;
+
     // Callback to report a link to the overlay (called from Rust on init)
     callback report-link(int, int, int, color);  // id, start-pin-id, end-pin-id, color
 
@@ -511,36 +516,13 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Link creation state managed directly in Slint
-    property <bool> link-active: false;
-    property <int> link-pin-id: 0;
-    property <length> link-start-x: 0px;
-    property <length> link-start-y: 0px;
-    property <length> link-end-x: 0px;
-    property <length> link-end-y: 0px;
+    // Link creation now uses overlay's state machine (is-creating-link, link-start-x/y, link-end-x/y)
+    // See overlay.pending-link-* for triggering link creation
 
-    // Hit radius for pin detection (in screen pixels, scales with zoom)
-    property <length> pin-hit-radius: 15px * zoom;
+    // Pin hit-testing is now handled by core's find_pin_at() using reported pin positions
+    // No more 16-node limit!
 
-    // Helper: check if point is near a pin (returns pin-id or 0)
-    pure function point-near-pin(x: length, y: length, pin-x: length, pin-y: length, pin-id: int) -> int {
-        if (x - pin-x) * (x - pin-x) + (y - pin-y) * (y - pin-y) < pin-hit-radius * pin-hit-radius {
-            return pin-id;
-        }
-        return 0;
-    }
-
-    // Helper: check if pin is an input pin (pin-id ends in 1)
-    pure function is-input-pin(pin-id: int) -> bool {
-        return mod(pin-id, 10) == 1;
-    }
-
-    // Helper: check if pin is an output pin (pin-id ends in 2)
-    pure function is-output-pin(pin-id: int) -> bool {
-        return mod(pin-id, 10) == 2;
-    }
-
-    // Helper: check if a node (given its ID) is selected
+    // Helper: check if a node (given its ID) is selected (used for link drag offset)
     pure function is-node-selected(node-id: int) -> bool {
         if nodes.length > 0 && nodes[0].id == node-id { return nodes[0].selected; }
         if nodes.length > 1 && nodes[1].id == node-id { return nodes[1].selected; }
@@ -572,147 +554,12 @@ export component MainWindow inherits Window {
         return is-node-selected(floor(pin-id / 10)) ? visual-drag-offset-y : 0px;
     }
 
-    // Helper: get pin position by id (computed from model data)
-    // Pin ID format: node_id * 10 + pin_type (1=input, 2=output)
-    pure function get-pin-x(pin-id: int) -> length {
-        // Extract node-id: pin-id / 10
-        if mod(pin-id, 10) == 1 {
-            // Input pin
-            return compute-input-pin-x(get-node-world-x(floor(pin-id / 10)));
-        } else {
-            // Output pin
-            return compute-output-pin-x(get-node-world-x(floor(pin-id / 10)));
-        }
-    }
-
-    pure function get-pin-y(pin-id: int) -> length {
-        if mod(pin-id, 10) == 1 {
-            // Input pin
-            return compute-input-pin-y(get-node-world-y(floor(pin-id / 10)));
-        } else {
-            // Output pin
-            return compute-output-pin-y(get-node-world-y(floor(pin-id / 10)));
-        }
-    }
-
-    // Find which pin (if any) is at position (uses computed positions from model)
-    // Checks both input and output pins for each node in the model
-    pure function find-pin-at(x: length, y: length) -> int {
-        // Check pins for each node - input pin = node_id * 10 + 1, output pin = node_id * 10 + 2
-        if nodes.length > 0 {
-            if point-near-pin(x, y, get-pin-x(nodes[0].id * 10 + 1), get-pin-y(nodes[0].id * 10 + 1), nodes[0].id * 10 + 1) != 0 { return nodes[0].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[0].id * 10 + 2), get-pin-y(nodes[0].id * 10 + 2), nodes[0].id * 10 + 2) != 0 { return nodes[0].id * 10 + 2; }
-        }
-        if nodes.length > 1 {
-            if point-near-pin(x, y, get-pin-x(nodes[1].id * 10 + 1), get-pin-y(nodes[1].id * 10 + 1), nodes[1].id * 10 + 1) != 0 { return nodes[1].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[1].id * 10 + 2), get-pin-y(nodes[1].id * 10 + 2), nodes[1].id * 10 + 2) != 0 { return nodes[1].id * 10 + 2; }
-        }
-        if nodes.length > 2 {
-            if point-near-pin(x, y, get-pin-x(nodes[2].id * 10 + 1), get-pin-y(nodes[2].id * 10 + 1), nodes[2].id * 10 + 1) != 0 { return nodes[2].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[2].id * 10 + 2), get-pin-y(nodes[2].id * 10 + 2), nodes[2].id * 10 + 2) != 0 { return nodes[2].id * 10 + 2; }
-        }
-        if nodes.length > 3 {
-            if point-near-pin(x, y, get-pin-x(nodes[3].id * 10 + 1), get-pin-y(nodes[3].id * 10 + 1), nodes[3].id * 10 + 1) != 0 { return nodes[3].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[3].id * 10 + 2), get-pin-y(nodes[3].id * 10 + 2), nodes[3].id * 10 + 2) != 0 { return nodes[3].id * 10 + 2; }
-        }
-        if nodes.length > 4 {
-            if point-near-pin(x, y, get-pin-x(nodes[4].id * 10 + 1), get-pin-y(nodes[4].id * 10 + 1), nodes[4].id * 10 + 1) != 0 { return nodes[4].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[4].id * 10 + 2), get-pin-y(nodes[4].id * 10 + 2), nodes[4].id * 10 + 2) != 0 { return nodes[4].id * 10 + 2; }
-        }
-        if nodes.length > 5 {
-            if point-near-pin(x, y, get-pin-x(nodes[5].id * 10 + 1), get-pin-y(nodes[5].id * 10 + 1), nodes[5].id * 10 + 1) != 0 { return nodes[5].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[5].id * 10 + 2), get-pin-y(nodes[5].id * 10 + 2), nodes[5].id * 10 + 2) != 0 { return nodes[5].id * 10 + 2; }
-        }
-        if nodes.length > 6 {
-            if point-near-pin(x, y, get-pin-x(nodes[6].id * 10 + 1), get-pin-y(nodes[6].id * 10 + 1), nodes[6].id * 10 + 1) != 0 { return nodes[6].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[6].id * 10 + 2), get-pin-y(nodes[6].id * 10 + 2), nodes[6].id * 10 + 2) != 0 { return nodes[6].id * 10 + 2; }
-        }
-        if nodes.length > 7 {
-            if point-near-pin(x, y, get-pin-x(nodes[7].id * 10 + 1), get-pin-y(nodes[7].id * 10 + 1), nodes[7].id * 10 + 1) != 0 { return nodes[7].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[7].id * 10 + 2), get-pin-y(nodes[7].id * 10 + 2), nodes[7].id * 10 + 2) != 0 { return nodes[7].id * 10 + 2; }
-        }
-        if nodes.length > 8 {
-            if point-near-pin(x, y, get-pin-x(nodes[8].id * 10 + 1), get-pin-y(nodes[8].id * 10 + 1), nodes[8].id * 10 + 1) != 0 { return nodes[8].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[8].id * 10 + 2), get-pin-y(nodes[8].id * 10 + 2), nodes[8].id * 10 + 2) != 0 { return nodes[8].id * 10 + 2; }
-        }
-        if nodes.length > 9 {
-            if point-near-pin(x, y, get-pin-x(nodes[9].id * 10 + 1), get-pin-y(nodes[9].id * 10 + 1), nodes[9].id * 10 + 1) != 0 { return nodes[9].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[9].id * 10 + 2), get-pin-y(nodes[9].id * 10 + 2), nodes[9].id * 10 + 2) != 0 { return nodes[9].id * 10 + 2; }
-        }
-        if nodes.length > 10 {
-            if point-near-pin(x, y, get-pin-x(nodes[10].id * 10 + 1), get-pin-y(nodes[10].id * 10 + 1), nodes[10].id * 10 + 1) != 0 { return nodes[10].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[10].id * 10 + 2), get-pin-y(nodes[10].id * 10 + 2), nodes[10].id * 10 + 2) != 0 { return nodes[10].id * 10 + 2; }
-        }
-        if nodes.length > 11 {
-            if point-near-pin(x, y, get-pin-x(nodes[11].id * 10 + 1), get-pin-y(nodes[11].id * 10 + 1), nodes[11].id * 10 + 1) != 0 { return nodes[11].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[11].id * 10 + 2), get-pin-y(nodes[11].id * 10 + 2), nodes[11].id * 10 + 2) != 0 { return nodes[11].id * 10 + 2; }
-        }
-        if nodes.length > 12 {
-            if point-near-pin(x, y, get-pin-x(nodes[12].id * 10 + 1), get-pin-y(nodes[12].id * 10 + 1), nodes[12].id * 10 + 1) != 0 { return nodes[12].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[12].id * 10 + 2), get-pin-y(nodes[12].id * 10 + 2), nodes[12].id * 10 + 2) != 0 { return nodes[12].id * 10 + 2; }
-        }
-        if nodes.length > 13 {
-            if point-near-pin(x, y, get-pin-x(nodes[13].id * 10 + 1), get-pin-y(nodes[13].id * 10 + 1), nodes[13].id * 10 + 1) != 0 { return nodes[13].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[13].id * 10 + 2), get-pin-y(nodes[13].id * 10 + 2), nodes[13].id * 10 + 2) != 0 { return nodes[13].id * 10 + 2; }
-        }
-        if nodes.length > 14 {
-            if point-near-pin(x, y, get-pin-x(nodes[14].id * 10 + 1), get-pin-y(nodes[14].id * 10 + 1), nodes[14].id * 10 + 1) != 0 { return nodes[14].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[14].id * 10 + 2), get-pin-y(nodes[14].id * 10 + 2), nodes[14].id * 10 + 2) != 0 { return nodes[14].id * 10 + 2; }
-        }
-        if nodes.length > 15 {
-            if point-near-pin(x, y, get-pin-x(nodes[15].id * 10 + 1), get-pin-y(nodes[15].id * 10 + 1), nodes[15].id * 10 + 1) != 0 { return nodes[15].id * 10 + 1; }
-            if point-near-pin(x, y, get-pin-x(nodes[15].id * 10 + 2), get-pin-y(nodes[15].id * 10 + 2), nodes[15].id * 10 + 2) != 0 { return nodes[15].id * 10 + 2; }
-        }
-        return 0;
-    }
-
-    // Internal function to request link creation from Rust
-    function request-link-creation(start-pin: int, end-pin: int) {
-        root.create-link(start-pin, end-pin);
-    }
-
-    // Helper functions for link creation
-    function start-link-creation(pin-id: int, x: length, y: length) {
-        link-active = true;
-        link-pin-id = pin-id;
-        link-start-x = x;
-        link-start-y = y;
-        link-end-x = x;
-        link-end-y = y;
-    }
-
-    function update-link-position(pin-id: int, x: length, y: length) {
-        if link-active && link-pin-id == pin-id {
-            link-end-x = x;
-            link-end-y = y;
-        }
-    }
-
-    // Temporary storage for hit-testing result
-    property <int> drop-target-pin: 0;
-
-    function end-link-creation(pin-id: int, x: length, y: length) {
-        if link-active && link-pin-id == pin-id {
-            // Check if we're dropping on a valid target pin
-            drop-target-pin = find-pin-at(x, y);
-
-            if drop-target-pin != 0 && drop-target-pin != pin-id {
-                // Validate: output should connect to input (or vice versa)
-                if (is-output-pin(pin-id) && is-input-pin(drop-target-pin)) ||
-                   (is-input-pin(pin-id) && is-output-pin(drop-target-pin)) {
-                    // Normalize: always store output -> input
-                    if is-output-pin(pin-id) {
-                        request-link-creation(pin-id, drop-target-pin);
-                    } else {
-                        request-link-creation(drop-target-pin, pin-id);
-                    }
-                }
-            }
-
-            link-active = false;
-            link-pin-id = 0;
-        }
-    }
+    // Link creation is now handled by the core overlay:
+    // - Pin drag-started: sets overlay.pending-link-* and triggers link creation
+    // - Pin drag-moved: updates overlay.link-end-x/y
+    // - Pin drag-ended: sets overlay.complete-link-creation = true
+    // - Core uses find_pin_at() for hit-testing (no node limit)
+    // - Core fires link-created or link-dropped callback
 
     // Nodes layer - iterate over model from Rust
     // During drag, apply visual offset. Model is only updated on drag-end.
@@ -759,37 +606,23 @@ export component MainWindow inherits Window {
             visual-drag-offset-y = 0px;
         }
         pin-drag-started(pin-id, x, y) => {
-            // Start link preview using local state (overlay doesn't receive events during pin drag)
-            link-active = true;
-            link-pin-id = pin-id;
-            link-start-x = x;
-            link-start-y = y;
-            link-end-x = x;
-            link-end-y = y;
+            // Start link creation using core's state machine
+            overlay.pending-link-pin-id = pin-id;
+            overlay.pending-link-x = x;
+            overlay.pending-link-y = y;
+            overlay.start-link();  // Trigger core to start link creation
         }
         pin-drag-moved(pin-id, x, y) => {
-            // Update link preview end position
-            link-end-x = x;
-            link-end-y = y;
+            // Update link preview end position via overlay
+            overlay.link-end-x = x;
+            overlay.link-end-y = y;
         }
         pin-drag-ended(pin-id, x, y) => {
-            // End link preview
-            link-active = false;
-            // Check if dropped on a valid target pin and create link
-            drop-target-pin = find-pin-at(x, y);
-            if drop-target-pin != 0 && drop-target-pin != link-pin-id {
-                // Validate: output should connect to input (or vice versa)
-                if (is-output-pin(link-pin-id) && is-input-pin(drop-target-pin)) ||
-                   (is-input-pin(link-pin-id) && is-output-pin(drop-target-pin)) {
-                    // Normalize: always store output -> input
-                    if is-output-pin(link-pin-id) {
-                        root.create-link(link-pin-id, drop-target-pin);
-                    } else {
-                        root.create-link(drop-target-pin, link-pin-id);
-                    }
-                }
-            }
-            link-pin-id = 0;
+            // Complete link creation - core will use find_pin_at() to find target
+            overlay.link-end-x = x;
+            overlay.link-end-y = y;
+            overlay.complete-link-creation = true;
+            // Core handles validation and fires link-created or link-dropped callback
         }
         report-rect(id, x, y, w, h) => {
             // Append to batch (format: "id,x,y,w,h;...")
@@ -873,13 +706,13 @@ export component MainWindow inherits Window {
         border-width: 1px;
     }
 
-    // Active link preview (rendered during link creation, using local state)
+    // Active link preview (rendered during link creation, using overlay's state)
     Link {
-        visible: link-active;
-        start-x: link-start-x;
-        start-y: link-start-y;
-        end-x: link-end-x;
-        end-y: link-end-y;
+        visible: overlay.is-creating-link;
+        start-x: overlay.link-start-x;
+        start-y: overlay.link-start-y;
+        end-x: overlay.link-end-x;
+        end-y: overlay.link-end-y;
         link-color: #ffffff80;
         line-width: 2px * zoom;
         zoom: zoom;

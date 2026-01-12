@@ -853,6 +853,9 @@ export component NodeEditorOverlay inherits Empty {
     in property <length> pin-hit-radius: 15px;
     /// Callback when a pin reports its position - set reporting-pin-* properties first
     callback pin-position-changed();
+    /// Batch of pending pin positions to register (format: "id,x,y;...")
+    /// Used when multiple pins report positions at once (e.g., on viewport change)
+    in-out property <string> pending-pins-batch;
 
     // === Link creation result (output when link-created is fired) ===
     /// Start pin ID of the created link (output pin)
