@@ -15,8 +15,8 @@ const NODE_BASE_HEIGHT: f32 = 80.0;
 const GRID_SPACING: f32 = 24.0;
 
 // Filter node dimensions (must match filter_node.slint)
-const FILTER_NODE_BASE_WIDTH: f32 = 200.0;
-const FILTER_NODE_BASE_HEIGHT: f32 = 160.0;
+const FILTER_NODE_BASE_WIDTH: f32 = 220.0;
+const FILTER_NODE_BASE_HEIGHT: f32 = 140.0;  // 28 + 8 + 32*3 + 8
 
 /// Snap a value to the nearest grid position
 fn snap_to_grid(value: f32) -> f32 {
@@ -135,14 +135,17 @@ fn build_filter_node_rects_batch(filter_nodes: &VecModel<FilterNodeData>, zoom: 
 /// Build filter node pins batch string
 /// Filter nodes have 3 pins: data-input (1), data-output (2), control-input (3)
 fn build_filter_pins_batch(filter_nodes: &VecModel<FilterNodeData>, zoom: f32, pan_x: f32, pan_y: f32) -> String {
-    const PIN_MARGIN: f32 = 8.0;
+    // Layout constants (must match filter_node.slint)
+    const PIN_MARGIN: f32 = 4.0;
     const PIN_SIZE: f32 = 12.0;
-    const TITLE_HEIGHT: f32 = 24.0;
+    const CONTENT_PADDING: f32 = 8.0;
+    const TITLE_HEIGHT: f32 = 28.0;
+    const ROW_HEIGHT: f32 = 32.0;
 
     let pin_radius = PIN_SIZE / 2.0;
-    // Pin row positions (must match filter_node.slint)
-    let pin_row_1_y = PIN_MARGIN + TITLE_HEIGHT + 12.0 + pin_radius;  // First row
-    let pin_row_2_y = PIN_MARGIN + TITLE_HEIGHT + 12.0 + 36.0 + pin_radius;  // Second row
+    // Pin row Y positions: content-padding + title + content-padding + row offset
+    let row_1_center = CONTENT_PADDING + TITLE_HEIGHT + CONTENT_PADDING + ROW_HEIGHT / 2.0;  // 60
+    let row_2_center = CONTENT_PADDING + TITLE_HEIGHT + CONTENT_PADDING + ROW_HEIGHT + ROW_HEIGHT / 2.0;  // 92
 
     (0..filter_nodes.row_count())
         .filter_map(|i| filter_nodes.row_data(i))
@@ -153,17 +156,17 @@ fn build_filter_pins_batch(filter_nodes: &VecModel<FilterNodeData>, zoom: f32, p
             // Data input pin (pin 1): left side, row 1
             let data_input_pin_id = node.id * 10 + 1;
             let data_input_x = node_screen_x + (PIN_MARGIN + pin_radius) * zoom;
-            let data_input_y = node_screen_y + pin_row_1_y * zoom;
+            let data_input_y = node_screen_y + row_1_center * zoom;
 
             // Data output pin (pin 2): right side, row 1
             let data_output_pin_id = node.id * 10 + 2;
-            let data_output_x = node_screen_x + (FILTER_NODE_BASE_WIDTH - PIN_MARGIN - PIN_SIZE + pin_radius) * zoom;
-            let data_output_y = node_screen_y + pin_row_1_y * zoom;
+            let data_output_x = node_screen_x + (FILTER_NODE_BASE_WIDTH - PIN_MARGIN - pin_radius) * zoom;
+            let data_output_y = node_screen_y + row_1_center * zoom;
 
             // Control input pin (pin 3): left side, row 2
             let control_input_pin_id = node.id * 10 + 3;
             let control_input_x = node_screen_x + (PIN_MARGIN + pin_radius) * zoom;
-            let control_input_y = node_screen_y + pin_row_2_y * zoom;
+            let control_input_y = node_screen_y + row_2_center * zoom;
 
             vec![
                 format!("{},{},{}", data_input_pin_id, data_input_x, data_input_y),
