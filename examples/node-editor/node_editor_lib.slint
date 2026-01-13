@@ -65,14 +65,6 @@ export global PinId {
     pure public function is-input(pin-id: int) -> bool {
         return mod(pin-id, 10) != PinTypes.output;
     }
-
-    /// Check if two pins are compatible for linking.
-    /// Compatible means: one output + one input from different nodes.
-    pure public function are-compatible(start-pin: int, end-pin: int) -> bool {
-        if start-pin == end-pin { return false; }
-        if self.get-node-id(start-pin) == self.get-node-id(end-pin) { return false; }
-        return self.is-output(start-pin) != self.is-output(end-pin);
-    }
 }
 
 /// Simplified node representation for minimap rendering.

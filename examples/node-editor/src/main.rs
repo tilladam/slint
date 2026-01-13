@@ -571,13 +571,12 @@ fn main() {
     let color_index_for_create = color_index.clone();
     let window_for_create = window.as_weak();
     window.on_create_link(move |start_pin, end_pin| {
-        // Validate using PinId.are-compatible() helper from Slint
         let window = match window_for_create.upgrade() {
             Some(w) => w,
             None => return,
         };
 
-        // Check compatibility using validation logic (matches PinId.are-compatible in Slint)
+        // Validate pin compatibility (application-layer validation)
         if !are_pins_compatible(start_pin, end_pin) {
             return; // Incompatible pins, silently ignore
         }
