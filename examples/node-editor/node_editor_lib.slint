@@ -591,13 +591,18 @@ export component NodeEditor {
     /// Maximum Y coordinate of the graph (set by application or computed from nodes)
     in-out property <length> graph-max-y: 1200px;
 
-    // === Node drag state (set during node drag for link position updates) ===
-    /// Whether nodes are currently being dragged
-    in property <bool> is-dragging: false;
-    /// X offset of dragged nodes
-    in property <length> drag-offset-x;
-    /// Y offset of dragged nodes
-    in property <length> drag-offset-y;
+    // === Node drag state (managed internally by NodeEditor) ===
+    /// Whether nodes are currently being dragged (read-only for children)
+    out property <bool> is-dragging: root.internal-is-dragging;
+    /// X offset of dragged nodes (read-only for children)
+    out property <length> drag-offset-x: root.internal-drag-offset-x;
+    /// Y offset of dragged nodes (read-only for children)
+    out property <length> drag-offset-y: root.internal-drag-offset-y;
+
+    // Internal drag state (private)
+    property <bool> internal-is-dragging: false;
+    property <length> internal-drag-offset-x: 0px;
+    property <length> internal-drag-offset-y: 0px;
 
     // === Output: Grid ===
     /// Generated SVG path commands for grid lines
@@ -703,8 +708,8 @@ export component NodeEditor {
     out property <string> current-selected-link-ids: overlay.current-selected-link-ids;
 
     // === Input: Node click handling ===
-    in property <int> clicked-node-id <=> overlay.clicked-node-id;
-    in property <bool> clicked-shift-held <=> overlay.clicked-shift-held;
+    in-out property <int> clicked-node-id <=> overlay.clicked-node-id;
+    in-out property <bool> clicked-shift-held <=> overlay.clicked-shift-held;
 
     // === Output: Link hover state ===
     out property <int> hovered-link-id: overlay.hovered-link-id;
@@ -731,7 +736,7 @@ export component NodeEditor {
     callback add-node-requested <=> overlay.add-node-requested;
 
     /// Node drag ended - delta is automatically snapped if grid-snapping is enabled
-    /// Applications should connect node drag-ended callbacks to this
+    /// Applications should connect this to update their model
     callback node-drag-ended(/* delta-x */ float, /* delta-y */ float);
 
     // === Helper Functions ===
@@ -744,14 +749,51 @@ export component NodeEditor {
         return value;
     }
 
-    /// Call this from node drag-ended handlers - applies snapping and fires node-drag-ended callback
-    /// Applications should wire: drag-ended(id, dx, dy) => { editor.handle-node-drag(dx, dy); }
-    public function handle-node-drag(delta-x: length, delta-y: length) {
+    /// Start node drag - call from node drag-started handler
+    /// Handles selection updates and initializes drag state
+    /// Applications should wire: drag-started(id, already-selected) => { editor.start-node-drag(id, already-selected); }
+    public function start-node-drag(node-id: int, already-selected: bool) {
+        // Only change selection if the node is not already selected
+        // This preserves multi-selection when dragging a selected node
+        if !already-selected {
+            root.clicked-node-id = node-id;
+            root.clicked-shift-held = false;
+            root.selection-changed();  // Notify application of selection change
+        }
+
+        // Initialize drag state
+        root.internal-is-dragging = true;
+        root.internal-drag-offset-x = 0px;
+        root.internal-drag-offset-y = 0px;
+    }
+
+    /// Update node drag - call from node drag-moved handler
+    /// Applications should wire: drag-moved(id, offset-x, offset-y) => { editor.update-node-drag(offset-x, offset-y); }
+    public function update-node-drag(offset-x: length, offset-y: length) {
+        root.internal-drag-offset-x = offset-x;
+        root.internal-drag-offset-y = offset-y;
+    }
+
+    /// End node drag - call from node drag-ended handler
+    /// Applies snapping and fires node-drag-ended callback
+    /// Applications should wire: drag-ended(id, delta-x, delta-y) => { editor.end-node-drag(delta-x, delta-y); }
+    public function end-node-drag(delta-x: length, delta-y: length) {
         // Apply snapping if enabled, then fire callback
         root.node-drag-ended(
             root.grid-snapping ? root.snap-to-grid(delta-x / 1px) : delta-x / 1px,
             root.grid-snapping ? root.snap-to-grid(delta-y / 1px) : delta-y / 1px
         );
+
+        // Reset drag state
+        root.internal-is-dragging = false;
+        root.internal-drag-offset-x = 0px;
+        root.internal-drag-offset-y = 0px;
+    }
+
+    /// @deprecated Use start-node-drag, update-node-drag, and end-node-drag instead
+    /// Call this from node drag-ended handlers - applies snapping and fires node-drag-ended callback
+    public function handle-node-drag(delta-x: length, delta-y: length) {
+        root.end-node-drag(delta-x, delta-y);
     }
 
     // === Minimap Positioning ===

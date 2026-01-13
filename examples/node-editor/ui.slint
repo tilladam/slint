@@ -180,11 +180,6 @@ export component MainWindow inherits Window {
     // Grid snap toggle (bound to editor.grid-snapping)
     property <bool> grid-snap-enabled: true;
 
-    // Visual drag offset (tracked in Slint, not affecting model until drag ends)
-    property <bool> is-dragging: false;
-    property <length> visual-drag-offset-x: 0px;
-    property <length> visual-drag-offset-y: 0px;
-
     // Shared pan state (in-out so Rust can read them)
     in-out property <length> pan-x: 0px;
     in-out property <length> pan-y: 0px;
@@ -377,10 +372,7 @@ export component MainWindow inherits Window {
         // Set pin hit radius from globals (eliminates hardcoded default in core)
         pin-hit-radius: NodeConstants.pin-size * zoom * 0.66;
 
-        // Drag state - editor applies offset to link positions when dragging
-        is-dragging: is-dragging;
-        drag-offset-x: visual-drag-offset-x;
-        drag-offset-y: visual-drag-offset-y;
+        // Drag state is now managed internally by NodeEditor
 
         link-requested => {
             // Request link creation - validation happens in application
@@ -442,9 +434,9 @@ export component MainWindow inherits Window {
             selected: root.is-node-selected(node-data.id);
             world-x: node-data.world-x * 1px;
             world-y: node-data.world-y * 1px;
-            // Pass drag offset to selected nodes
-            drag-offset-x: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-x : 0px;
-            drag-offset-y: root.is-node-selected(node-data.id) && is-dragging ? visual-drag-offset-y : 0px;
+            // Drag offset is managed by editor and applied to selected nodes automatically
+            drag-offset-x: root.is-node-selected(node-data.id) ? editor.drag-offset-x : 0px;
+            drag-offset-y: root.is-node-selected(node-data.id) ? editor.drag-offset-y : 0px;
             zoom: zoom;
             pan-x: pan-x;
             pan-y: pan-y;
@@ -454,29 +446,13 @@ export component MainWindow inherits Window {
                 root.selection-changed(editor.current-selected-ids);
             }
             drag-started(id, already-selected) => {
-                // Only change selection if the node is not already selected
-                // This preserves multi-selection when dragging a selected node
-                if !already-selected {
-                    editor.clicked-node-id = id;
-                    editor.clicked-shift-held = false;
-                    root.selection-changed(editor.current-selected-ids);
-                }
-
-                is-dragging = true;
-                visual-drag-offset-x = 0px;
-                visual-drag-offset-y = 0px;
+                editor.start-node-drag(id, already-selected);
             }
             drag-moved(id, offset-x, offset-y) => {
-                // Update visual offset for all selected nodes
-                visual-drag-offset-x = offset-x;
-                visual-drag-offset-y = offset-y;
+                editor.update-node-drag(offset-x, offset-y);
             }
             drag-ended(id, delta-x, delta-y) => {
-                // Let editor handle snapping and fire callback
-                editor.handle-node-drag(delta-x, delta-y);
-                is-dragging = false;
-                visual-drag-offset-x = 0px;
-                visual-drag-offset-y = 0px;
+                editor.end-node-drag(delta-x, delta-y);
             }
             pin-drag-started(pin-id, x, y) => {
                 // Start link creation using editor's state machine
@@ -513,8 +489,9 @@ export component MainWindow inherits Window {
             selected: root.is-node-selected(filter-data.id);
             world-x: filter-data.world-x * 1px;
             world-y: filter-data.world-y * 1px;
-            drag-offset-x: root.is-node-selected(filter-data.id) && is-dragging ? visual-drag-offset-x : 0px;
-            drag-offset-y: root.is-node-selected(filter-data.id) && is-dragging ? visual-drag-offset-y : 0px;
+            // Drag offset is managed by editor and applied to selected nodes automatically
+            drag-offset-x: root.is-node-selected(filter-data.id) ? editor.drag-offset-x : 0px;
+            drag-offset-y: root.is-node-selected(filter-data.id) ? editor.drag-offset-y : 0px;
             zoom: zoom;
             pan-x: pan-x;
             pan-y: pan-y;
@@ -528,25 +505,13 @@ export component MainWindow inherits Window {
                 root.selection-changed(editor.current-selected-ids);
             }
             drag-started(id, already-selected) => {
-                if !already-selected {
-                    editor.clicked-node-id = id;
-                    editor.clicked-shift-held = false;
-                    root.selection-changed(editor.current-selected-ids);
-                }
-                is-dragging = true;
-                visual-drag-offset-x = 0px;
-                visual-drag-offset-y = 0px;
+                editor.start-node-drag(id, already-selected);
             }
             drag-moved(id, offset-x, offset-y) => {
-                visual-drag-offset-x = offset-x;
-                visual-drag-offset-y = offset-y;
+                editor.update-node-drag(offset-x, offset-y);
             }
             drag-ended(id, delta-x, delta-y) => {
-                // Let editor handle snapping and fire callback
-                editor.handle-node-drag(delta-x, delta-y);
-                is-dragging = false;
-                visual-drag-offset-x = 0px;
-                visual-drag-offset-y = 0px;
+                editor.end-node-drag(delta-x, delta-y);
             }
             pin-drag-started(pin-id, x, y) => {
                 editor.pending-link-pin-id = pin-id;
