@@ -67,6 +67,104 @@ export global PinId {
     }
 }
 
+/// Standard node layout constants and position computation functions.
+/// Applications can override these constants to customize node appearance.
+///
+/// Default layout for standard 2-pin node:
+/// - Width: 150px, Height: 80px
+/// - Title bar: 24px height at top with 8px margins
+/// - Input pin: left side, 8px margin, below title
+/// - Output pin: right side, 8px margin, below title
+/// - Pin size: 12px diameter
+export global NodeLayout {
+    // === Layout Constants (can be overridden by applications) ===
+
+    /// Base node width (before zoom scaling)
+    in-out property <length> node-base-width: 150px;
+    /// Base node height (before zoom scaling)
+    in-out property <length> node-base-height: 80px;
+    /// Pin diameter
+    in-out property <length> pin-size: 12px;
+    /// Margin from node edge to pin center
+    in-out property <length> pin-margin: 8px;
+    /// Title bar height
+    in-out property <length> title-height: 24px;
+    /// Grid spacing (for reference)
+    in-out property <length> grid-spacing: 24px;
+
+    // === Position Computation Functions ===
+
+    /// Compute node screen X position from world coordinates
+    /// Parameters: world-x (unscaled), zoom, pan-x
+    pure public function screen-x(world-x: float, zoom: float, pan-x: length) -> length {
+        return world-x * 1px * zoom + pan-x;
+    }
+
+    /// Compute node screen Y position from world coordinates
+    /// Parameters: world-y (unscaled), zoom, pan-y
+    pure public function screen-y(world-y: float, zoom: float, pan-y: length) -> length {
+        return world-y * 1px * zoom + pan-y;
+    }
+
+    /// Compute node screen width with zoom applied
+    pure public function screen-width(zoom: float) -> length {
+        return self.node-base-width * zoom;
+    }
+
+    /// Compute node screen height with zoom applied
+    pure public function screen-height(zoom: float) -> length {
+        return self.node-base-height * zoom;
+    }
+
+    // === Pin Position Computation (Absolute Screen Coordinates) ===
+
+    /// Compute input pin absolute X position
+    /// Parameters: node-world-x, zoom, pan-x
+    pure public function input-pin-x(node-world-x: float, zoom: float, pan-x: length) -> length {
+        return node-world-x * 1px * zoom + pan-x + (self.pin-margin + self.pin-size / 2) * zoom;
+    }
+
+    /// Compute input pin absolute Y position
+    /// Parameters: node-world-y, zoom, pan-y
+    pure public function input-pin-y(node-world-y: float, zoom: float, pan-y: length) -> length {
+        return node-world-y * 1px * zoom + pan-y + (self.pin-margin + self.title-height + self.pin-margin + self.pin-size / 2) * zoom;
+    }
+
+    /// Compute output pin absolute X position
+    /// Parameters: node-world-x, zoom, pan-x
+    pure public function output-pin-x(node-world-x: float, zoom: float, pan-x: length) -> length {
+        return node-world-x * 1px * zoom + pan-x + (self.node-base-width - self.pin-margin - self.pin-size / 2) * zoom;
+    }
+
+    /// Compute output pin absolute Y position
+    /// Parameters: node-world-y, zoom, pan-y
+    pure public function output-pin-y(node-world-y: float, zoom: float, pan-y: length) -> length {
+        return node-world-y * 1px * zoom + pan-y + (self.pin-margin + self.title-height + self.pin-margin + self.pin-size / 2) * zoom;
+    }
+
+    // === Pin Relative Offsets (Unscaled, From Node Origin) ===
+
+    /// Input pin relative X offset (unscaled, from node top-left)
+    pure public function input-pin-relative-x() -> length {
+        return self.pin-margin + self.pin-size / 2;
+    }
+
+    /// Input pin relative Y offset (unscaled, from node top-left)
+    pure public function input-pin-relative-y() -> length {
+        return self.pin-margin + self.title-height + self.pin-margin + self.pin-size / 2;
+    }
+
+    /// Output pin relative X offset (unscaled, from node top-left)
+    pure public function output-pin-relative-x() -> length {
+        return self.node-base-width - self.pin-margin - self.pin-size / 2;
+    }
+
+    /// Output pin relative Y offset (unscaled, from node top-left)
+    pure public function output-pin-relative-y() -> length {
+        return self.pin-margin + self.title-height + self.pin-margin + self.pin-size / 2;
+    }
+}
+
 /// Simplified node representation for minimap rendering.
 /// Contains only the essential positioning and identification data.
 export struct MinimapNode {

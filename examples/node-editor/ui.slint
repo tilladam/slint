@@ -16,18 +16,17 @@
 // 2. Add links as children (using Link component)
 // 3. Handle callbacks for link creation, selection changes, etc.
 
-import { NodeEditor, Link, Pin, PinTypes, PinId, MinimapNode, BaseNode, NodeData, LinkData } from "node_editor_lib.slint";
+import { NodeEditor, Link, Pin, PinTypes, PinId, MinimapNode, BaseNode, NodeData, LinkData, NodeLayout } from "node_editor_lib.slint";
 import { InstructionsOverlay } from "instructions_overlay.slint";
 
-// Node layout constants - single source of truth
-// These are exported so Rust can access them
+// Re-export NodeLayout for Rust access (as NodeConstants for backward compatibility)
 export global NodeConstants {
-    out property <length> node-base-width: 150px;
-    out property <length> node-base-height: 80px;
-    out property <length> pin-size: 12px;
-    out property <length> pin-margin: 8px;
-    out property <length> title-height: 24px;
-    out property <length> grid-spacing: 24px;
+    out property <length> node-base-width <=> NodeLayout.node-base-width;
+    out property <length> node-base-height <=> NodeLayout.node-base-height;
+    out property <length> pin-size <=> NodeLayout.pin-size;
+    out property <length> pin-margin <=> NodeLayout.pin-margin;
+    out property <length> title-height <=> NodeLayout.title-height;
+    out property <length> grid-spacing <=> NodeLayout.grid-spacing;
 }
 
 export global FilterNodeConstants {
@@ -258,38 +257,22 @@ export component MainWindow inherits Window {
     pure callback compute-filter-control-input-pin-relative-x() -> length;
     pure callback compute-filter-control-input-pin-relative-y() -> length;
 
-    // Implement the callbacks using Slint globals
-    compute-node-screen-x(world-x) => { return world-x * 1px * zoom + pan-x; }
-    compute-node-screen-y(world-y) => { return world-y * 1px * zoom + pan-y; }
-    compute-node-screen-width => { return NodeConstants.node-base-width * zoom; }
-    compute-node-screen-height => { return NodeConstants.node-base-height * zoom; }
+    // Implement the callbacks using library NodeLayout functions
+    compute-node-screen-x(world-x) => { return NodeLayout.screen-x(world-x, zoom, pan-x); }
+    compute-node-screen-y(world-y) => { return NodeLayout.screen-y(world-y, zoom, pan-y); }
+    compute-node-screen-width => { return NodeLayout.screen-width(zoom); }
+    compute-node-screen-height => { return NodeLayout.screen-height(zoom); }
 
-    compute-input-pin-x(world-x) => {
-        return world-x * 1px * zoom + pan-x + (NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
-    }
-    compute-input-pin-y(world-y) => {
-        return world-y * 1px * zoom + pan-y + (NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
-    }
-    compute-output-pin-x(world-x) => {
-        return world-x * 1px * zoom + pan-x + (NodeConstants.node-base-width - NodeConstants.pin-margin - NodeConstants.pin-size / 2) * zoom;
-    }
-    compute-output-pin-y(world-y) => {
-        return world-y * 1px * zoom + pan-y + (NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2) * zoom;
-    }
+    compute-input-pin-x(world-x) => { return NodeLayout.input-pin-x(world-x, zoom, pan-x); }
+    compute-input-pin-y(world-y) => { return NodeLayout.input-pin-y(world-y, zoom, pan-y); }
+    compute-output-pin-x(world-x) => { return NodeLayout.output-pin-x(world-x, zoom, pan-x); }
+    compute-output-pin-y(world-y) => { return NodeLayout.output-pin-y(world-y, zoom, pan-y); }
 
     // Relative offsets (unscaled, from node top-left)
-    compute-input-pin-relative-x => {
-        return NodeConstants.pin-margin + NodeConstants.pin-size / 2;
-    }
-    compute-input-pin-relative-y => {
-        return NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2;
-    }
-    compute-output-pin-relative-x => {
-        return NodeConstants.node-base-width - NodeConstants.pin-margin - NodeConstants.pin-size / 2;
-    }
-    compute-output-pin-relative-y => {
-        return NodeConstants.pin-margin + NodeConstants.title-height + NodeConstants.pin-margin + NodeConstants.pin-size / 2;
-    }
+    compute-input-pin-relative-x => { return NodeLayout.input-pin-relative-x(); }
+    compute-input-pin-relative-y => { return NodeLayout.input-pin-relative-y(); }
+    compute-output-pin-relative-x => { return NodeLayout.output-pin-relative-x(); }
+    compute-output-pin-relative-y => { return NodeLayout.output-pin-relative-y(); }
 
     compute-filter-screen-width => { return FilterNodeConstants.base-width * zoom; }
     compute-filter-screen-height => { return FilterNodeConstants.base-height * zoom; }
