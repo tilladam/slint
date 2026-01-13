@@ -868,11 +868,11 @@ export component NodeEditorOverlay inherits Empty {
     /// Used when multiple pins report positions at once (e.g., on viewport change)
     in-out property <string> pending-pins-batch;
 
-    // === Link creation result (output when link-created is fired) ===
-    /// Start pin ID of the created link (output pin)
-    out property <int> created-link-start-pin;
-    /// End pin ID of the created link (input pin)
-    out property <int> created-link-end-pin;
+    // === Link request result (set when link-requested is fired) ===
+    /// Start pin ID of the requested link (read from callback)
+    out property <int> requested-link-start-pin;
+    /// End pin ID of the requested link (read from callback)
+    out property <int> requested-link-end-pin;
 
     // === Node rectangle reporting (for hit-testing and box selection) ===
     /// Node ID being reported (set before triggering node-rect-changed)
@@ -945,8 +945,9 @@ export component NodeEditorOverlay inherits Empty {
     /// Comma-separated list of currently selected link IDs (output)
     out property <string> current-selected-link-ids;
 
-    /// Callback when a link is created between two pins (read created-link-start-pin and created-link-end-pin)
-    callback link-created();
+    /// Callback when user requests link creation (read requested-link-start-pin and requested-link-end-pin)
+    /// Application should validate compatibility and create link if valid
+    callback link-requested();
     /// Callback when hovered link changes (check hovered-link-id for current value)
     callback link-hovered();
     /// Callback when link selection changes (check current-selected-link-ids for selected links)
@@ -957,8 +958,6 @@ export component NodeEditorOverlay inherits Empty {
     out property <int> debug-pin-count;
     /// Number of registered links (for debugging)
     out property <int> debug-link-count;
-    /// Callback when a link is dropped on empty space (can be used to create nodes)
-    callback link-dropped();
     /// Callback when link creation is cancelled
     callback link-cancelled();
     /// Callback for context menu

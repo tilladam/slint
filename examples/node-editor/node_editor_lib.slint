@@ -14,7 +14,7 @@
 //         pan-y: 0px;
 //         zoom: 1.0;
 //
-//         link-created => { /* handle link creation */ }
+//         link-requested => { /* validate and create link */ }
 //
 //         // Add nodes
 //         for node in nodes: MyNode { ... }
@@ -64,6 +64,14 @@ export global PinId {
     /// Check if a pin is an input type (not output)
     pure public function is-input(pin-id: int) -> bool {
         return mod(pin-id, 10) != PinTypes.output;
+    }
+
+    /// Check if two pins are compatible for linking.
+    /// Compatible means: one output + one input from different nodes.
+    pure public function are-compatible(start-pin: int, end-pin: int) -> bool {
+        if start-pin == end-pin { return false; }
+        if self.get-node-id(start-pin) == self.get-node-id(end-pin) { return false; }
+        return self.is-output(start-pin) != self.is-output(end-pin);
     }
 }
 
@@ -273,11 +281,11 @@ export component NodeEditor {
     in property <length> pin-hit-radius <=> overlay.pin-hit-radius;
     in-out property <string> pending-pins-batch <=> overlay.pending-pins-batch;
 
-    // === Output: Link creation result ===
-    /// Created link start pin ID
-    out property <int> created-link-start-pin: overlay.created-link-start-pin;
-    /// Created link end pin ID
-    out property <int> created-link-end-pin: overlay.created-link-end-pin;
+    // === Output: Link request result ===
+    /// Requested link start pin ID (read from link-requested callback)
+    out property <int> requested-link-start-pin: overlay.requested-link-start-pin;
+    /// Requested link end pin ID (read from link-requested callback)
+    out property <int> requested-link-end-pin: overlay.requested-link-end-pin;
 
     // === Input: Node rectangle reporting ===
     in property <int> reporting-node-id <=> overlay.reporting-node-id;
@@ -328,11 +336,10 @@ export component NodeEditor {
     callback node-clicked <=> overlay.node-clicked;
 
     // === Callbacks: Events ===
-    callback link-created <=> overlay.link-created;
+    callback link-requested <=> overlay.link-requested;
     callback link-hovered <=> overlay.link-hovered;
     callback link-selection-changed <=> overlay.link-selection-changed;
     callback link-positions-changed <=> overlay.link-positions-changed;
-    callback link-dropped <=> overlay.link-dropped;
     callback link-cancelled <=> overlay.link-cancelled;
     callback context-menu-requested <=> overlay.context-menu-requested;
     callback selection-changed <=> overlay.selection-changed;

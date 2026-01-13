@@ -9,6 +9,28 @@ use std::rc::Rc;
 
 slint::include_modules!();
 
+/// Pin type constants (must match PinTypes global in Slint)
+mod pin_types {
+    pub const OUTPUT: i32 = 2;
+}
+
+/// Pin validation utilities (matches PinId global in Slint)
+fn is_output_pin(pin_id: i32) -> bool {
+    (pin_id % 10) == pin_types::OUTPUT
+}
+
+fn are_pins_compatible(start_pin: i32, end_pin: i32) -> bool {
+    if start_pin == end_pin {
+        return false;
+    }
+    let start_node = start_pin / 10;
+    let end_node = end_pin / 10;
+    if start_node == end_node {
+        return false;
+    }
+    is_output_pin(start_pin) != is_output_pin(end_pin)
+}
+
 /// Build node rects batch string from model data using Slint-computed positions
 /// Format: "id,screen_x,screen_y,width,height;..."
 /// Slint computes positions using globals - Rust just queries
@@ -34,7 +56,8 @@ fn build_node_rects_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> St
 
 /// Get pin screen position for a given pin ID using Slint-computed positions
 fn get_pin_position(window: &MainWindow, nodes: &VecModel<NodeData>, pin_id: i32) -> Option<(f32, f32)> {
-    // Pin ID encoding: pin_id = node_id * 10 + pin_type (see PinId global in Slint)
+    // Pin ID encoding and compatibility logic: see PinId global in node_editor_lib.slint
+    // Core provides type-agnostic utilities in pin_id module
     let node_id = pin_id / 10;
     let pin_type = pin_id % 10;
 
@@ -148,7 +171,7 @@ fn build_filter_pins_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNo
 
 /// Build pin relative offsets batch string from Slint-computed offsets
 /// Format: "pin_id,rel_x,rel_y;..." where rel_x/rel_y are unscaled offsets from node top-left
-/// Pin IDs use PinId.make(node-id, pin-type) encoding (see PinTypes global)
+/// Pin IDs use PinId.make(node-id, pin-type) encoding (see PinId global in node_editor_lib.slint)
 ///
 /// The core computes absolute positions on-demand as: node_rect.pos + rel_offset * zoom
 /// This eliminates hardcoded layout constants from the core.
@@ -428,12 +451,40 @@ fn main() {
         }
     });
 
-    // Handle link creation
+    // Handle link creation - validates compatibility and checks for duplicates
     let links_for_create = links.clone();
     let next_link_id_for_create = next_link_id.clone();
     let color_index_for_create = color_index.clone();
     let window_for_create = window.as_weak();
     window.on_create_link(move |start_pin, end_pin| {
+        // Validate using PinId.are-compatible() helper from Slint
+        let window = match window_for_create.upgrade() {
+            Some(w) => w,
+            None => return,
+        };
+
+        // Check compatibility using validation logic (matches PinId.are-compatible in Slint)
+        if !are_pins_compatible(start_pin, end_pin) {
+            return; // Incompatible pins, silently ignore
+        }
+
+        // Normalize to (output, input) for consistent storage
+        let (output_pin, input_pin) = if is_output_pin(start_pin) {
+            (start_pin, end_pin)
+        } else {
+            (end_pin, start_pin)
+        };
+
+        // Check for duplicate links
+        for i in 0..links_for_create.row_count() {
+            if let Some(link) = links_for_create.row_data(i) {
+                if link.start_pin_id == output_pin && link.end_pin_id == input_pin {
+                    return; // Duplicate link, ignore
+                }
+            }
+        }
+
+        // Valid and unique - create the link
         let id = *next_link_id_for_create.borrow();
         *next_link_id_for_create.borrow_mut() += 1;
 
@@ -445,23 +496,21 @@ fn main() {
         // Add link to model (path_commands will be computed by core)
         links_for_create.push(LinkData {
             id,
-            start_pin_id: start_pin,
-            end_pin_id: end_pin,
+            start_pin_id: output_pin,
+            end_pin_id: input_pin,
             color,
             path_commands: SharedString::default(), // Will be computed by core
         });
 
         // Report link to overlay for position computation (append to batch)
-        if let Some(window) = window_for_create.upgrade() {
-            let current_batch = window.get_pending_links_batch();
-            let new_entry = format!("{},{},{},{}", id, start_pin, end_pin, color.as_argb_encoded());
-            let new_batch = if current_batch.is_empty() {
-                new_entry
-            } else {
-                format!("{};{}", current_batch, new_entry)
-            };
-            window.set_pending_links_batch(SharedString::from(new_batch.as_str()));
-        }
+        let current_batch = window.get_pending_links_batch();
+        let new_entry = format!("{},{},{},{}", id, output_pin, input_pin, color.as_argb_encoded());
+        let new_batch = if current_batch.is_empty() {
+            new_entry
+        } else {
+            format!("{};{}", current_batch, new_entry)
+        };
+        window.set_pending_links_batch(SharedString::from(new_batch.as_str()));
     });
 
     // Node selection is now handled by the overlay (overlay.clicked-node-id)
@@ -583,7 +632,7 @@ fn main() {
         }
 
         // Also remove any links connected to deleted nodes
-        // Pin IDs encode node ID: pin_id = node_id * 10 + pin_type (see PinId.make)
+        // Pin IDs encode node ID: pin_id = node_id * 10 + pin_type (see PinId global)
         let mut link_indices_to_remove: Vec<usize> = Vec::new();
         let mut deleted_link_ids: Vec<i32> = Vec::new();
         for i in 0..links_for_delete.row_count() {

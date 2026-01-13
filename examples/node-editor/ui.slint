@@ -486,13 +486,9 @@ export component MainWindow inherits Window {
         drag-offset-x: visual-drag-offset-x;
         drag-offset-y: visual-drag-offset-y;
 
-        link-created => {
-            // Create link using the editor's output properties
-            root.create-link(editor.created-link-start-pin, editor.created-link-end-pin);
-        }
-
-        link-dropped => {
-            debug("Link dropped on empty space");
+        link-requested => {
+            // Request link creation - validation happens in application
+            root.create-link(editor.requested-link-start-pin, editor.requested-link-end-pin);
         }
 
         context-menu-requested => {

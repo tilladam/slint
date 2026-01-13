@@ -144,14 +144,9 @@ fn generate_grid_commands(width: f32, height: f32, zoom: f32, pan_x: f32, pan_y:
 /// Pin IDs encode both the node ID and pin type using the formula:
 /// pin_id = node_id * 10 + pin_type
 ///
-/// Type conventions (defined in Slint PinTypes global):
-/// - Type 1: Input (standard data/signal input)
-/// - Type 2: Output (standard data/signal output)
-/// - Type 3+: Application-specific (e.g., control inputs)
+/// Pin types and compatibility logic are defined in the Slint PinId global.
+/// See node_editor_lib.slint for type definitions and validation functions.
 pub mod pin_id {
-    /// Output pin type constant (must match PinTypes.output in Slint)
-    const OUTPUT_TYPE: i32 = 2;
-
     /// Create a pin ID from node ID and pin type
     /// Example: make(5, 1) => 51
     #[inline]
@@ -171,25 +166,6 @@ pub mod pin_id {
     #[inline]
     pub fn get_type(pin_id: i32) -> i32 {
         pin_id % 10
-    }
-
-    /// Check if a pin is an output type
-    #[inline]
-    pub fn is_output(pin_id: i32) -> bool {
-        get_type(pin_id) == OUTPUT_TYPE
-    }
-
-    /// Check if a pin is an input type (not output)
-    #[inline]
-    pub fn is_input(pin_id: i32) -> bool {
-        !is_output(pin_id)
-    }
-
-    /// Check if two pins are compatible for linking
-    /// Compatible means one output and one input (not same pin)
-    #[inline]
-    pub fn are_compatible(start_pin: i32, end_pin: i32) -> bool {
-        start_pin != end_pin && is_output(start_pin) != is_output(end_pin)
     }
 }
 
@@ -681,10 +657,16 @@ pub struct NodeEditorOverlay {
     /// Updated during link creation when link_end_x/y changes
     pub link_preview_path_commands: Property<SharedString>,
 
-    /// Callback when a link is created (use properties to get event data)
-    pub link_created: Callback<()>,
-    /// Callback when a link is dropped on empty space (use properties to get event data)
-    pub link_dropped: Callback<()>,
+    // === Link request result (set when link_requested is fired) ===
+    /// Start pin ID of the requested link (read from callback)
+    pub requested_link_start_pin: Property<i32>,
+    /// End pin ID of the requested link (read from callback)
+    pub requested_link_end_pin: Property<i32>,
+
+    /// Callback when user completes link creation (drag from pin to pin)
+    /// Read requested_link_start_pin and requested_link_end_pin for details
+    /// Application should validate and create link if valid
+    pub link_requested: Callback<()>,
     /// Callback when link creation is cancelled (use properties to get event data)
     pub link_cancelled: Callback<()>,
     /// Callback for context menu (use properties to get event data)
@@ -728,12 +710,6 @@ pub struct NodeEditorOverlay {
     /// Batch of pending pin positions to register (format: "id,x,y;...")
     /// Used when multiple pins report positions at once (e.g., on viewport change)
     pub pending_pins_batch: Property<SharedString>,
-
-    // === Link creation result (output when link_created is fired) ===
-    /// Start pin ID of the created link (output pin)
-    pub created_link_start_pin: Property<i32>,
-    /// End pin ID of the created link (input pin)
-    pub created_link_end_pin: Property<i32>,
 
     // === Node rectangle reporting (for hit-testing and box selection) ===
     /// Node ID being reported (set before triggering node_rect_changed)
@@ -1152,33 +1128,12 @@ impl NodeEditorOverlay {
                 // Clear link creation visual
                 Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
 
-                if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
-                    // Normalize: output pin first, input pin second
-                    let (output_pin, input_pin) = if pin_id::is_output(start_pin) {
-                        (start_pin, end_pin)
-                    } else {
-                        (end_pin, start_pin)
-                    };
-
-                    // Check if link already exists between these pins
-                    let state = self.data.state.borrow();
-                    let already_exists = Self::link_exists(&state, output_pin, input_pin);
-                    drop(state);
-
-                    if already_exists {
-                        // Don't create duplicate link
-                        self.link_dropped.call(&());
-                    } else {
-                        // Set the created link properties
-                        Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
-                        Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
-
-                        // Emit link_created callback
-                        self.link_created.call(&());
-                    }
-                } else {
-                    // Dropped on empty space or incompatible pin
-                    self.link_dropped.call(&());
+                // Notify application of link request
+                // Application will validate compatibility and duplicates
+                if end_pin != 0 {
+                    Self::FIELD_OFFSETS.requested_link_start_pin.apply_pin(self).set(start_pin);
+                    Self::FIELD_OFFSETS.requested_link_end_pin.apply_pin(self).set(end_pin);
+                    self.link_requested.call(&());
                 }
             }
         }
@@ -1683,33 +1638,12 @@ impl NodeEditorOverlay {
                     // Clear link creation visual
                     Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
 
-                    if end_pin != 0 && Self::pins_compatible(start_pin, end_pin) {
-                        // Normalize: output pin first, input pin second
-                        let (output_pin, input_pin) = if pin_id::is_output(start_pin) {
-                            (start_pin, end_pin)
-                        } else {
-                            (end_pin, start_pin)
-                        };
-
-                        // Check if link already exists between these pins
-                        let state = self.data.state.borrow();
-                        let already_exists = Self::link_exists(&state, output_pin, input_pin);
-                        drop(state);
-
-                        if already_exists {
-                            // Don't create duplicate link
-                            self.link_dropped.call(&());
-                        } else {
-                            // Set the created link properties
-                            Self::FIELD_OFFSETS.created_link_start_pin.apply_pin(self).set(output_pin);
-                            Self::FIELD_OFFSETS.created_link_end_pin.apply_pin(self).set(input_pin);
-
-                            // Emit link_created callback
-                            self.link_created.call(&());
-                        }
-                    } else {
-                        // Dropped on empty space or incompatible pin
-                        self.link_dropped.call(&());
+                    // Notify application of link request
+                    // Application will validate compatibility and duplicates
+                    if end_pin != 0 {
+                        Self::FIELD_OFFSETS.requested_link_start_pin.apply_pin(self).set(start_pin);
+                        Self::FIELD_OFFSETS.requested_link_end_pin.apply_pin(self).set(end_pin);
+                        self.link_requested.call(&());
                     }
                     return InputEventResult::EventAccepted;
                 }
@@ -1958,19 +1892,6 @@ impl NodeEditorOverlay {
         }
 
         0 // No pin found
-    }
-
-    /// Check if two pins are compatible for linking (one input, one output)
-    fn pins_compatible(start_pin: i32, end_pin: i32) -> bool {
-        pin_id::are_compatible(start_pin, end_pin)
-    }
-
-    /// Check if a link already exists between two pins
-    /// Takes normalized pin IDs (output_pin, input_pin)
-    fn link_exists(state: &NodeEditorState, output_pin: i32, input_pin: i32) -> bool {
-        state.links.values().any(|link| {
-            link.start_pin_id == output_pin && link.end_pin_id == input_pin
-        })
     }
 
     /// Find a link at the given position, returns link ID or -1 if no link found
