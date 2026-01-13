@@ -493,6 +493,9 @@ pub struct NodeEditorBackground {
     pub link_at_result: Property<i32>,
     pub handle_link_query: Callback<()>,
 
+    // Callback to process pending reports (triggered by changed handlers)
+    pub process_pending_reports_callback: Callback<()>,
+
     /// Internal state for grid caching
     data: BackgroundDataBox,
 
@@ -507,6 +510,16 @@ impl Item for NodeEditorBackground {
             move |()| {
                 if let Some(self_rc) = self_weak.upgrade() {
                     Self::invoke_handle_link_query(&self_rc);
+                }
+            }
+        });
+
+        // Set up callback for processing pending reports (called by changed handlers in Slint)
+        Self::FIELD_OFFSETS.process_pending_reports_callback.apply_pin(self).set_handler({
+            let self_weak = _self_rc.downgrade();
+            move |()| {
+                if let Some(self_rc) = self_weak.upgrade() {
+                    Self::invoke_process_pending_reports(&self_rc);
                 }
             }
         });
@@ -824,6 +837,13 @@ impl NodeEditorBackground {
     fn invoke_handle_link_query(item_rc: &ItemRc) {
         if let Some(bg) = item_rc.downcast::<NodeEditorBackground>() {
             bg.as_pin_ref().handle_link_query();
+        }
+    }
+
+    /// Invoke process_pending_reports via ItemRc (for property change handlers)
+    fn invoke_process_pending_reports(item_rc: &ItemRc) {
+        if let Some(bg) = item_rc.downcast::<NodeEditorBackground>() {
+            bg.as_pin_ref().process_pending_reports();
         }
     }
 }

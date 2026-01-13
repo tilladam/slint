@@ -804,6 +804,15 @@ export component NodeEditorBackground inherits Empty {
     /// Callback to trigger link query (call after setting query properties)
     callback handle-link-query();
 
+    /// Callback to process pending reports (called by changed handlers)
+    callback process-pending-reports-callback();
+
+    // Process pending reports immediately when batches change
+    // This ensures links appear as soon as they're created
+    changed pending-links-batch => { process-pending-reports-callback(); }
+    changed pending-pins-batch => { process-pending-reports-callback(); }
+    changed pending-node-rects-batch => { process-pending-reports-callback(); }
+
     //-default_size_binding:expands_to_parent_geometry
 }
 
