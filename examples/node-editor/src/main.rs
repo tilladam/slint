@@ -136,6 +136,114 @@ fn build_filter_node_rects_batch(window: &MainWindow, filter_nodes: &VecModel<Fi
         .join(";")
 }
 
+/// Compute graph bounds from all nodes
+fn compute_graph_bounds(
+    nodes: &VecModel<NodeData>,
+    filter_nodes: &VecModel<FilterNodeData>,
+    window: &MainWindow,
+) -> (f32, f32, f32, f32) {
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+
+    // Get node dimensions from Slint
+    let node_width = window.invoke_compute_node_screen_width();
+    let node_height = window.invoke_compute_node_screen_height();
+    let filter_width = window.invoke_compute_filter_screen_width();
+    let filter_height = window.invoke_compute_filter_screen_height();
+
+    // Process simple nodes
+    for i in 0..nodes.row_count() {
+        if let Some(node) = nodes.row_data(i) {
+            min_x = min_x.min(node.world_x);
+            min_y = min_y.min(node.world_y);
+            max_x = max_x.max(node.world_x + node_width);
+            max_y = max_y.max(node.world_y + node_height);
+        }
+    }
+
+    // Process filter nodes
+    for i in 0..filter_nodes.row_count() {
+        if let Some(node) = filter_nodes.row_data(i) {
+            min_x = min_x.min(node.world_x);
+            min_y = min_y.min(node.world_y);
+            max_x = max_x.max(node.world_x + filter_width);
+            max_y = max_y.max(node.world_y + filter_height);
+        }
+    }
+
+    // Return sensible defaults if no nodes
+    if min_x == f32::MAX {
+        (0.0, 0.0, 1600.0, 1200.0)
+    } else {
+        // Add some padding to bounds
+        (min_x - 50.0, min_y - 50.0, max_x + 50.0, max_y + 50.0)
+    }
+}
+
+/// Build minimap nodes from all nodes
+fn build_minimap_nodes(
+    nodes: &VecModel<NodeData>,
+    filter_nodes: &VecModel<FilterNodeData>,
+    window: &MainWindow,
+) -> ModelRc<MinimapNode> {
+    let mut minimap_nodes = Vec::new();
+
+    let node_width = window.invoke_compute_node_screen_width();
+    let node_height = window.invoke_compute_node_screen_height();
+    let filter_width = window.invoke_compute_filter_screen_width();
+    let filter_height = window.invoke_compute_filter_screen_height();
+
+    // Add simple nodes
+    for i in 0..nodes.row_count() {
+        if let Some(node) = nodes.row_data(i) {
+            minimap_nodes.push(MinimapNode {
+                id: node.id,
+                x: node.world_x,
+                y: node.world_y,
+                width: node_width,
+                height: node_height,
+                color: Color::from_rgb_u8(80, 120, 200), // Blue for simple nodes
+            });
+        }
+    }
+
+    // Add filter nodes
+    for i in 0..filter_nodes.row_count() {
+        if let Some(node) = filter_nodes.row_data(i) {
+            minimap_nodes.push(MinimapNode {
+                id: node.id,
+                x: node.world_x,
+                y: node.world_y,
+                width: filter_width,
+                height: filter_height,
+                color: Color::from_rgb_u8(200, 120, 80), // Orange for filter nodes
+            });
+        }
+    }
+
+    Rc::new(VecModel::from(minimap_nodes)).into()
+}
+
+/// Update minimap data (nodes and bounds)
+fn update_minimap_data(
+    window: &MainWindow,
+    nodes: &VecModel<NodeData>,
+    filter_nodes: &VecModel<FilterNodeData>,
+) {
+    // Build minimap nodes
+    let minimap_nodes = build_minimap_nodes(nodes, filter_nodes, window);
+    window.set_minimap_nodes(minimap_nodes);
+
+    // Compute and set graph bounds
+    let (min_x, min_y, max_x, max_y) = compute_graph_bounds(nodes, filter_nodes, window);
+    window.set_graph_min_x(min_x);
+    window.set_graph_min_y(min_y);
+    window.set_graph_max_x(max_x);
+    window.set_graph_max_y(max_y);
+}
+
 /// Build filter node pins batch string using Slint-computed positions
 /// Filter nodes have 3 pins: data-input (1), data-output (2), control-input (3)
 ///
@@ -323,6 +431,12 @@ fn main() {
         format!("{};{}", simple_pins, filter_pins)
     };
     window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
+
+    // Enable minimap
+    window.set_minimap_enabled(true);
+
+    // Set initial minimap data
+    update_minimap_data(&window, &nodes, &filter_nodes);
 
     // Pure callback to check if a node is selected (queries core's selection state)
     // This is called by Slint during rendering to determine node highlight state
@@ -577,6 +691,9 @@ fn main() {
             format!("{};{}", simple_pins, filter_pins)
         };
         window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
+
+        // Update minimap data
+        update_minimap_data(&window, &nodes_for_drag, &filter_nodes_for_drag);
     });
 
     // Handle deleting selected nodes
@@ -662,6 +779,9 @@ fn main() {
                 .join(",");
             window.set_pending_deleted_link_ids(SharedString::from(deleted_ids_str.as_str()));
         }
+
+        // Update minimap data
+        update_minimap_data(&window, &nodes_for_delete, &filter_nodes_for_delete);
     });
 
     // Handle deleting selected links
@@ -713,6 +833,7 @@ fn main() {
 
     // Handle adding new nodes (Ctrl+N)
     let nodes_for_add = nodes.clone();
+    let filter_nodes_for_add = filter_nodes.clone();
     let next_node_id_for_add = next_node_id.clone();
     let window_for_add = window.as_weak();
     window.on_add_node(move || {
@@ -732,6 +853,9 @@ fn main() {
             world_x: window.invoke_snap_to_grid(192.0 + (id as f32 * 48.0) % 384.0),
             world_y: window.invoke_snap_to_grid(192.0 + (id as f32 * 24.0) % 288.0),
         });
+
+        // Update minimap data
+        update_minimap_data(&window, &nodes_for_add, &filter_nodes_for_add);
     });
 
     // Box selection is now fully handled by the overlay

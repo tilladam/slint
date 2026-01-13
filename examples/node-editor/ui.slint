@@ -16,7 +16,7 @@
 // 2. Add links as children (using Link component)
 // 3. Handle callbacks for link creation, selection changes, etc.
 
-import { NodeEditor, Link, Pin, PinTypes, PinId } from "node_editor_lib.slint";
+import { NodeEditor, Link, Pin, PinTypes, PinId, MinimapNode } from "node_editor_lib.slint";
 
 // Node layout constants - single source of truth
 // These are exported so Rust can access them
@@ -338,6 +338,14 @@ export component MainWindow inherits Window {
     // Batch of pending pin positions to register (set from Rust)
     // Format: "pin_id,x,y;..." where x,y are screen coordinates
     in-out property <string> pending-pins-batch <=> editor.pending-pins-batch;
+
+    // === Minimap properties ===
+    in property <bool> minimap-enabled <=> editor.minimap-enabled;
+    in property <[MinimapNode]> minimap-nodes <=> editor.minimap-nodes;
+    in-out property <length> graph-min-x <=> editor.graph-min-x;
+    in-out property <length> graph-min-y <=> editor.graph-min-y;
+    in-out property <length> graph-max-x <=> editor.graph-max-x;
+    in-out property <length> graph-max-y <=> editor.graph-max-y;
 
     // Callback to report a link to the editor (called from Rust on init)
     callback report-link(int, int, int, color);  // id, start-pin-id, end-pin-id, color

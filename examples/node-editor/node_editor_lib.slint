@@ -75,6 +75,192 @@ export global PinId {
     }
 }
 
+/// Simplified node representation for minimap rendering.
+/// Contains only the essential positioning and identification data.
+export struct MinimapNode {
+    /// Unique node identifier
+    id: int,
+    /// X position in graph coordinates
+    x: length,
+    /// Y position in graph coordinates
+    y: length,
+    /// Node width
+    width: length,
+    /// Node height
+    height: length,
+    /// Optional per-node color for minimap rendering
+    color: color,
+}
+
+/// Positioning options for minimap placement within the NodeEditor.
+export enum MinimapPosition {
+    /// Top-left corner
+    top-left,
+    /// Top-right corner
+    top-right,
+    /// Bottom-left corner
+    bottom-left,
+    /// Bottom-right corner
+    bottom-right,
+}
+
+/// Minimap component for bird's-eye view of the node graph.
+///
+/// Displays a scaled-down overview of all nodes and the current viewport.
+/// Coordinates are automatically transformed from graph space to minimap space.
+///
+/// Example usage:
+/// ```slint
+/// Minimap {
+///     nodes: minimap-nodes;
+///     viewport-x: editor.pan-x;
+///     viewport-y: editor.pan-y;
+///     viewport-zoom: editor.zoom;
+///     viewport-width: editor.width;
+///     viewport-height: editor.height;
+///     graph-min-x: 0px;
+///     graph-min-y: 0px;
+///     graph-max-x: 2000px;
+///     graph-max-y: 1500px;
+/// }
+/// ```
+export component Minimap inherits Rectangle {
+    // === Data Input ===
+    /// Node rectangles (simplified)
+    in property <[MinimapNode]> nodes;
+
+    // === Viewport State ===
+    /// Current pan offset X (from NodeEditor)
+    in property <length> viewport-x;
+    /// Current pan offset Y (from NodeEditor)
+    in property <length> viewport-y;
+    /// Current zoom level (from NodeEditor)
+    in property <float> viewport-zoom: 1.0;
+    /// Canvas width (from NodeEditor)
+    in property <length> viewport-width;
+    /// Canvas height (from NodeEditor)
+    in property <length> viewport-height;
+
+    // === Graph Bounds ===
+    /// Minimum X coordinate of the graph
+    in property <length> graph-min-x;
+    /// Minimum Y coordinate of the graph
+    in property <length> graph-min-y;
+    /// Maximum X coordinate of the graph
+    in property <length> graph-max-x;
+    /// Maximum Y coordinate of the graph
+    in property <length> graph-max-y;
+
+    // === Styling ===
+    /// Minimap width
+    in property <length> minimap-width: 200px;
+    /// Minimap height
+    in property <length> minimap-height: 150px;
+    /// Background color (semi-transparent)
+    in property <color> minimap-background-color: #1a1a1aee;
+    /// Node color
+    in property <color> minimap-node-color: #4a4a4a;
+    /// Viewport border color
+    in property <color> minimap-viewport-border-color: #ffffff;
+    /// Viewport border width
+    in property <length> minimap-viewport-border-width: 2px;
+    /// Border color
+    in property <color> minimap-border-color: #333333;
+    /// Border width
+    in property <length> minimap-border-width: 1px;
+    /// Internal padding
+    in property <length> minimap-padding: 8px;
+
+    // === Interaction ===
+    /// Callback fired when user clicks minimap to navigate
+    /// Parameters: graph-x, graph-y (center position to navigate to)
+    callback navigate-to(/* graph-x */ length, /* graph-y */ length);
+
+    // === Coordinate Transformation ===
+    /// Graph width (computed)
+    property <length> graph-width: max(root.graph-max-x - root.graph-min-x, 1px);
+    /// Graph height (computed)
+    property <length> graph-height: max(root.graph-max-y - root.graph-min-y, 1px);
+
+    /// Available minimap rendering area width
+    property <length> available-width: root.minimap-width - 2 * root.minimap-padding;
+    /// Available minimap rendering area height
+    property <length> available-height: root.minimap-height - 2 * root.minimap-padding;
+
+    /// Scale factor to fit graph into minimap
+    property <float> scale: min(
+        root.available-width / root.graph-width,
+        root.available-height / root.graph-height
+    );
+
+    // === Viewport in Graph Coordinates ===
+    /// Visible area minimum X in graph coordinates
+    property <length> visible-min-x: -root.viewport-x / root.viewport-zoom;
+    /// Visible area minimum Y in graph coordinates
+    property <length> visible-min-y: -root.viewport-y / root.viewport-zoom;
+    /// Visible area maximum X in graph coordinates
+    property <length> visible-max-x: root.visible-min-x + (root.viewport-width / root.viewport-zoom);
+    /// Visible area maximum Y in graph coordinates
+    property <length> visible-max-y: root.visible-min-y + (root.viewport-height / root.viewport-zoom);
+
+    // === Viewport Indicator in Minimap Coordinates ===
+    property <length> viewport-indicator-x: root.minimap-padding + (root.visible-min-x - root.graph-min-x) * root.scale;
+    property <length> viewport-indicator-y: root.minimap-padding + (root.visible-min-y - root.graph-min-y) * root.scale;
+    property <length> viewport-indicator-width: (root.visible-max-x - root.visible-min-x) * root.scale;
+    property <length> viewport-indicator-height: (root.visible-max-y - root.visible-min-y) * root.scale;
+
+    // === Minimap Container ===
+    width: root.minimap-width;
+    height: root.minimap-height;
+    background: root.minimap-background-color;
+    border-color: root.minimap-border-color;
+    border-width: root.minimap-border-width;
+    border-radius: 4px;
+
+    // === Node Rectangles ===
+    for node in root.nodes: Rectangle {
+        // Transform graph coordinates to minimap coordinates
+        x: root.minimap-padding + (node.x - root.graph-min-x) * root.scale;
+        y: root.minimap-padding + (node.y - root.graph-min-y) * root.scale;
+        width: node.width * root.scale;
+        height: node.height * root.scale;
+
+        // Use per-node color if set, otherwise default
+        background: node.color.alpha > 0 ? node.color : root.minimap-node-color;
+    }
+
+    // === Viewport Indicator ===
+    Rectangle {
+        x: root.viewport-indicator-x;
+        y: root.viewport-indicator-y;
+        width: root.viewport-indicator-width;
+        height: root.viewport-indicator-height;
+
+        // Transparent fill, visible border only
+        background: transparent;
+        border-color: root.minimap-viewport-border-color;
+        border-width: root.minimap-viewport-border-width;
+    }
+
+    // === Click-to-Navigate Interaction ===
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: MouseCursor.pointer;
+
+        clicked => {
+            // Convert minimap coordinates to graph coordinates
+            // Step 1: Remove padding offset
+            // Step 2: Convert from minimap scale to graph scale
+            // Step 3: Add graph offset
+            root.navigate-to(
+                root.graph-min-x + ((self.mouse-x - root.minimap-padding) / root.scale),
+                root.graph-min-y + ((self.mouse-y - root.minimap-padding) / root.scale)
+            );
+        }
+    }
+}
+
 /// A bezier link between two pins using core-generated SVG path commands.
 export component Link inherits Path {
     /// SVG path commands from core's bezier calculation
@@ -215,6 +401,32 @@ export component NodeEditor {
     in property <float> min-zoom: 0.1;
     /// Maximum zoom level
     in property <float> max-zoom: 3.0;
+
+    // === Minimap configuration ===
+    /// Enable minimap rendering and interaction
+    in property <bool> minimap-enabled: false;
+    /// Position of the minimap within the editor
+    in property <MinimapPosition> minimap-position: MinimapPosition.bottom-right;
+
+    // === Minimap data ===
+    /// Simplified node data for minimap rendering (populated by application)
+    in property <[MinimapNode]> minimap-nodes: [];
+
+    // === Graph bounds (set by application for minimap rendering) ===
+    /// Minimum X coordinate of the graph (set by application or computed from nodes)
+    in-out property <length> graph-min-x: 0px;
+    /// Minimum Y coordinate of the graph (set by application or computed from nodes)
+    in-out property <length> graph-min-y: 0px;
+    /// Maximum X coordinate of the graph (set by application or computed from nodes)
+    in-out property <length> graph-max-x: 1600px;
+    /// Maximum Y coordinate of the graph (set by application or computed from nodes)
+    in-out property <length> graph-max-y: 1200px;
+
+    // === Viewport dimensions (for minimap) ===
+    /// Viewport width (canvas width)
+    out property <length> viewport-width: root.width;
+    /// Viewport height (canvas height)
+    out property <length> viewport-height: root.height;
 
     // === Node drag state (set during node drag for link position updates) ===
     /// Whether nodes are currently being dragged
@@ -385,6 +597,31 @@ export component NodeEditor {
         );
     }
 
+    // === Minimap Positioning ===
+    /// Minimap size (used for positioning calculations)
+    property <length> minimap-size-width: 200px;
+    property <length> minimap-size-height: 150px;
+    /// Margin from edges
+    property <length> minimap-margin: 16px;
+
+    /// Compute minimap X position based on minimap-position
+    pure function compute-minimap-x() -> length {
+        if (root.minimap-position == MinimapPosition.top-left || root.minimap-position == MinimapPosition.bottom-left) {
+            return root.minimap-margin;
+        } else {
+            return root.width - root.minimap-size-width - root.minimap-margin;
+        }
+    }
+
+    /// Compute minimap Y position based on minimap-position
+    pure function compute-minimap-y() -> length {
+        if (root.minimap-position == MinimapPosition.top-left || root.minimap-position == MinimapPosition.top-right) {
+            return root.minimap-margin;
+        } else {
+            return root.height - root.minimap-size-height - root.minimap-margin;
+        }
+    }
+
     // === Layer 1: Background ===
     background-layer := NodeEditorBackground {
         width: 100%;
@@ -476,5 +713,37 @@ export component NodeEditor {
         viewbox-y: 0;
         viewbox-width: max(self.width / 1px, 1);
         viewbox-height: max(self.height / 1px, 1);
+    }
+
+    // === Minimap (on top) ===
+    if root.minimap-enabled: Minimap {
+        x: root.compute-minimap-x();
+        y: root.compute-minimap-y();
+
+        // Data
+        nodes: root.minimap-nodes;
+
+        // Viewport state
+        viewport-x: root.pan-x;
+        viewport-y: root.pan-y;
+        viewport-zoom: root.zoom;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+
+        // Graph bounds
+        graph-min-x: root.graph-min-x;
+        graph-min-y: root.graph-min-y;
+        graph-max-x: root.graph-max-x;
+        graph-max-y: root.graph-max-y;
+
+        // Size
+        minimap-width: root.minimap-size-width;
+        minimap-height: root.minimap-size-height;
+
+        // Navigation callback - center clicked position in viewport
+        navigate-to(graph-x, graph-y) => {
+            root.pan-x = -graph-x * root.zoom + (root.viewport-width / 2);
+            root.pan-y = -graph-y * root.zoom + (root.viewport-height / 2);
+        }
     }
 }
