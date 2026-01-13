@@ -533,6 +533,18 @@ export component MainWindow inherits Window {
             root.link-positions-updated();
         }
 
+        // Links - children of NodeEditor (RENDERED FIRST so they appear BELOW nodes)
+        // Uses core-generated bezier path commands (hybrid architecture)
+        // Path commands are looked up from core via pure callback (not from model)
+        for link-data in links: Link {
+            path-commands: get-link-path-commands(link-data.id);
+            // Highlight link when selected (cyan) or hovered (white)
+            link-color: is-link-selected(link-data.id) ? #00ffff :
+                        link-data.id == hovered-link-id ? #ffffff : link-data.color;
+            line-width: is-link-selected(link-data.id) ? 4px * zoom :
+                        link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
+        }
+
         // Nodes - children of NodeEditor
         // Selection state comes from core via is-node-selected callback (not stored in model)
         for node-data in nodes: Node {
@@ -676,18 +688,6 @@ export component MainWindow inherits Window {
             reset-clicked(id) => {
                 root.filter-reset(id);
             }
-        }
-
-        // Links - children of NodeEditor
-        // Uses core-generated bezier path commands (hybrid architecture)
-        // Path commands are looked up from core via pure callback (not from model)
-        for link-data in links: Link {
-            path-commands: get-link-path-commands(link-data.id);
-            // Highlight link when selected (cyan) or hovered (white)
-            link-color: is-link-selected(link-data.id) ? #00ffff :
-                        link-data.id == hovered-link-id ? #ffffff : link-data.color;
-            line-width: is-link-selected(link-data.id) ? 4px * zoom :
-                        link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
         }
     }
 
