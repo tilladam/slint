@@ -877,6 +877,38 @@ export component NodeEditor {
         return value;
     }
 
+    // === Selection Checking Callbacks ===
+    // NOTE: These callbacks should be implemented by the application in Rust/JavaScript
+    // because Slint pure functions cannot parse comma-separated strings.
+    //
+    // Standard implementation pattern for main.rs:
+    //
+    //   window.on_is_selected(move |node_id| {
+    //       let window = window_weak.upgrade()?;
+    //       window.get_current_selected_ids()
+    //           .split(',')
+    //           .filter_map(|s| s.trim().parse::<i32>().ok())
+    //           .any(|id| id == node_id)
+    //   });
+    //
+    //   window.on_is_link_selected(move |link_id| {
+    //       let window = window_weak.upgrade()?;
+    //       window.get_current_selected_link_ids()
+    //           .split(',')
+    //           .filter_map(|s| s.trim().parse::<i32>().ok())
+    //           .any(|id| id == link_id)
+    //   });
+
+    /// Check if a node is currently selected
+    /// Applications must implement this callback to parse current-selected-ids
+    /// See documentation above for standard implementation pattern
+    pure callback is-selected(/* node-id */ int) -> bool;
+
+    /// Check if a link is currently selected
+    /// Applications must implement this callback to parse current-selected-link-ids
+    /// See documentation above for standard implementation pattern
+    pure callback is-link-selected(/* link-id */ int) -> bool;
+
     /// Start node drag - call from node drag-started handler
     /// Handles selection updates and initializes drag state
     /// Applications should wire: drag-started(id, already-selected) => { editor.start-node-drag(id, already-selected); }

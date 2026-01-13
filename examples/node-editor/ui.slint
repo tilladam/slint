@@ -150,7 +150,8 @@ export component MainWindow inherits Window {
     callback filter-toggle-enabled(int);      // node-id
     callback filter-reset(int);               // node-id
 
-    // Pure callback to check if a node is selected (checks core's selection state)
+    // Pure callback to check if a node is selected
+    // Forward to editor's built-in is-selected callback
     pure callback is-node-selected(int) -> bool;
 
     // Pure function to snap a value to the grid
@@ -337,6 +338,10 @@ export component MainWindow inherits Window {
         // Set pin hit radius from globals (eliminates hardcoded default in core)
         pin-hit-radius: NodeConstants.pin-size * zoom * 0.66;
 
+        // Forward selection checking callbacks to editor
+        is-selected(node-id) => { return root.is-node-selected(node-id); }
+        is-link-selected(link-id) => { return root.is-link-selected(link-id); }
+
         // Drag state is now managed internally by NodeEditor
 
         link-requested => {
@@ -385,23 +390,23 @@ export component MainWindow inherits Window {
         for link-data in links: Link {
             path-commands: get-link-path-commands(link-data.id);
             // Highlight link when selected (cyan) or hovered (white)
-            link-color: is-link-selected(link-data.id) ? #00ffff :
+            link-color: editor.is-link-selected(link-data.id) ? #00ffff :
                         link-data.id == hovered-link-id ? #ffffff : link-data.color;
-            line-width: is-link-selected(link-data.id) ? 4px * zoom :
+            line-width: editor.is-link-selected(link-data.id) ? 4px * zoom :
                         link-data.id == hovered-link-id ? 4px * zoom : 3px * zoom;
         }
 
         // Nodes - children of NodeEditor
-        // Selection state comes from core via is-node-selected callback (not stored in model)
+        // Selection state comes from editor via is-selected callback
         for node-data in nodes: Node {
             title: node-data.title;
             node-id: node-data.id;
-            selected: root.is-node-selected(node-data.id);
+            selected: editor.is-selected(node-data.id);
             world-x: node-data.world-x * 1px;
             world-y: node-data.world-y * 1px;
             // Drag offset is managed by editor and applied to selected nodes automatically
-            drag-offset-x: root.is-node-selected(node-data.id) ? editor.drag-offset-x : 0px;
-            drag-offset-y: root.is-node-selected(node-data.id) ? editor.drag-offset-y : 0px;
+            drag-offset-x: editor.is-selected(node-data.id) ? editor.drag-offset-x : 0px;
+            drag-offset-y: editor.is-selected(node-data.id) ? editor.drag-offset-y : 0px;
             zoom: zoom;
             pan-x: pan-x;
             pan-y: pan-y;
@@ -451,12 +456,12 @@ export component MainWindow inherits Window {
         for filter-data in filter-nodes: FilterNode {
             title: filter-data.title;
             node-id: filter-data.id;
-            selected: root.is-node-selected(filter-data.id);
+            selected: editor.is-selected(filter-data.id);
             world-x: filter-data.world-x * 1px;
             world-y: filter-data.world-y * 1px;
             // Drag offset is managed by editor and applied to selected nodes automatically
-            drag-offset-x: root.is-node-selected(filter-data.id) ? editor.drag-offset-x : 0px;
-            drag-offset-y: root.is-node-selected(filter-data.id) ? editor.drag-offset-y : 0px;
+            drag-offset-x: editor.is-selected(filter-data.id) ? editor.drag-offset-x : 0px;
+            drag-offset-y: editor.is-selected(filter-data.id) ? editor.drag-offset-y : 0px;
             zoom: zoom;
             pan-x: pan-x;
             pan-y: pan-y;
