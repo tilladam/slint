@@ -889,16 +889,8 @@ export component NodeEditorOverlay inherits Empty {
     in property <int> target-pin-id;
 
     // === Pin position reporting (for hit-testing during link creation) ===
-    /// Pin ID being reported (set before calling pin-position-changed)
-    in property <int> reporting-pin-id;
-    /// X position of pin being reported (in screen coordinates)
-    in property <length> reporting-pin-x;
-    /// Y position of pin being reported (in screen coordinates)
-    in property <length> reporting-pin-y;
     /// Hit radius for pin detection (0 = auto-compute based on pin size and zoom)
     in property <length> pin-hit-radius;
-    /// Callback when a pin reports its position - set reporting-pin-* properties first
-    callback pin-position-changed();
     /// Batch of pending pin positions to register (format: "id,x,y;...")
     /// Used when multiple pins report positions at once (e.g., on viewport change)
     in-out property <string> pending-pins-batch;

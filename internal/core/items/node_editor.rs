@@ -968,16 +968,8 @@ pub struct NodeEditorOverlay {
     pub target_pin_id: Property<i32>,
 
     // === Pin position reporting (for hit-testing during link creation) ===
-    /// Pin ID being reported (set before calling pin-position-changed)
-    pub reporting_pin_id: Property<i32>,
-    /// X position of pin being reported (in screen coordinates)
-    pub reporting_pin_x: Property<LogicalLength>,
-    /// Y position of pin being reported (in screen coordinates)
-    pub reporting_pin_y: Property<LogicalLength>,
     /// Hit radius for pin detection
     pub pin_hit_radius: Property<LogicalLength>,
-    /// Callback when a pin reports its position
-    pub pin_position_changed: Callback<()>,
     /// Batch of pending pin positions to register (format: "id,x,y;...")
     /// Used when multiple pins report positions at once (e.g., on viewport change)
     pub pending_pins_batch: Property<SharedString>,
@@ -1361,22 +1353,6 @@ impl NodeEditorOverlay {
     /// This is called from render() to ensure reports are processed even without input events
     fn process_pending_reports(self: Pin<&Self>) {
         // NOTE: Link regeneration is now handled by NodeEditorBackground
-
-        // Check if a Pin component is reporting its position (single pin - deprecated)
-        // This is kept for backward compatibility but batch reporting is preferred
-        let reporting_pin = self.reporting_pin_id();
-        if reporting_pin > 0 {
-            let pin_x = self.reporting_pin_x().get();
-            let pin_y = self.reporting_pin_y().get();
-
-            // Store the pin relative offset (treating reported values as relative offsets)
-            let mut state = self.data.state.borrow_mut();
-            state.pin_relative_offsets.insert(reporting_pin, (pin_x, pin_y));
-            drop(state);
-
-            // Clear the reporting trigger
-            Self::FIELD_OFFSETS.reporting_pin_id.apply_pin(self).set(0);
-        }
 
         // Check for batch pin relative offset reports (format: "id,rel_x,rel_y;...")
         let pins_batch = self.pending_pins_batch();

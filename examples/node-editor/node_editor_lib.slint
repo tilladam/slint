@@ -650,9 +650,6 @@ export component NodeEditor {
     in property <int> target-pin-id <=> overlay.target-pin-id;
 
     // === Input: Pin position reporting ===
-    in property <int> reporting-pin-id <=> overlay.reporting-pin-id;
-    in property <length> reporting-pin-x <=> overlay.reporting-pin-x;
-    in property <length> reporting-pin-y <=> overlay.reporting-pin-y;
     in property <length> pin-hit-radius <=> overlay.pin-hit-radius;
     // NOTE: Pin positions need to go to BOTH Background (for link rendering) AND Overlay (for pin hit-testing)
     in-out property <string> pending-pins-batch;
