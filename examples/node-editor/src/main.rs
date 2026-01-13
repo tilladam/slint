@@ -63,72 +63,6 @@ fn build_node_rects_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> St
         .join(";")
 }
 
-/// Get pin screen position for a given pin ID using Slint-computed positions
-fn get_pin_position(window: &MainWindow, nodes: &VecModel<NodeData>, pin_id: i32) -> Option<(f32, f32)> {
-    // Pin ID encoding and compatibility logic: see PinId global in node_editor_lib.slint
-    // Core provides type-agnostic utilities in pin_id module
-    let node_id = pin_id / 10;
-    let pin_type = pin_id % 10;
-
-    for i in 0..nodes.row_count() {
-        if let Some(node) = nodes.row_data(i) {
-            if node.id == node_id {
-                let (x, y) = if pin_type == 1 {
-                    // Input pin (PinTypes.input == 1)
-                    (window.invoke_compute_input_pin_x(node.world_x),
-                     window.invoke_compute_input_pin_y(node.world_y))
-                } else {
-                    // Output pin (PinTypes.output == 2)
-                    (window.invoke_compute_output_pin_x(node.world_x),
-                     window.invoke_compute_output_pin_y(node.world_y))
-                };
-                return Some((x, y));
-            }
-        }
-    }
-    None
-}
-
-/// Build bezier path commands for all links using Slint-computed positions
-/// Format: "id|path_commands|color_argb;..."
-fn build_link_bezier_paths(
-    window: &MainWindow,
-    nodes: &VecModel<NodeData>,
-    links: &VecModel<LinkData>,
-) -> String {
-    let zoom = window.get_zoom();
-    links
-        .iter()
-        .filter_map(|link| {
-            let start_pos = get_pin_position(window, nodes, link.start_pin_id)?;
-            let end_pos = get_pin_position(window, nodes, link.end_pin_id)?;
-
-            // Generate bezier path command
-            let (start_x, start_y) = start_pos;
-            let (end_x, end_y) = end_pos;
-
-            // Horizontal distance determines control point offset
-            let dx = (end_x - start_x).abs();
-            let offset = (dx * 0.5).max(50.0 * zoom);
-
-            // Output pin (start) curves right, input pin (end) curves left
-            let ctrl1_x = start_x + offset;
-            let ctrl1_y = start_y;
-            let ctrl2_x = end_x - offset;
-            let ctrl2_y = end_y;
-
-            let path_cmd = format!(
-                "M {} {} C {} {} {} {} {} {}",
-                start_x, start_y, ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, end_x, end_y
-            );
-
-            let color_argb = link.color.as_argb_encoded();
-            Some(format!("{}|{}|{}", link.id, path_cmd, color_argb))
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
 /// Build filter node rects batch string using Slint-computed positions
 /// Format: "id,screen_x,screen_y,width,height;..."
 fn build_filter_node_rects_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNodeData>) -> String {
@@ -418,11 +352,6 @@ fn main() {
         &build_filter_node_rects_batch(&window, &filter_nodes),
     );
     window.set_pending_node_rects_batch(SharedString::from(node_rects_batch.as_str()));
-
-    // Set initial bezier paths directly so links are visible on first render
-    // (The overlay processes batches during render, which is too late for initial display)
-    let bezier_paths = build_link_bezier_paths(&window, &nodes, &links);
-    window.set_link_bezier_paths(SharedString::from(bezier_paths.as_str()));
 
     // Build combined pins batch (simple nodes + filter nodes)
     let pins_batch = combine_batches(
