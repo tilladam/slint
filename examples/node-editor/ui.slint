@@ -114,12 +114,14 @@ component Node inherits BaseNode {
         y: (8px + 24px + 8px) * root.zoom;  // below title bar
         pin-id: root.input-pin-id;
         zoom: root.zoom;
+        node-screen-x: root.screen-x;
+        node-screen-y: root.screen-y;
         base-color: #4CAF50;
         hover-color: #66BB6A;
         base-size: NodeConstants.pin-size;
-        drag-started(id, x, y) => { root.pin-drag-started(id, root.screen-x + x, root.screen-y + y); }
-        drag-moved(id, x, y) => { root.pin-drag-moved(id, root.screen-x + x, root.screen-y + y); }
-        drag-ended(id, x, y) => { root.pin-drag-ended(id, root.screen-x + x, root.screen-y + y); }
+        drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
     }
 
     // Output pin (blue) - with drag-to-link support (on top of body TouchArea)
@@ -128,12 +130,14 @@ component Node inherits BaseNode {
         y: (8px + 24px + 8px) * root.zoom;  // below title bar
         pin-id: root.output-pin-id;
         zoom: root.zoom;
+        node-screen-x: root.screen-x;
+        node-screen-y: root.screen-y;
         base-color: #2196F3;
         hover-color: #42A5F5;
         base-size: NodeConstants.pin-size;
-        drag-started(id, x, y) => { root.pin-drag-started(id, root.screen-x + x, root.screen-y + y); }
-        drag-moved(id, x, y) => { root.pin-drag-moved(id, root.screen-x + x, root.screen-y + y); }
-        drag-ended(id, x, y) => { root.pin-drag-ended(id, root.screen-x + x, root.screen-y + y); }
+        drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
     }
 }
 

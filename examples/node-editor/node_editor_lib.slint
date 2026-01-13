@@ -480,6 +480,11 @@ export component Pin inherits Rectangle {
     /// Base size before zoom scaling
     in property <length> base-size: 12px;
 
+    /// Parent node's screen X position (for coordinate offset calculation)
+    in property <length> node-screen-x: 0px;
+    /// Parent node's screen Y position (for coordinate offset calculation)
+    in property <length> node-screen-y: 0px;
+
     // Computed properties
     property <length> pin-size: base-size * zoom;
     property <length> pin-radius: pin-size / 2;
@@ -489,11 +494,14 @@ export component Pin inherits Rectangle {
     /// Center Y position in parent coordinates (for link attachment)
     out property <length> center-y: self.y + pin-radius;
 
-    /// Fired when drag starts (pin-id, x, y in parent coordinates)
+    /// Fired when drag starts (pin-id, screen-x, screen-y)
+    /// Coordinates are already offset by node position
     callback drag-started(int, length, length);
-    /// Fired during drag (pin-id, x, y in parent coordinates)
+    /// Fired during drag (pin-id, screen-x, screen-y)
+    /// Coordinates are already offset by node position
     callback drag-moved(int, length, length);
-    /// Fired when drag ends (pin-id, x, y in parent coordinates)
+    /// Fired when drag ends (pin-id, screen-x, screen-y)
+    /// Coordinates are already offset by node position
     callback drag-ended(int, length, length);
 
     // Rectangle styling
@@ -509,18 +517,23 @@ export component Pin inherits Rectangle {
         pointer-event(event) => {
             if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                 drag-active = true;
-                root.drag-started(pin-id, center-x, center-y);
+                // Apply node screen position offset internally
+                root.drag-started(pin-id, node-screen-x + center-x, node-screen-y + center-y);
             }
             if event.kind == PointerEventKind.up && drag-active {
                 drag-active = false;
-                // Calculate cursor position in parent coordinates
-                root.drag-ended(pin-id, center-x + self.mouse-x - pin-radius, center-y + self.mouse-y - pin-radius);
+                // Calculate cursor position in screen coordinates
+                root.drag-ended(pin-id,
+                    node-screen-x + center-x + self.mouse-x - pin-radius,
+                    node-screen-y + center-y + self.mouse-y - pin-radius);
             }
         }
         moved => {
             if drag-active {
-                // Update link preview with cursor position
-                root.drag-moved(pin-id, center-x + self.mouse-x - pin-radius, center-y + self.mouse-y - pin-radius);
+                // Update link preview with cursor position in screen coordinates
+                root.drag-moved(pin-id,
+                    node-screen-x + center-x + self.mouse-x - pin-radius,
+                    node-screen-y + center-y + self.mouse-y - pin-radius);
             }
         }
     }
