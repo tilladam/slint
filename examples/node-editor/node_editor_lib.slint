@@ -278,6 +278,170 @@ export component Link inherits Path {
     commands: path-commands;
 }
 
+/// Base component for all node types in the node editor.
+///
+/// BaseNode provides the core functionality needed by all nodes:
+/// - Transform properties (world position, zoom, pan, drag offset)
+/// - Drag handling with threshold detection and absolute positioning
+/// - Selection state and visual feedback
+/// - Callbacks for node and pin interactions
+/// - Automatic rectangle reporting for hit-testing
+///
+/// Subclasses should:
+/// - Set width and height based on their content
+/// - Add node-specific content (title, pins, widgets, etc.)
+/// - Optionally add custom callbacks for widget interactions
+///
+/// Example usage:
+/// ```slint
+/// export component MyNode inherits BaseNode {
+///     width: 150px * zoom;
+///     height: 80px * zoom;
+///
+///     // Add custom content
+///     Rectangle { /* title bar */ }
+///     Pin { /* pins */ }
+/// }
+/// ```
+export component BaseNode inherits Rectangle {
+    // === Common Properties ===
+
+    /// Unique identifier for this node
+    in property <int> node-id;
+
+    /// Whether this node is currently selected
+    in property <bool> selected: false;
+
+    /// World position (grid space) - base position from model
+    in property <length> world-x;
+    in property <length> world-y;
+
+    /// Transform parameters (from parent NodeEditor)
+    in property <float> zoom: 1.0;
+    in property <length> pan-x: 0px;
+    in property <length> pan-y: 0px;
+
+    /// External drag offset (for multi-select: all selected nodes get same offset)
+    in property <length> drag-offset-x: 0px;
+    in property <length> drag-offset-y: 0px;
+
+    // === Common Callbacks ===
+
+    /// Called when a pin drag starts (pin-id, screen-x, screen-y)
+    callback pin-drag-started(int, length, length);
+
+    /// Called when a pin drag moves (pin-id, screen-x, screen-y)
+    callback pin-drag-moved(int, length, length);
+
+    /// Called when a pin drag ends (pin-id, screen-x, screen-y)
+    callback pin-drag-ended(int, length, length);
+
+    /// Called when node is clicked (node-id, shift-held)
+    callback clicked(int, bool);
+
+    /// Called when node drag starts (node-id, already-selected)
+    callback drag-started(int, bool);
+
+    /// Called when node drag moves (node-id, offset-x, offset-y)
+    callback drag-moved(int, length, length);
+
+    /// Called when node drag ends (node-id, delta-x, delta-y)
+    callback drag-ended(int, length, length);
+
+    /// Called to report node rectangle for hit-testing (node-id, x, y, width, height)
+    callback report-rect(int, length, length, length, length);
+
+    // === Computed Properties ===
+
+    /// Screen position calculated from world position + drag offset
+    out property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
+    out property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
+
+    // === Common Styling ===
+
+    x: screen-x;
+    y: screen-y;
+    background: selected ? #3a3a4a : #2d2d2d;
+    border-radius: 8px * zoom;
+    border-width: selected ? 2px * zoom : 1px * zoom;
+    border-color: selected ? #4a9eff : #555;
+
+    // === Common Handlers ===
+
+    // Report rect on init
+    init => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+
+    // Report rect whenever screen position changes (for link updates during drag)
+    changed screen-x => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+    changed screen-y => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+
+    // === Drag Handling ===
+    // Rendered first so node content appears on top and can intercept events
+
+    TouchArea {
+        property <bool> shift-held: false;
+        property <bool> was-dragged: false;
+        property <length> drag-threshold: 5px;
+
+        // Store initial press position in absolute (window) coordinates
+        // This is needed because the node moves during drag, which would change
+        // the local coordinate system and cause oscillation
+        property <length> press-abs-x: 0px;
+        property <length> press-abs-y: 0px;
+
+        // Current offset computed from absolute positions
+        property <length> current-offset-x: self.absolute-position.x + self.mouse-x - press-abs-x;
+        property <length> current-offset-y: self.absolute-position.y + self.mouse-y - press-abs-y;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                shift-held = event.modifiers.shift;
+                was-dragged = false;
+                // Store absolute position of press
+                press-abs-x = self.absolute-position.x + self.pressed-x;
+                press-abs-y = self.absolute-position.y + self.pressed-y;
+            }
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                if !was-dragged {
+                    root.clicked(node-id, shift-held);
+                } else {
+                    // Drag ended - report final delta using absolute coordinates
+                    root.drag-ended(node-id, current-offset-x / zoom, current-offset-y / zoom);
+                }
+            }
+        }
+
+        moved => {
+            if self.pressed {
+                // Check threshold using absolute coordinate offsets
+                if !was-dragged {
+                    if current-offset-x > drag-threshold ||
+                       (-current-offset-x) > drag-threshold ||
+                       current-offset-y > drag-threshold ||
+                       (-current-offset-y) > drag-threshold {
+                        was-dragged = true;
+                        root.drag-started(node-id, selected);
+                    }
+                }
+
+                // Report offset to parent
+                if was-dragged {
+                    root.drag-moved(node-id, current-offset-x / zoom, current-offset-y / zoom);
+                }
+            }
+        }
+    }
+
+    // Subclasses add their content here (rendered on top of TouchArea)
+    // Content should include: title, pins, widgets, etc.
+}
+
 /// A connection point on a node where links can be attached.
 ///
 /// The Pin component encapsulates rendering and drag-to-link interaction.

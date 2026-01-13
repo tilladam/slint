@@ -16,7 +16,7 @@
 // 2. Add links as children (using Link component)
 // 3. Handle callbacks for link creation, selection changes, etc.
 
-import { NodeEditor, Link, Pin, PinTypes, PinId, MinimapNode } from "node_editor_lib.slint";
+import { NodeEditor, Link, Pin, PinTypes, PinId, MinimapNode, BaseNode } from "node_editor_lib.slint";
 import { InstructionsOverlay } from "instructions_overlay.slint";
 
 // Node layout constants - single source of truth
@@ -67,183 +67,74 @@ export { FilterNodeData }
 
 
 // A basic node component with interactive pins
-component Node inherits Rectangle {
+component Node inherits BaseNode {
     in property <string> title: "Node";
-    in property <int> node-id;
-    in property <int> input-pin-id: PinId.make(node-id, PinTypes.input);
-    in property <int> output-pin-id: PinId.make(node-id, PinTypes.output);
-
-    // Selection state
-    in property <bool> selected: false;
-
-    // World coordinates (grid space) - base position from model
-    in property <length> world-x;
-    in property <length> world-y;
-
-    // Transform parameters (from parent)
-    in property <float> zoom: 1.0;
-    in property <length> pan-x: 0px;
-    in property <length> pan-y: 0px;
-
-    // External drag offset (for multi-select: all selected nodes get same offset)
-    in property <length> drag-offset-x: 0px;
-    in property <length> drag-offset-y: 0px;
-
-    // Callbacks for pin drag-to-link (pin-id, x, y)
-    callback pin-drag-started(int, length, length);
-    callback pin-drag-moved(int, length, length);
-    callback pin-drag-ended(int, length, length);
-
-    // Callback when node is clicked (for selection) - passes node-id and shift-held
-    callback clicked(int, bool);
-
-    // Callbacks for node dragging (for multi-select support)
-    callback drag-started(int, bool);  // node-id, already-selected
-    callback drag-moved(int, length, length);  // node-id, offset-x, offset-y
-    callback drag-ended(int, length, length);  // node-id, delta-x, delta-y
-
-    // Callback to report node rectangle (for overlay hit-testing and box selection)
-    // Parameters: node-id, x, y, width, height (all in screen coordinates)
-    callback report-rect(int, length, length, length, length);
-
-    // Report rect on init
-    init => {
-        report-rect(node-id, screen-x, screen-y, self.width, self.height);
-    }
+    in property <int> input-pin-id: PinId.make(self.node-id, PinTypes.input);
+    in property <int> output-pin-id: PinId.make(self.node-id, PinTypes.output);
 
     // Pin dimensions (scaled by zoom)
-    property <length> pin-size: NodeConstants.pin-size * zoom;
+    property <length> pin-size: NodeConstants.pin-size * self.zoom;
     property <length> pin-radius: pin-size / 2;
 
     // Base dimensions (from global constants)
     property <length> base-width: NodeConstants.node-base-width;
     property <length> base-height: NodeConstants.node-base-height;
 
-    // Screen position calculated from world position + drag offset
-    property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
-    property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
-
-    // Report rect whenever screen position changes (for link updates during drag)
-    changed screen-x => {
-        report-rect(node-id, screen-x, screen-y, self.width, self.height);
-    }
-    changed screen-y => {
-        report-rect(node-id, screen-x, screen-y, self.width, self.height);
-    }
-
     // Expose pin positions (center of pin circles, in parent coordinates)
-    out property <length> input-pin-x: screen-x + input-pin.center-x;
-    out property <length> input-pin-y: screen-y + input-pin.center-y;
-    out property <length> output-pin-x: screen-x + output-pin.center-x;
-    out property <length> output-pin-y: screen-y + output-pin.center-y;
+    out property <length> input-pin-x: self.screen-x + input-pin.center-x;
+    out property <length> input-pin-y: self.screen-y + input-pin.center-y;
+    out property <length> output-pin-x: self.screen-x + output-pin.center-x;
+    out property <length> output-pin-y: self.screen-y + output-pin.center-y;
 
-    x: screen-x;
-    y: screen-y;
-    width: base-width * zoom;
-    height: base-height * zoom;
-    background: selected ? #3a3a4a : #2d2d2d;
-    border-radius: 8px * zoom;
-    border-width: selected ? 2px * zoom : 1px * zoom;
-    border-color: selected ? #4a9eff : #555;
+    // Set dimensions
+    width: base-width * self.zoom;
+    height: base-height * self.zoom;
 
     // Title bar
     Rectangle {
-        x: 8px * zoom;
-        y: 8px * zoom;
-        width: parent.width - 16px * zoom;
-        height: 24px * zoom;
-        background: selected ? #4a6a9a : #3d3d3d;
-        border-radius: 4px * zoom;
+        x: 8px * root.zoom;
+        y: 8px * root.zoom;
+        width: parent.width - 16px * root.zoom;
+        height: 24px * root.zoom;
+        background: root.selected ? #4a6a9a : #3d3d3d;
+        border-radius: 4px * root.zoom;
 
         Text {
-            text: title;
+            text: root.title;
             color: white;
-            font-size: 14px * zoom;
+            font-size: 14px * root.zoom;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
     }
 
-    // Drag handling for the node body (must be before pins so pins are on top)
-    TouchArea {
-        property <bool> shift-held: false;
-        property <bool> was-dragged: false;
-        property <length> drag-threshold: 5px;
-        // Store initial press position in absolute (window) coordinates
-        // This is needed because the node moves during drag, which would change
-        // the local coordinate system and cause oscillation
-        property <length> press-abs-x: 0px;
-        property <length> press-abs-y: 0px;
-        // Current offset computed from absolute positions
-        property <length> current-offset-x: self.absolute-position.x + self.mouse-x - press-abs-x;
-        property <length> current-offset-y: self.absolute-position.y + self.mouse-y - press-abs-y;
-
-        pointer-event(event) => {
-            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                shift-held = event.modifiers.shift;
-                was-dragged = false;
-                // Store absolute position of press
-                press-abs-x = self.absolute-position.x + self.pressed-x;
-                press-abs-y = self.absolute-position.y + self.pressed-y;
-            }
-            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
-                if !was-dragged {
-                    root.clicked(node-id, shift-held);
-                } else {
-                    // Drag ended - report final delta using absolute coordinates
-                    root.drag-ended(node-id, current-offset-x / zoom, current-offset-y / zoom);
-                }
-            }
-        }
-        moved => {
-            if self.pressed {
-                // Check threshold using absolute coordinate offsets
-                if !was-dragged {
-                    if current-offset-x > drag-threshold ||
-                       (-current-offset-x) > drag-threshold ||
-                       current-offset-y > drag-threshold ||
-                       (-current-offset-y) > drag-threshold {
-                        was-dragged = true;
-                        root.drag-started(node-id, selected);
-                    }
-                }
-
-                // Report offset to parent
-                if was-dragged {
-                    root.drag-moved(node-id, current-offset-x / zoom, current-offset-y / zoom);
-                }
-            }
-        }
-    }
-
     // Input pin (green) - with drag-to-link support (on top of body TouchArea)
     input-pin := Pin {
-        x: 8px * zoom;
-        y: (8px + 24px + 8px) * zoom;  // below title bar
-        pin-id: input-pin-id;
-        zoom: zoom;
+        x: 8px * root.zoom;
+        y: (8px + 24px + 8px) * root.zoom;  // below title bar
+        pin-id: root.input-pin-id;
+        zoom: root.zoom;
         base-color: #4CAF50;
         hover-color: #66BB6A;
         base-size: NodeConstants.pin-size;
-        drag-started(id, x, y) => { root.pin-drag-started(id, screen-x + x, screen-y + y); }
-        drag-moved(id, x, y) => { root.pin-drag-moved(id, screen-x + x, screen-y + y); }
-        drag-ended(id, x, y) => { root.pin-drag-ended(id, screen-x + x, screen-y + y); }
+        drag-started(id, x, y) => { root.pin-drag-started(id, root.screen-x + x, root.screen-y + y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, root.screen-x + x, root.screen-y + y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, root.screen-x + x, root.screen-y + y); }
     }
 
     // Output pin (blue) - with drag-to-link support (on top of body TouchArea)
     output-pin := Pin {
-        x: parent.width - 8px * zoom - pin-size;
-        y: (8px + 24px + 8px) * zoom;  // below title bar
-        pin-id: output-pin-id;
-        zoom: zoom;
+        x: parent.width - 8px * root.zoom - root.pin-size;
+        y: (8px + 24px + 8px) * root.zoom;  // below title bar
+        pin-id: root.output-pin-id;
+        zoom: root.zoom;
         base-color: #2196F3;
         hover-color: #42A5F5;
         base-size: NodeConstants.pin-size;
-        drag-started(id, x, y) => { root.pin-drag-started(id, screen-x + x, screen-y + y); }
-        drag-moved(id, x, y) => { root.pin-drag-moved(id, screen-x + x, screen-y + y); }
-        drag-ended(id, x, y) => { root.pin-drag-ended(id, screen-x + x, screen-y + y); }
+        drag-started(id, x, y) => { root.pin-drag-started(id, root.screen-x + x, root.screen-y + y); }
+        drag-moved(id, x, y) => { root.pin-drag-moved(id, root.screen-x + x, root.screen-y + y); }
+        drag-ended(id, x, y) => { root.pin-drag-ended(id, root.screen-x + x, root.screen-y + y); }
     }
-
 }
 
 export component MainWindow inherits Window {
