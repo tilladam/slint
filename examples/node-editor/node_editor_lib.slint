@@ -279,7 +279,7 @@ export component NodeEditor {
     in property <length> reporting-pin-x <=> overlay.reporting-pin-x;
     in property <length> reporting-pin-y <=> overlay.reporting-pin-y;
     in property <length> pin-hit-radius <=> overlay.pin-hit-radius;
-    in-out property <string> pending-pins-batch <=> overlay.pending-pins-batch;
+    in-out property <string> pending-pins-batch <=> background-layer.pending-pins-batch;
 
     // === Output: Link request result ===
     /// Requested link start pin ID (read from link-requested callback)
@@ -293,20 +293,20 @@ export component NodeEditor {
     in property <length> reporting-node-y <=> overlay.reporting-node-y;
     in property <length> reporting-node-width <=> overlay.reporting-node-width;
     in property <length> reporting-node-height <=> overlay.reporting-node-height;
-    in-out property <string> pending-node-rects-batch <=> overlay.pending-node-rects-batch;
+    in-out property <string> pending-node-rects-batch <=> background-layer.pending-node-rects-batch;
 
-    // === Input: Link reporting ===
-    in property <int> reporting-link-id <=> overlay.reporting-link-id;
-    in property <int> reporting-link-start-pin-id <=> overlay.reporting-link-start-pin-id;
-    in property <int> reporting-link-end-pin-id <=> overlay.reporting-link-end-pin-id;
-    in property <color> reporting-link-color <=> overlay.reporting-link-color;
-    in-out property <string> pending-links-batch <=> overlay.pending-links-batch;
-    in-out property <string> pending-deleted-link-ids <=> overlay.pending-deleted-link-ids;
+    // === Input: Link reporting (NOW BOUND TO BACKGROUND LAYER) ===
+    in property <int> reporting-link-id <=> background-layer.reporting-link-id;
+    in property <int> reporting-link-start-pin-id <=> background-layer.reporting-link-start-pin-id;
+    in property <int> reporting-link-end-pin-id <=> background-layer.reporting-link-end-pin-id;
+    in property <color> reporting-link-color <=> background-layer.reporting-link-color;
+    in-out property <string> pending-links-batch <=> background-layer.pending-links-batch;
+    in-out property <string> pending-deleted-link-ids <=> background-layer.pending-deleted-link-ids;
 
-    // === Output: Link position data ===
-    out property <string> link-positions-data: overlay.link-positions-data;
+    // === Output: Link position data (FROM BACKGROUND LAYER) ===
+    // NOTE: link-positions-data removed - legacy format no longer generated
     /// Core-generated bezier paths for all links
-    in-out property <string> link-bezier-paths <=> overlay.link-bezier-paths;
+    in-out property <string> link-bezier-paths <=> background-layer.link-bezier-paths;
 
     // === Output: Selection state ===
     /// Selected node IDs from box selection (comma-separated)
@@ -326,20 +326,20 @@ export component NodeEditor {
 
     // === Output: Debug ===
     out property <int> debug-pin-count: overlay.debug-pin-count;
-    out property <int> debug-link-count: overlay.debug-link-count;
+    // NOTE: debug-link-count removed - links are now in Background
 
     // === Callbacks: Triggers (set properties first, then call) ===
     callback start-link <=> overlay.start-link;
     callback pin-position-changed <=> overlay.pin-position-changed;
     callback node-rect-changed <=> overlay.node-rect-changed;
-    callback link-reported <=> overlay.link-reported;
+    callback link-reported <=> background-layer.link-reported;
     callback node-clicked <=> overlay.node-clicked;
 
     // === Callbacks: Events ===
     callback link-requested <=> overlay.link-requested;
     callback link-hovered <=> overlay.link-hovered;
     callback link-selection-changed <=> overlay.link-selection-changed;
-    callback link-positions-changed <=> overlay.link-positions-changed;
+    callback link-positions-changed <=> background-layer.link-positions-changed;
     callback link-cancelled <=> overlay.link-cancelled;
     callback context-menu-requested <=> overlay.context-menu-requested;
     callback selection-changed <=> overlay.selection-changed;

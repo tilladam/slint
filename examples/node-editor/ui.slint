@@ -309,8 +309,7 @@ export component MainWindow inherits Window {
     // Callback to delete selected links (called from Rust)
     callback delete-selected-links();
 
-    // Link position data (managed by editor, updated when viewport/nodes change)
-    out property <string> link-positions-data <=> editor.link-positions-data;
+    // NOTE: link-positions-data removed - only link-bezier-paths is now used
 
     // Core-generated bezier paths for all links (hybrid architecture)
     // Format: "id|path_commands|color_argb;..." where path_commands is SVG like "M x0 y0 C x1 y1 x2 y2 x3 y3"
@@ -755,7 +754,7 @@ export component MainWindow inherits Window {
         border-radius: 4px;
 
         Text {
-            text: "Pins: " + editor.debug-pin-count + " Links: " + editor.debug-link-count;
+            text: "Pins: " + editor.debug-pin-count;
             color: #aaa;
             font-size: 11px;
             horizontal-alignment: center;
