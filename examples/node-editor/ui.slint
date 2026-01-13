@@ -238,9 +238,6 @@ export component MainWindow inherits Window {
     in-out property <length> graph-min-y <=> editor.graph-min-y;
     in-out property <length> graph-max-x <=> editor.graph-max-x;
     in-out property <length> graph-max-y <=> editor.graph-max-y;
-    
-    // Callback to report a link to the editor (called from Rust on init)
-    callback report-link(int, int, int, color);  // id, start-pin-id, end-pin-id, color
 
     // Callback when link positions change (forwarded from editor)
     callback link-positions-updated();
