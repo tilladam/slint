@@ -433,6 +433,22 @@ export component NodeEditor {
         is-dragging: root.is-dragging;
         drag-offset-x: root.drag-offset-x;
         drag-offset-y: root.drag-offset-y;
+
+        // Wire link query to Background
+        changed query-link-at-x => {
+            background-layer.query-link-at-x = overlay.query-link-at-x;
+            background-layer.query-link-at-y = overlay.query-link-at-y;
+            background-layer.link-hover-distance = overlay.link-hover-distance;
+            background-layer.handle-link-query();
+            overlay.link-at-result = background-layer.link-at-result;
+        }
+        changed query-link-at-y => {
+            background-layer.query-link-at-x = overlay.query-link-at-x;
+            background-layer.query-link-at-y = overlay.query-link-at-y;
+            background-layer.link-hover-distance = overlay.link-hover-distance;
+            background-layer.handle-link-query();
+            overlay.link-at-result = background-layer.link-at-result;
+        }
     }
 
     // === Selection box (on top) ===

@@ -486,6 +486,13 @@ pub struct NodeEditorBackground {
     /// Callback when link positions have been updated
     pub link_positions_changed: Callback<()>,
 
+    // Query mechanism for link hit-testing
+    pub query_link_at_x: Property<LogicalLength>,
+    pub query_link_at_y: Property<LogicalLength>,
+    pub link_hover_distance: Property<LogicalLength>,
+    pub link_at_result: Property<i32>,
+    pub handle_link_query: Callback<()>,
+
     /// Internal state for grid caching
     data: BackgroundDataBox,
 
@@ -493,7 +500,17 @@ pub struct NodeEditorBackground {
 }
 
 impl Item for NodeEditorBackground {
-    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {
+        // Set up callback for link hit-testing query
+        Self::FIELD_OFFSETS.handle_link_query.apply_pin(self).set_handler({
+            let self_weak = _self_rc.downgrade();
+            move |()| {
+                if let Some(self_rc) = self_weak.upgrade() {
+                    Self::invoke_handle_link_query(&self_rc);
+                }
+            }
+        });
+    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -790,6 +807,25 @@ impl NodeEditorBackground {
 
         closest_link_id
     }
+
+    /// Handle link query from Overlay (called when query properties change)
+    pub fn handle_link_query(self: Pin<&Self>) {
+        let x = self.query_link_at_x().get();
+        let y = self.query_link_at_y().get();
+        let hover_distance = self.link_hover_distance().get();
+
+        let position = LogicalPoint::new(x, y);
+        let result = self.find_link_at(position, hover_distance);
+
+        self.link_at_result.set(result);
+    }
+
+    /// Invoke handle_link_query via ItemRc (for callback)
+    fn invoke_handle_link_query(item_rc: &ItemRc) {
+        if let Some(bg) = item_rc.downcast::<NodeEditorBackground>() {
+            bg.as_pin_ref().handle_link_query();
+        }
+    }
 }
 
 impl ItemConsts for NodeEditorBackground {
@@ -983,6 +1019,14 @@ pub struct NodeEditorOverlay {
     pub current_selected_link_ids: Property<SharedString>,
     /// Callback when link selection changes
     pub link_selection_changed: Callback<()>,
+
+    // === Query properties (for querying Background layer) ===
+    /// Query position X (set along with query_link_at_y to trigger query)
+    pub query_link_at_x: Property<LogicalLength>,
+    /// Query position Y (set along with query_link_at_x to trigger query)
+    pub query_link_at_y: Property<LogicalLength>,
+    /// Result of link query (link ID or -1 if none found)
+    pub link_at_result: Property<i32>,
 
     // === Debug properties ===
     /// Number of registered pins (for debugging)
@@ -1898,12 +1942,14 @@ impl NodeEditorOverlay {
     }
 
     /// Find a link at the given position, returns link ID or -1 if no link found
-    /// NOTE: This now needs to query NodeEditorBackground. For now, stub it out.
-    /// TODO: Wire up proper Background query mechanism in composite component
-    fn find_link_at(self: Pin<&Self>, _position: LogicalPoint) -> i32 {
-        // TODO: Query Background's find_link_at method
-        // For now, return -1 (no link found)
-        -1
+    /// Queries NodeEditorBackground via query properties (composite wires these)
+    fn find_link_at(self: Pin<&Self>, position: LogicalPoint) -> i32 {
+        // Set query position properties to trigger Background query
+        Self::FIELD_OFFSETS.query_link_at_x.apply_pin(self).set(LogicalLength::new(position.x));
+        Self::FIELD_OFFSETS.query_link_at_y.apply_pin(self).set(LogicalLength::new(position.y));
+
+        // Read result from link_at_result property (set by composite)
+        self.link_at_result()
     }
 
     /// Update the hovered link state and fire callback if changed

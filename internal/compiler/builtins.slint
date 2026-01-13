@@ -792,6 +792,18 @@ export component NodeEditorBackground inherits Empty {
     in-out property <string> link-bezier-paths;
     callback link-positions-changed();
 
+    // === Link query mechanism (for Overlay to query link hit-testing) ===
+    /// Query position X (set by composite when Overlay queries)
+    in-out property <length> query-link-at-x;
+    /// Query position Y (set by composite when Overlay queries)
+    in-out property <length> query-link-at-y;
+    /// Link hover distance for hit-testing
+    in property <length> link-hover-distance: 5px;
+    /// Result of link query (set by core, read by composite)
+    out property <int> link-at-result: -1;
+    /// Callback to trigger link query (call after setting query properties)
+    callback handle-link-query();
+
     //-default_size_binding:expands_to_parent_geometry
 }
 
@@ -946,6 +958,14 @@ export component NodeEditorOverlay inherits Empty {
     callback link-hovered();
     /// Callback when link selection changes (check current-selected-link-ids for selected links)
     callback link-selection-changed();
+
+    // === Query properties (for querying Background layer) ===
+    /// Query position X (set this along with query-link-at-y to trigger query)
+    in-out property <length> query-link-at-x;
+    /// Query position Y (set this along with query-link-at-x to trigger query)
+    in-out property <length> query-link-at-y;
+    /// Result of link query (link ID or -1 if none found)
+    in property <int> link-at-result: -1;
 
     // === Debug properties ===
     /// Number of registered pins (for debugging)
