@@ -884,9 +884,6 @@ pub struct NodeEditorOverlay {
     /// Maximum zoom level
     pub max_zoom: Property<f32>,
 
-    /// Enable minimap
-    pub minimap_enabled: Property<bool>,
-
     // === Selection box state (for Slint rendering) ===
     /// Whether a box selection is currently active
     pub is_selecting: Property<bool>,
@@ -1051,8 +1048,6 @@ pub struct NodeEditorOverlay {
     // === Debug properties ===
     /// Number of registered pins (for debugging)
     pub debug_pin_count: Property<i32>,
-    /// Number of registered links (for debugging)
-    pub debug_link_count: Property<i32>,
 
     /// Internal state
     data: NodeEditorDataBox,
@@ -1208,38 +1203,12 @@ impl Item for NodeEditorOverlay {
 
     fn key_event(
         self: Pin<&Self>,
-        event: &KeyEvent,
+        _event: &KeyEvent,
         _window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
     ) -> KeyEventResult {
-        // Only handle KeyPressed events
-        if event.event_type != KeyEventType::KeyPressed {
-            return KeyEventResult::EventIgnored;
-        }
-
-        // Handle Escape to cancel link creation
-        if event.text.starts_with(crate::input::key_codes::Escape) {
-            let mut state = self.data.state.borrow_mut();
-            if state.is_creating_link {
-                state.is_creating_link = false;
-                state.link_start_pin = -1;
-                drop(state);
-
-                // Clear link creation properties
-                Self::FIELD_OFFSETS.is_creating_link.apply_pin(self).set(false);
-                self.link_cancelled.call(&());
-                return KeyEventResult::EventAccepted;
-            }
-        }
-
-        // Handle Delete or Backspace to delete selected items
-        if event.text.starts_with(crate::input::key_codes::Delete)
-            || event.text.starts_with(crate::input::key_codes::Backspace)
-        {
-            self.delete_selected.call(&());
-            return KeyEventResult::EventAccepted;
-        }
-
+        // All key handling is done in capture_key_event, which returns EventAccepted
+        // for handled keys, preventing this method from being called for those keys.
         KeyEventResult::EventIgnored
     }
 
@@ -1915,14 +1884,6 @@ impl NodeEditorOverlay {
         }
 
         InputEventResult::EventIgnored
-    }
-
-    /// Start creating a link from a pin
-    pub fn start_link_creation(self: Pin<&Self>, pin_id: i32, position: LogicalPoint) {
-        let mut state = self.data.state.borrow_mut();
-        state.is_creating_link = true;
-        state.link_start_pin = pin_id;
-        state.link_current_pos = position;
     }
 
     /// Find a pin at the given position, returns pin ID or 0 if no pin found

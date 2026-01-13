@@ -829,9 +829,6 @@ export component NodeEditorOverlay inherits Empty {
     /// Maximum zoom level
     in property <float> max-zoom: 3.0;
 
-    /// Enable minimap
-    in property <bool> minimap-enabled: false;
-
     // === Selection box state (for Slint rendering) ===
     /// Whether a box selection is currently active
     out property <bool> is-selecting: false;
@@ -979,7 +976,7 @@ export component NodeEditorOverlay inherits Empty {
     // === Debug properties ===
     /// Number of registered pins (for debugging)
     out property <int> debug-pin-count;
-    // NOTE: debug-link-count removed - links are now in Background
+
     /// Callback when link creation is cancelled
     callback link-cancelled();
     /// Callback for context menu
