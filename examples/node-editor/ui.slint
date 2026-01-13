@@ -172,10 +172,6 @@ export component MainWindow inherits Window {
     // Pure callback to check if a node is selected (checks core's selection state)
     pure callback is-node-selected(int) -> bool;
 
-    // Pure callbacks to get node/pin screen positions (computed by Slint, not Rust)
-    pure callback get-node-screen-rect(int) -> string;  // Returns "x,y,width,height" or empty
-    pure callback get-pin-screen-pos(int) -> string;    // Returns "x,y" or empty
-
     // Pure function to snap a value to the grid
     pure public function snap-to-grid(value: float) -> float {
         return editor.snap-to-grid(value);
@@ -242,20 +238,12 @@ export component MainWindow inherits Window {
     in-out property <length> graph-min-y <=> editor.graph-min-y;
     in-out property <length> graph-max-x <=> editor.graph-max-x;
     in-out property <length> graph-max-y <=> editor.graph-max-y;
-
+    
     // Callback to report a link to the editor (called from Rust on init)
     callback report-link(int, int, int, color);  // id, start-pin-id, end-pin-id, color
 
     // Callback when link positions change (forwarded from editor)
     callback link-positions-updated();
-
-    // Implement report-link to forward to editor
-    report-link(id, start-pin, end-pin, col) => {
-        editor.reporting-link-id = id;
-        editor.reporting-link-start-pin-id = start-pin;
-        editor.reporting-link-end-pin-id = end-pin;
-        editor.reporting-link-color = col;
-    }
 
     // Pure callbacks to compute screen positions from world coordinates
     // These use Slint globals as the single source of truth - callable from Rust
