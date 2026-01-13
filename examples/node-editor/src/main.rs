@@ -31,6 +31,15 @@ fn are_pins_compatible(start_pin: i32, end_pin: i32) -> bool {
     is_output_pin(start_pin) != is_output_pin(end_pin)
 }
 
+/// Combine two semicolon-separated batch strings, handling empty cases
+fn combine_batches(a: &str, b: &str) -> String {
+    match (a.is_empty(), b.is_empty()) {
+        (true, _) => b.to_string(),
+        (_, true) => a.to_string(),
+        _ => format!("{};{}", a, b),
+    }
+}
+
 /// Build node rects batch string from model data using Slint-computed positions
 /// Format: "id,screen_x,screen_y,width,height;..."
 /// Slint computes positions using globals - Rust just queries
@@ -404,15 +413,10 @@ fn main() {
     // Positions computed by Slint using globals
     // Build combined node rects batch (simple nodes + filter nodes)
     // Positions computed by Slint using globals
-    let simple_node_rects = build_node_rects_batch(&window, &nodes);
-    let filter_node_rects = build_filter_node_rects_batch(&window, &filter_nodes);
-    let node_rects_batch = if simple_node_rects.is_empty() {
-        filter_node_rects
-    } else if filter_node_rects.is_empty() {
-        simple_node_rects
-    } else {
-        format!("{};{}", simple_node_rects, filter_node_rects)
-    };
+    let node_rects_batch = combine_batches(
+        &build_node_rects_batch(&window, &nodes),
+        &build_filter_node_rects_batch(&window, &filter_nodes),
+    );
     window.set_pending_node_rects_batch(SharedString::from(node_rects_batch.as_str()));
 
     // Set initial bezier paths directly so links are visible on first render
@@ -421,15 +425,10 @@ fn main() {
     window.set_link_bezier_paths(SharedString::from(bezier_paths.as_str()));
 
     // Build combined pins batch (simple nodes + filter nodes)
-    let simple_pins = build_pins_batch(&window, &nodes);
-    let filter_pins = build_filter_pins_batch(&window, &filter_nodes);
-    let pins_batch = if simple_pins.is_empty() {
-        filter_pins
-    } else if filter_pins.is_empty() {
-        simple_pins
-    } else {
-        format!("{};{}", simple_pins, filter_pins)
-    };
+    let pins_batch = combine_batches(
+        &build_pins_batch(&window, &nodes),
+        &build_filter_pins_batch(&window, &filter_nodes),
+    );
     window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
 
     // Enable minimap
@@ -540,27 +539,16 @@ fn main() {
     window.on_update_viewport(move |_zoom, _pan_x, _pan_y| {
         // Rebuild node rects and pin positions using Slint-computed values
         if let Some(window) = window_for_viewport.upgrade() {
-            // Combine simple nodes and filter nodes
-            let simple_rects = build_node_rects_batch(&window, &nodes_for_viewport);
-            let filter_rects = build_filter_node_rects_batch(&window, &filter_nodes_for_viewport);
-            let node_batch = if simple_rects.is_empty() {
-                filter_rects
-            } else if filter_rects.is_empty() {
-                simple_rects
-            } else {
-                format!("{};{}", simple_rects, filter_rects)
-            };
+            let node_batch = combine_batches(
+                &build_node_rects_batch(&window, &nodes_for_viewport),
+                &build_filter_node_rects_batch(&window, &filter_nodes_for_viewport),
+            );
             window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
 
-            let simple_pins = build_pins_batch(&window, &nodes_for_viewport);
-            let filter_pins = build_filter_pins_batch(&window, &filter_nodes_for_viewport);
-            let pins_batch = if simple_pins.is_empty() {
-                filter_pins
-            } else if filter_pins.is_empty() {
-                simple_pins
-            } else {
-                format!("{};{}", simple_pins, filter_pins)
-            };
+            let pins_batch = combine_batches(
+                &build_pins_batch(&window, &nodes_for_viewport),
+                &build_filter_pins_batch(&window, &filter_nodes_for_viewport),
+            );
             window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
         }
     });
@@ -668,27 +656,16 @@ fn main() {
         }
 
         // Update node rects and pin positions in core so link positions are recomputed
-        // Positions computed by Slint using globals
-        let simple_rects = build_node_rects_batch(&window, &nodes_for_drag);
-        let filter_rects = build_filter_node_rects_batch(&window, &filter_nodes_for_drag);
-        let node_batch = if simple_rects.is_empty() {
-            filter_rects
-        } else if filter_rects.is_empty() {
-            simple_rects
-        } else {
-            format!("{};{}", simple_rects, filter_rects)
-        };
+        let node_batch = combine_batches(
+            &build_node_rects_batch(&window, &nodes_for_drag),
+            &build_filter_node_rects_batch(&window, &filter_nodes_for_drag),
+        );
         window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
 
-        let simple_pins = build_pins_batch(&window, &nodes_for_drag);
-        let filter_pins = build_filter_pins_batch(&window, &filter_nodes_for_drag);
-        let pins_batch = if simple_pins.is_empty() {
-            filter_pins
-        } else if filter_pins.is_empty() {
-            simple_pins
-        } else {
-            format!("{};{}", simple_pins, filter_pins)
-        };
+        let pins_batch = combine_batches(
+            &build_pins_batch(&window, &nodes_for_drag),
+            &build_filter_pins_batch(&window, &filter_nodes_for_drag),
+        );
         window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
 
         // Update minimap data
