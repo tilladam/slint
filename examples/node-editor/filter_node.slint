@@ -109,6 +109,14 @@ export component FilterNode inherits Rectangle {
     property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
     property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
 
+    // Report rect whenever screen position changes (for link updates during drag)
+    changed screen-x => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+    changed screen-y => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+
     // Pin Y positions - centered on each content row
     // Account for: VerticalLayout padding + title + HorizontalLayout padding-top + row offset
     property <length> row-1-center: (content-padding + title-height + content-padding + row-height / 2) * zoom;

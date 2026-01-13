@@ -122,6 +122,14 @@ component Node inherits Rectangle {
     property <length> screen-x: (world-x + drag-offset-x) * zoom + pan-x;
     property <length> screen-y: (world-y + drag-offset-y) * zoom + pan-y;
 
+    // Report rect whenever screen position changes (for link updates during drag)
+    changed screen-x => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+    changed screen-y => {
+        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+    }
+
     // Expose pin positions (center of pin circles, in parent coordinates)
     out property <length> input-pin-x: screen-x + input-pin.center-x;
     out property <length> input-pin-y: screen-y + input-pin.center-y;
