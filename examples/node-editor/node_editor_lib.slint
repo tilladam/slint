@@ -591,12 +591,6 @@ export component NodeEditor {
     /// Maximum Y coordinate of the graph (set by application or computed from nodes)
     in-out property <length> graph-max-y: 1200px;
 
-    // === Viewport dimensions (for minimap) ===
-    /// Viewport width (canvas width)
-    out property <length> viewport-width: root.width;
-    /// Viewport height (canvas height)
-    out property <length> viewport-height: root.height;
-
     // === Node drag state (set during node drag for link position updates) ===
     /// Whether nodes are currently being dragged
     in property <bool> is-dragging: false;
@@ -724,8 +718,6 @@ export component NodeEditor {
 
     // === Callbacks: Triggers (set properties first, then call) ===
     callback start-link <=> overlay.start-link;
-    callback pin-position-changed <=> overlay.pin-position-changed;
-    callback node-rect-changed <=> overlay.node-rect-changed;
     callback link-reported <=> background-layer.link-reported;
     callback node-clicked <=> overlay.node-clicked;
 
@@ -895,8 +887,8 @@ export component NodeEditor {
         viewport-x: root.pan-x;
         viewport-y: root.pan-y;
         viewport-zoom: root.zoom;
-        viewport-width: root.viewport-width;
-        viewport-height: root.viewport-height;
+        viewport-width: root.width;
+        viewport-height: root.height;
 
         // Graph bounds
         graph-min-x: root.graph-min-x;
@@ -910,8 +902,8 @@ export component NodeEditor {
 
         // Navigation callback - center clicked position in viewport
         navigate-to(graph-x, graph-y) => {
-            root.pan-x = -graph-x * root.zoom + (root.viewport-width / 2);
-            root.pan-y = -graph-y * root.zoom + (root.viewport-height / 2);
+            root.pan-x = -graph-x * root.zoom + (root.width / 2);
+            root.pan-y = -graph-y * root.zoom + (root.height / 2);
         }
     }
 }
