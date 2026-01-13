@@ -96,6 +96,36 @@ export enum MinimapPosition {
     bottom-right,
 }
 
+/// Standard node data structure for applications.
+/// Contains the minimal required fields for node positioning and identification.
+/// Applications can extend this or create custom structures for domain-specific data.
+export struct NodeData {
+    /// Unique node identifier
+    id: int,
+    /// Display title/label
+    title: string,
+    /// X position in world coordinates (unscaled)
+    world-x: float,
+    /// Y position in world coordinates (unscaled)
+    world-y: float,
+}
+
+/// Standard link data structure for applications.
+/// Contains the minimal required fields for link rendering and identification.
+export struct LinkData {
+    /// Unique link identifier
+    id: int,
+    /// Starting pin ID (typically output pin)
+    start-pin-id: int,
+    /// Ending pin ID (typically input pin)
+    end-pin-id: int,
+    /// Link color
+    color: color,
+    /// Core-generated bezier path commands (set by application from core's output)
+    /// Format: "M x0 y0 C x1 y1 x2 y2 x3 y3" (SVG path syntax)
+    path-commands: string,
+}
+
 /// Minimap component for bird's-eye view of the node graph.
 ///
 /// Displays a scaled-down overview of all nodes and the current viewport.

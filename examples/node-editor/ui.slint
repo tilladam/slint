@@ -16,7 +16,7 @@
 // 2. Add links as children (using Link component)
 // 3. Handle callbacks for link creation, selection changes, etc.
 
-import { NodeEditor, Link, Pin, PinTypes, PinId, MinimapNode, BaseNode } from "node_editor_lib.slint";
+import { NodeEditor, Link, Pin, PinTypes, PinId, MinimapNode, BaseNode, NodeData, LinkData } from "node_editor_lib.slint";
 import { InstructionsOverlay } from "instructions_overlay.slint";
 
 // Node layout constants - single source of truth
@@ -41,26 +41,8 @@ export global FilterNodeConstants {
 }
 import { FilterNode, FilterNodeData } from "filter_node.slint";
 
-// Data structure for nodes - exported to Rust
-// Note: Selection state is owned by core (overlay.current-selected-ids), not stored here
-export struct NodeData {
-    id: int,
-    title: string,
-    world-x: float,
-    world-y: float,
-}
-
-// Data structure for links - exported to Rust
-// Bezier path commands are computed by core and synced to Rust
-export struct LinkData {
-    id: int,
-    start-pin-id: int,
-    end-pin-id: int,
-    color: color,
-    // Core-generated bezier path command (set by Rust from core's output)
-    // Format: "M x0 y0 C x1 y1 x2 y2 x3 y3"
-    path-commands: string,
-}
+// Re-export standard data structures from library for Rust
+export { NodeData, LinkData }
 
 // Re-export FilterNodeData for Rust
 export { FilterNodeData }
