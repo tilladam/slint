@@ -198,22 +198,6 @@ export component MainWindow inherits Window {
     // Structured bezier path data for all links
     out property <[LinkPath]> link-paths <=> editor.link-paths;
 
-    // Batch of pending links to register (set from Rust)
-    // Format: "id,start_pin,end_pin,color_argb;id,start_pin,end_pin,color_argb;..."
-    in-out property <string> pending-links-batch <=> editor.pending-links-batch;
-
-    // Batch of link IDs to delete (set from Rust when links are removed)
-    // Format: "id1,id2,id3,..."
-    in-out property <string> pending-deleted-link-ids <=> editor.pending-deleted-link-ids;
-
-    // Batch of pending node rects to register (set from Rust)
-    // Format: "id,x,y,w,h;..." where x,y,w,h are screen coordinates
-    in-out property <string> pending-node-rects-batch <=> editor.pending-node-rects-batch;
-
-    // Batch of pending pin positions to register (set from Rust)
-    // Format: "pin_id,x,y;..." where x,y are screen coordinates
-    in-out property <string> pending-pins-batch <=> editor.pending-pins-batch;
-
     // === Minimap properties ===
     in property <bool> minimap-enabled <=> editor.minimap-enabled;
     in property <[MinimapNode]> minimap-nodes <=> editor.minimap-nodes;

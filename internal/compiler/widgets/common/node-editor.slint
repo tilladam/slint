@@ -825,15 +825,6 @@ export component NodeEditor {
         overlay.reporting-pin-rel-y = reporting-pin-rel-y;
     }
 
-    // NOTE: Pin positions need to go to BOTH Background (for link rendering) AND Overlay (for pin hit-testing)
-    in-out property <string> pending-pins-batch;
-
-    // Forward pin batch to both layers
-    changed pending-pins-batch => {
-        background-layer.pending-pins-batch = pending-pins-batch;
-        overlay.pending-pins-batch = pending-pins-batch;
-    }
-
     // === Output: Link request result ===
     /// Requested link start pin ID (read from link-requested callback)
     out property <int> requested-link-start-pin: overlay.requested-link-start-pin;
@@ -868,23 +859,12 @@ export component NodeEditor {
         overlay.reporting-node-height = reporting-node-height;
     }
 
-    // NOTE: Node rects need to go to BOTH Background (for link rendering) AND Overlay (for box selection & pin hit-testing)
-    in-out property <string> pending-node-rects-batch;
-
-    // Forward node rect batch to both layers
-    changed pending-node-rects-batch => {
-        background-layer.pending-node-rects-batch = pending-node-rects-batch;
-        overlay.pending-node-rects-batch = pending-node-rects-batch;
-    }
-
-    // === Input: Link reporting (NOW BOUND TO BACKGROUND LAYER) ===
+    // === Input: Link reporting (BOUND TO BACKGROUND LAYER) ===
     in property <[LinkData]> links <=> background-layer.links;
     in property <int> reporting-link-id <=> background-layer.reporting-link-id;
     in property <int> reporting-link-start-pin-id <=> background-layer.reporting-link-start-pin-id;
     in property <int> reporting-link-end-pin-id <=> background-layer.reporting-link-end-pin-id;
     in property <color> reporting-link-color <=> background-layer.reporting-link-color;
-    in-out property <string> pending-links-batch <=> background-layer.pending-links-batch;
-    in-out property <string> pending-deleted-link-ids <=> background-layer.pending-deleted-link-ids;
 
     // === Output: Link position data (FROM BACKGROUND LAYER) ===
     // NOTE: link-positions-data removed - legacy format no longer generated
