@@ -224,13 +224,16 @@ fn main() {
     // Set initial minimap data
     update_minimap_data(&window, &nodes, &filter_nodes);
 
-    // Pure callback to check if a node is selected (queries core's selection state)
-    // This is called by Slint during rendering to determine node highlight state
-    let window_for_selection = window.as_weak();
+    // Implement selection checking callbacks
+    // These parse the comma-separated string properties maintained by the editor
+    let window_for_node_selection = window.as_weak();
     window.on_is_node_selected(move |node_id| {
-        if let Some(window) = window_for_selection.upgrade() {
-            let selected_ids_str = window.get_current_selected_ids();
-            // Parse the comma-separated string and check if node_id is present
+        if let Some(window) = window_for_node_selection.upgrade() {
+            let selected_ids_str = window.get_selected_node_ids_str();
+            if selected_ids_str.is_empty() {
+                return false;
+            }
+            // Parse comma-separated IDs and check if node_id is in the list
             selected_ids_str
                 .split(',')
                 .filter_map(|s| s.trim().parse::<i32>().ok())
@@ -240,13 +243,14 @@ fn main() {
         }
     });
 
-    // Pure callback to check if a link is selected (queries core's selection state)
-    // This is called by Slint during rendering to determine link highlight state
     let window_for_link_selection = window.as_weak();
     window.on_is_link_selected(move |link_id| {
         if let Some(window) = window_for_link_selection.upgrade() {
-            let selected_ids_str = window.get_current_selected_link_ids();
-            // Parse the comma-separated string and check if link_id is present
+            let selected_ids_str = window.get_selected_link_ids_str();
+            if selected_ids_str.is_empty() {
+                return false;
+            }
+            // Parse comma-separated IDs and check if link_id is in the list
             selected_ids_str
                 .split(',')
                 .filter_map(|s| s.trim().parse::<i32>().ok())
@@ -339,7 +343,7 @@ fn main() {
             None => return,
         };
 
-        let selected_ids: std::collections::HashSet<i32> = window.get_current_selected_ids()
+        let selected_ids: std::collections::HashSet<i32> = window.get_selected_node_ids_str()
             .split(',')
             .filter_map(|s| s.trim().parse::<i32>().ok())
             .collect();
@@ -383,7 +387,7 @@ fn main() {
 
         // Get selected node IDs from overlay
         let selected_ids: std::collections::HashSet<i32> = window
-            .get_current_selected_ids()
+            .get_selected_node_ids_str()
             .split(',')
             .filter_map(|s| s.trim().parse::<i32>().ok())
             .collect();
@@ -459,7 +463,7 @@ fn main() {
 
         // Get selected link IDs from overlay
         let selected_link_ids: std::collections::HashSet<i32> = window
-            .get_current_selected_link_ids()
+            .get_selected_link_ids_str()
             .split(',')
             .filter_map(|s| s.trim().parse::<i32>().ok())
             .collect();

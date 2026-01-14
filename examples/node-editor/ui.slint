@@ -163,10 +163,6 @@ export component MainWindow inherits Window {
     callback filter-toggle-enabled(int);      // node-id
     callback filter-reset(int);               // node-id
 
-    // Pure callback to check if a node is selected
-    // Forward to editor's built-in is-selected callback
-    pure callback is-node-selected(int) -> bool;
-
     // Pure function to snap a value to the grid
     pure public function snap-to-grid(value: float) -> float {
         return editor.snap-to-grid(value);
@@ -180,16 +176,15 @@ export component MainWindow inherits Window {
     in-out property <length> pan-y: 0px;
     in-out property <float> zoom: 1.0;
 
-    // Selection state (managed by editor)
-    out property <string> current-selected-ids <=> editor.current-selected-ids;
-
     // Link hover state (managed by editor)
     out property <int> hovered-link-id <=> editor.hovered-link-id;
 
-    // Link selection state (managed by editor)
-    out property <string> current-selected-link-ids <=> editor.current-selected-link-ids;
+    // Selection state (for implementing selection callbacks)
+    out property <string> selected-node-ids-str <=> editor.selected-node-ids-str;
+    out property <string> selected-link-ids-str <=> editor.selected-link-ids-str;
 
-    // Pure callback to check if a link is selected (parses current-selected-link-ids)
+    // Selection checking callbacks (must be pure for use in property bindings)
+    pure callback is-node-selected(int) -> bool;
     pure callback is-link-selected(int) -> bool;
 
     // Callback to delete selected links (called from Rust)
@@ -330,10 +325,6 @@ export component MainWindow inherits Window {
         // Set pin hit radius from globals (eliminates hardcoded default in core)
         pin-hit-radius: NodeConstants.pin-size * zoom * 0.66;
 
-        // Forward selection checking callbacks to editor
-        is-selected(node-id) => { return root.is-node-selected(node-id); }
-        is-link-selected(link-id) => { return root.is-link-selected(link-id); }
-
         // Drag state is now managed internally by NodeEditor
 
         link-requested => {
@@ -347,8 +338,12 @@ export component MainWindow inherits Window {
 
         selection-changed => {
             // Editor has computed intersecting node IDs and updated selection - notify Rust
-            root.selection-changed(editor.current-selected-ids);
+            root.selection-changed(editor.selected-node-ids-str);
         }
+
+        // Forward selection checking callbacks to root
+        is-selected(node-id) => { return root.is-node-selected(node-id); }
+        is-link-selected(link-id) => { return root.is-link-selected(link-id); }
 
         node-drag-ended(delta-x, delta-y) => {
             // Editor has applied snapping - just commit to model
@@ -404,7 +399,7 @@ export component MainWindow inherits Window {
             clicked(id, shift) => {
                 editor.clicked-node-id = id;
                 editor.clicked-shift-held = shift;
-                root.selection-changed(editor.current-selected-ids);
+                root.selection-changed("");
             }
             drag-started(id, already-selected) => {
                 editor.start-node-drag(id, already-selected);
@@ -463,7 +458,7 @@ export component MainWindow inherits Window {
             clicked(id, shift) => {
                 editor.clicked-node-id = id;
                 editor.clicked-shift-held = shift;
-                root.selection-changed(editor.current-selected-ids);
+                root.selection-changed("");
             }
             drag-started(id, already-selected) => {
                 editor.start-node-drag(id, already-selected);

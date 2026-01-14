@@ -871,14 +871,6 @@ export component NodeEditor {
     /// Structured bezier path data for all links
     out property <[LinkPath]> link-paths <=> background-layer.link-paths;
 
-    // === Output: Selection state ===
-    /// Selected node IDs from box selection (comma-separated)
-    out property <string> selected-node-ids-str: overlay.selected-node-ids-str;
-    /// Currently selected node IDs
-    out property <string> current-selected-ids: overlay.current-selected-ids;
-    /// Currently selected link IDs
-    out property <string> current-selected-link-ids: overlay.current-selected-link-ids;
-
     // === Input: Node click handling ===
     in-out property <int> clicked-node-id <=> overlay.clicked-node-id;
     in-out property <bool> clicked-shift-held <=> overlay.clicked-shift-held;
@@ -961,37 +953,25 @@ export component NodeEditor {
         return value;
     }
 
+    // === Selection state (exposed for application-implemented callbacks) ===
+    /// Selected node IDs as comma-separated string
+    /// Applications should use this to implement is-selected callback
+    out property <string> selected-node-ids-str: overlay.selected-node-ids-str;
+    /// Selected link IDs as comma-separated string
+    /// Applications should use this to implement is-link-selected callback
+    out property <string> selected-link-ids-str: overlay.selected-link-ids-str;
+
     // === Selection Checking Callbacks ===
-    // NOTE: These callbacks should be implemented by the application in Rust/JavaScript
-    // because Slint pure functions cannot parse comma-separated strings.
-    //
-    // Standard implementation pattern for main.rs:
-    //
-    //   window.on_is_selected(move |node_id| {
-    //       let window = window_weak.upgrade()?;
-    //       window.get_current_selected_ids()
-    //           .split(',')
-    //           .filter_map(|s| s.trim().parse::<i32>().ok())
-    //           .any(|id| id == node_id)
-    //   });
-    //
-    //   window.on_is_link_selected(move |link_id| {
-    //       let window = window_weak.upgrade()?;
-    //       window.get_current_selected_link_ids()
-    //           .split(',')
-    //           .filter_map(|s| s.trim().parse::<i32>().ok())
-    //           .any(|id| id == link_id)
-    //   });
+    // NOTE: Applications must implement these callbacks to check selection state.
+    // Implementation should parse the selected-node-ids-str / selected-link-ids-str properties.
 
     /// Check if a node is currently selected
-    /// Applications must implement this callback to parse current-selected-ids
-    /// See documentation above for standard implementation pattern
-    pure callback is-selected(/* node-id */ int) -> bool;
+    /// Applications must implement by parsing selected-node-ids-str
+    pure callback is-selected(node-id: int) -> bool;
 
     /// Check if a link is currently selected
-    /// Applications must implement this callback to parse current-selected-link-ids
-    /// See documentation above for standard implementation pattern
-    pure callback is-link-selected(/* link-id */ int) -> bool;
+    /// Applications must implement by parsing selected-link-ids-str
+    pure callback is-link-selected(link-id: int) -> bool;
 
     /// Start node drag - call from node drag-started handler
     /// Handles selection updates and initializes drag state

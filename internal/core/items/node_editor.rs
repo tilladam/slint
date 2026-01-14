@@ -1141,11 +1141,6 @@ pub struct NodeEditorOverlay {
     // NOTE: Link reporting and link bezier paths moved to NodeEditorBackground
     // Link management is handled by NodeEditorBackground via the links model property
 
-    // === Box selection result (output when selection_changed fires) ===
-    /// Comma-separated list of node IDs that intersect with the selection box
-    /// Format: "1,2,3" or empty string if none
-    pub selected_node_ids_str: Property<SharedString>,
-
     // === Node selection management ===
     /// Node ID being clicked (set before calling node-clicked)
     pub clicked_node_id: Property<i32>,
@@ -1153,10 +1148,6 @@ pub struct NodeEditorOverlay {
     pub clicked_shift_held: Property<bool>,
     /// Callback when a node is clicked - set clicked-node-id and clicked-shift-held first
     pub node_clicked: Callback<()>,
-
-    /// Comma-separated list of currently selected node IDs (output)
-    /// Format: "1,2,3" or empty string if none
-    pub current_selected_ids: Property<SharedString>,
 
     // === Link hover state ===
     /// ID of the link currently being hovered, or -1 if none
@@ -1167,11 +1158,14 @@ pub struct NodeEditorOverlay {
     pub link_hovered: Callback<()>,
 
     // === Link selection state ===
-    /// Comma-separated list of currently selected link IDs (output)
-    /// Format: "1,2,3" or empty string if none
-    pub current_selected_link_ids: Property<SharedString>,
     /// Callback when link selection changes
     pub link_selection_changed: Callback<()>,
+
+    // === Selection state (exposed as strings for pure Slint querying) ===
+    /// Selected node IDs as comma-separated string (for pure callback queries)
+    pub selected_node_ids_str: Property<SharedString>,
+    /// Selected link IDs as comma-separated string (for pure callback queries)
+    pub selected_link_ids_str: Property<SharedString>,
 
     // === Query properties (for querying Background layer) ===
     /// Query position X (set along with query_link_at_y to trigger query)
@@ -1603,7 +1597,7 @@ impl NodeEditorOverlay {
                 state.selected_node_ids.insert(clicked_node);
             }
 
-            // Update the current selected IDs output property
+            // Update the selection string property
             let ids_str = state
                 .selected_node_ids
                 .iter()
@@ -1613,7 +1607,7 @@ impl NodeEditorOverlay {
             drop(state);
 
             Self::FIELD_OFFSETS
-                .current_selected_ids
+                .selected_node_ids_str
                 .apply_pin(self)
                 .set(SharedString::from(&ids_str));
 
@@ -1742,25 +1736,19 @@ impl NodeEditorOverlay {
 
                     // Update selection state (replace with intersecting nodes)
                     state.selected_node_ids = intersecting_ids;
+                    state.is_box_selecting = false;
 
-                    // Build output string from selection state
+                    // Update the selection string property
                     let ids_str = state
                         .selected_node_ids
                         .iter()
                         .map(|id| alloc::format!("{}", id))
                         .collect::<alloc::vec::Vec<_>>()
                         .join(",");
-
-                    state.is_box_selecting = false;
                     drop(state);
 
-                    // Update both output properties
                     Self::FIELD_OFFSETS
                         .selected_node_ids_str
-                        .apply_pin(self)
-                        .set(SharedString::from(&ids_str));
-                    Self::FIELD_OFFSETS
-                        .current_selected_ids
                         .apply_pin(self)
                         .set(SharedString::from(&ids_str));
 
@@ -1817,18 +1805,18 @@ impl NodeEditorOverlay {
                         state.selected_link_ids.clear();
                         drop(state);
 
-                        // Update properties if anything changed
-                        if had_node_selection {
-                            Self::FIELD_OFFSETS
-                                .current_selected_ids
-                                .apply_pin(self)
-                                .set(SharedString::default());
-                        }
+                        // Update selection string properties
+                        Self::FIELD_OFFSETS
+                            .selected_node_ids_str
+                            .apply_pin(self)
+                            .set(SharedString::from(""));
+                        Self::FIELD_OFFSETS
+                            .selected_link_ids_str
+                            .apply_pin(self)
+                            .set(SharedString::from(""));
+
+                        // Notify callbacks if anything changed
                         if had_link_selection {
-                            Self::FIELD_OFFSETS
-                                .current_selected_link_ids
-                                .apply_pin(self)
-                                .set(SharedString::default());
                             self.link_selection_changed.call(&());
                         }
                         if had_node_selection || had_link_selection {
@@ -2081,32 +2069,19 @@ impl NodeEditorOverlay {
             }
         }
 
-        // Build output strings
-        let link_ids_str = state
+        // Update the selection string property
+        let ids_str = state
             .selected_link_ids
             .iter()
             .map(|id| alloc::format!("{}", id))
             .collect::<alloc::vec::Vec<_>>()
             .join(",");
-
-        let node_ids_str = state
-            .selected_node_ids
-            .iter()
-            .map(|id| alloc::format!("{}", id))
-            .collect::<alloc::vec::Vec<_>>()
-            .join(",");
-
         drop(state);
 
-        // Update output properties
         Self::FIELD_OFFSETS
-            .current_selected_link_ids
+            .selected_link_ids_str
             .apply_pin(self)
-            .set(SharedString::from(&link_ids_str));
-        Self::FIELD_OFFSETS
-            .current_selected_ids
-            .apply_pin(self)
-            .set(SharedString::from(&node_ids_str));
+            .set(SharedString::from(&ids_str));
 
         // Notify that selection changed
         self.link_selection_changed.call(&());
@@ -2123,9 +2098,10 @@ impl NodeEditorOverlay {
         drop(state);
 
         Self::FIELD_OFFSETS
-            .current_selected_link_ids
+            .selected_link_ids_str
             .apply_pin(self)
-            .set(SharedString::default());
+            .set(SharedString::from(""));
+
         self.link_selection_changed.call(&());
     }
 }

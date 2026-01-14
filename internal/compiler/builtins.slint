@@ -960,10 +960,6 @@ export component NodeEditorOverlay inherits Empty {
 
     // NOTE: Link management is handled by NodeEditorBackground via the links model property
 
-    // === Box selection result (output when selection-changed fires) ===
-    /// Comma-separated list of node IDs that intersect with the selection box
-    out property <string> selected-node-ids-str;
-
     // === Node selection management ===
     /// Node ID being clicked (set before calling node-clicked)
     in property <int> clicked-node-id;
@@ -972,9 +968,6 @@ export component NodeEditorOverlay inherits Empty {
     /// Callback when a node is clicked - set clicked-node-id and clicked-shift-held first
     callback node-clicked();
 
-    /// Comma-separated list of currently selected node IDs (output)
-    out property <string> current-selected-ids;
-
     // === Link hover state ===
     /// ID of the link currently being hovered, or -1 if none
     out property <int> hovered-link-id: -1;
@@ -982,9 +975,6 @@ export component NodeEditorOverlay inherits Empty {
     in property <length> link-hover-distance: 8px;
 
     // === Link selection state ===
-    /// Comma-separated list of currently selected link IDs (output)
-    out property <string> current-selected-link-ids;
-
     /// Callback when user requests link creation (read requested-link-start-pin and requested-link-end-pin)
     /// Application should validate compatibility and create link if valid
     callback link-requested();
@@ -992,6 +982,12 @@ export component NodeEditorOverlay inherits Empty {
     callback link-hovered();
     /// Callback when link selection changes (check current-selected-link-ids for selected links)
     callback link-selection-changed();
+
+    // === Selection state (exposed for pure callback queries) ===
+    /// Selected node IDs as comma-separated string (for pure callback queries)
+    out property <string> selected-node-ids-str;
+    /// Selected link IDs as comma-separated string (for pure callback queries)
+    out property <string> selected-link-ids-str;
 
     // === Query properties (for querying Background layer) ===
     /// Query position X (set this along with query-link-at-y to trigger query)
