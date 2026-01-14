@@ -787,19 +787,9 @@ impl Item for NodeEditorBackground {
         // Regenerate link paths if needed (AFTER re-syncing)
         let state = self.data.state.borrow();
         let dirty = state.links_dirty.get();
-        #[cfg(feature = "std")]
-        {
-            extern crate std;
-            std::println!("[RENDER] Checking links_dirty = {}, links.len() = {}", dirty, state.links.len());
-        }
         if dirty {
             state.links_dirty.set(false);
             drop(state);
-            #[cfg(feature = "std")]
-            {
-                extern crate std;
-                std::println!("[RENDER] Calling regenerate_link_paths()");
-            }
             self.regenerate_link_paths();
         } else {
             drop(state);
@@ -1195,11 +1185,6 @@ impl Item for NodeEditorOverlay {
                     if let Some(overlay) = self_rc.downcast::<NodeEditorOverlay>() {
                         let overlay_pin = overlay.as_pin_ref();
                         let id = overlay_pin.reporting_node_id();
-                        #[cfg(feature = "std")]
-                        {
-                            extern crate std;
-                            std::println!("[OVERLAY] node_rect_changed: id = {}", id);
-                        }
                         if id > 0 {
                             let x = overlay_pin.reporting_node_x().get();
                             let y = overlay_pin.reporting_node_y().get();
@@ -1216,11 +1201,6 @@ impl Item for NodeEditorOverlay {
 
                             let mut state = overlay_pin.data.state.borrow_mut();
                             state.node_rects.insert(id, rect);
-                            #[cfg(feature = "std")]
-                            {
-                                extern crate std;
-                                std::println!("[OVERLAY] Stored node rect {} at ({}, {}), total node_rects: {}", id, x, y, state.node_rects.len());
-                            }
                         }
                     }
                 }
@@ -1235,15 +1215,12 @@ impl Item for NodeEditorOverlay {
                     if let Some(overlay) = self_rc.downcast::<NodeEditorOverlay>() {
                         let overlay_pin = overlay.as_pin_ref();
                         let id = overlay_pin.reporting_pin_id();
-                            std::println!("[OVERLAY] pin_position_changed: id = {}", id);
                         if id > 0 {
                             let rel_x = overlay_pin.reporting_pin_rel_x().get();
                             let rel_y = overlay_pin.reporting_pin_rel_y().get();
 
                             let mut state = overlay_pin.data.state.borrow_mut();
                             state.pin_relative_offsets.insert(id, (rel_x, rel_y));
-                                std::println!("[OVERLAY] Stored pin {} at rel ({}, {})", id, rel_x, rel_y);
-                                std::println!("[OVERLAY] Total pins in overlay: {}", state.pin_relative_offsets.len());
                         }
                     }
                 }
