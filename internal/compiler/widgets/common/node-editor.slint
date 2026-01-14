@@ -1028,6 +1028,14 @@ export component NodeEditor {
         pan-x <=> root.pan-x;
         pan-y <=> root.pan-y;
         zoom: root.zoom;
+        reporting-node-id: root.reporting-node-id;
+        reporting-node-x: root.reporting-node-x;
+        reporting-node-y: root.reporting-node-y;
+        reporting-node-width: root.reporting-node-width;
+        reporting-node-height: root.reporting-node-height;
+        reporting-pin-id: root.reporting-pin-id;
+        reporting-pin-rel-x: root.reporting-pin-rel-x;
+        reporting-pin-rel-y: root.reporting-pin-rel-y;
 
         // Background fill
         Rectangle {
@@ -1066,6 +1074,14 @@ export component NodeEditor {
         is-dragging: root.is-dragging;
         drag-offset-x: root.drag-offset-x;
         drag-offset-y: root.drag-offset-y;
+        reporting-node-id: root.reporting-node-id;
+        reporting-node-x: root.reporting-node-x;
+        reporting-node-y: root.reporting-node-y;
+        reporting-node-width: root.reporting-node-width;
+        reporting-node-height: root.reporting-node-height;
+        reporting-pin-id: root.reporting-pin-id;
+        reporting-pin-rel-x: root.reporting-pin-rel-x;
+        reporting-pin-rel-y: root.reporting-pin-rel-y;
 
         // Wire link query to Background
         changed query-link-at-x => {

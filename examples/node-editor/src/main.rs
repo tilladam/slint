@@ -268,13 +268,19 @@ fn main() {
     let color_index_for_create = color_index.clone();
     let window_for_create = window.as_weak();
     window.on_create_link(move |start_pin, end_pin| {
+        println!("[MAIN] on_create_link called: start={}, end={}", start_pin, end_pin);
+
         let _window = match window_for_create.upgrade() {
             Some(w) => w,
-            None => return,
+            None => {
+                println!("[MAIN] Window upgrade failed");
+                return;
+            }
         };
 
         // Validate pin compatibility (application-layer validation)
         if !are_pins_compatible(start_pin, end_pin) {
+            println!("[MAIN] Pins not compatible");
             return; // Incompatible pins, silently ignore
         }
 
@@ -284,11 +290,13 @@ fn main() {
         } else {
             (end_pin, start_pin)
         };
+        println!("[MAIN] Normalized: output={}, input={}", output_pin, input_pin);
 
         // Check for duplicate links
         for i in 0..links_for_create.row_count() {
             if let Some(link) = links_for_create.row_data(i) {
                 if link.start_pin_id == output_pin && link.end_pin_id == input_pin {
+                    println!("[MAIN] Duplicate link detected");
                     return; // Duplicate link, ignore
                 }
             }
@@ -303,6 +311,8 @@ fn main() {
 
         let color = link_colors[idx];
 
+        println!("[MAIN] Creating link with id={}, color={:?}", id, color);
+
         // Add link to model (path_commands will be computed by core)
         links_for_create.push(LinkData {
             id,
@@ -311,6 +321,8 @@ fn main() {
             color,
             path_commands: SharedString::default(), // Will be computed by core
         });
+
+        println!("[MAIN] Link added to model, total links: {}", links_for_create.row_count());
     });
 
     // Node selection is now handled by the overlay (overlay.clicked-node-id)

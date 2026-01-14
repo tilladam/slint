@@ -69,6 +69,11 @@ struct BackgroundLinksListener {
 
 impl ModelChangeListener for BackgroundLinksListener {
     fn row_added(self: Pin<&Self>, _index: usize, _count: usize) {
+        #[cfg(feature = "std")]
+        {
+            extern crate std;
+            std::println!("[LISTENER] row_added called: index={}, count={}", _index, _count);
+        }
         // Mark links as dirty when rows are added
         self.links_dirty.set(true);
         // Trigger re-render
@@ -793,11 +798,38 @@ impl Item for NodeEditorBackground {
         // This must happen BEFORE regenerating link paths so we have position data
         self.process_pending_reports();
 
-        // Regenerate link paths if needed (AFTER processing reports)
+        // Re-sync links if dirty (model content may have changed even if reference didn't)
+        {
+            let state = self.data.state.borrow();
+            if state.links_dirty.get() {
+                // Links were modified - need to re-sync from model
+                let last_model = state.last_links_model.clone();
+                drop(state);
+
+                if let Some(model) = last_model {
+                    let mut state = self.data.state.borrow_mut();
+                    self.sync_links_full_locked(&mut state, &model);
+                    drop(state);
+                }
+            }
+        }
+
+        // Regenerate link paths if needed (AFTER re-syncing)
         let state = self.data.state.borrow();
-        if state.links_dirty.get() {
+        let dirty = state.links_dirty.get();
+        #[cfg(feature = "std")]
+        {
+            extern crate std;
+            std::println!("[RENDER] Checking links_dirty = {}, links.len() = {}", dirty, state.links.len());
+        }
+        if dirty {
             state.links_dirty.set(false);
             drop(state);
+            #[cfg(feature = "std")]
+            {
+                extern crate std;
+                std::println!("[RENDER] Calling regenerate_link_paths()");
+            }
             self.regenerate_link_paths();
         } else {
             drop(state);
@@ -1313,6 +1345,41 @@ pub struct NodeEditorOverlay {
 
 impl Item for NodeEditorOverlay {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {
+        // Set up callback for node rectangle reporting
+        Self::FIELD_OFFSETS.node_rect_changed.apply_pin(self).set_handler({
+            let self_weak = _self_rc.downgrade();
+            move |()| {
+                if let Some(self_rc) = self_weak.upgrade() {
+                    if let Some(overlay) = self_rc.downcast::<NodeEditorOverlay>() {
+                        let overlay_pin = overlay.as_pin_ref();
+                        let id = overlay_pin.reporting_node_id();
+                        #[cfg(feature = "std")]
+                        {
+                            extern crate std;
+                            std::println!("[OVERLAY] node_rect_changed: id = {}", id);
+                        }
+                        if id > 0 {
+                            let rect = super::NodeRect {
+                                id,
+                                x: overlay_pin.reporting_node_x().get(),
+                                y: overlay_pin.reporting_node_y().get(),
+                                width: overlay_pin.reporting_node_width().get(),
+                                height: overlay_pin.reporting_node_height().get(),
+                            };
+
+                            let mut state = overlay_pin.data.state.borrow_mut();
+                            state.node_rects.insert(id, rect);
+                            #[cfg(feature = "std")]
+                            {
+                                extern crate std;
+                                std::println!("[OVERLAY] Stored node rect {}, total node_rects: {}", id, state.node_rects.len());
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         // Set up callback for pin position reporting
         Self::FIELD_OFFSETS.pin_position_changed.apply_pin(self).set_handler({
             let self_weak = _self_rc.downgrade();
@@ -1321,12 +1388,15 @@ impl Item for NodeEditorOverlay {
                     if let Some(overlay) = self_rc.downcast::<NodeEditorOverlay>() {
                         let overlay_pin = overlay.as_pin_ref();
                         let id = overlay_pin.reporting_pin_id();
+                            std::println!("[OVERLAY] pin_position_changed: id = {}", id);
                         if id > 0 {
                             let rel_x = overlay_pin.reporting_pin_rel_x().get();
                             let rel_y = overlay_pin.reporting_pin_rel_y().get();
 
                             let mut state = overlay_pin.data.state.borrow_mut();
                             state.pin_relative_offsets.insert(id, (rel_x, rel_y));
+                                std::println!("[OVERLAY] Stored pin {} at rel ({}, {})", id, rel_x, rel_y);
+                                std::println!("[OVERLAY] Total pins in overlay: {}", state.pin_relative_offsets.len());
                         }
                     }
                 }
@@ -1593,6 +1663,8 @@ impl NodeEditorOverlay {
     /// Called from both input_event_filter_before_children and render
     fn check_pending_link_complete(self: Pin<&Self>) {
         if self.complete_link_creation() {
+                std::println!("[LINK] check_pending_link_complete: complete_link_creation is true");
+
             // If target_pin_id is set, use it (backward compatibility / explicit target)
             // Otherwise, use core's find_pin_at with the current link end position
             let explicit_target = self.target_pin_id();
@@ -1606,10 +1678,15 @@ impl NodeEditorOverlay {
                 self.find_pin_at(end_pos)
             };
 
+                std::println!("[LINK] Found end_pin = {}, explicit_target = {}", end_pin, explicit_target);
+
             // Get the start pin from state
             let mut state = self.data.state.borrow_mut();
             let start_pin = state.link_start_pin;
             let was_creating = state.is_creating_link;
+
+                std::println!("[LINK] start_pin = {}, was_creating = {}", start_pin, was_creating);
+
             state.is_creating_link = false;
             state.link_start_pin = -1;
             drop(state);
@@ -1625,9 +1702,12 @@ impl NodeEditorOverlay {
                 // Notify application of link request
                 // Application will validate compatibility and duplicates
                 if end_pin != 0 {
+                        std::println!("[LINK] Calling link_requested with start={}, end={}", start_pin, end_pin);
                     Self::FIELD_OFFSETS.requested_link_start_pin.apply_pin(self).set(start_pin);
                     Self::FIELD_OFFSETS.requested_link_end_pin.apply_pin(self).set(end_pin);
                     self.link_requested.call(&());
+                } else {
+                        std::println!("[LINK] end_pin is 0, not calling link_requested");
                 }
             }
         }
@@ -2161,6 +2241,10 @@ impl NodeEditorOverlay {
         };
         let hit_radius_sq = hit_radius * hit_radius;
         let state = self.data.state.borrow();
+
+            std::println!("[FIND_PIN] Looking for pin at ({}, {}), hit_radius = {}", position.x, position.y, hit_radius);
+            std::println!("[FIND_PIN] pin_relative_offsets.len() = {}, node_rects.len() = {}",
+                state.pin_relative_offsets.len(), state.node_rects.len());
 
         // Check all pins from pin_relative_offsets (supports arbitrary pin counts per node)
         for (&pin_id, &(rel_x, rel_y)) in state.pin_relative_offsets.iter() {
