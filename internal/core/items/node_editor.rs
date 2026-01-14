@@ -403,16 +403,18 @@ fn create_bezier_from_endpoints(
 }
 
 /// Compute absolute screen position for a pin from its relative offset and node rect
-/// Relative offset is in unscaled coordinates (from node top-left)
+/// Relative offset is already zoom-scaled (from Pin component's center-x/y)
 /// Returns (x, y) in screen coordinates (center of pin circle)
 fn compute_absolute_pin_position(
     relative_x: f32,
     relative_y: f32,
     node_rect: &super::NodeRect,
-    zoom: f32,
 ) -> (f32, f32) {
-    let abs_x = node_rect.x + relative_x * zoom;
-    let abs_y = node_rect.y + relative_y * zoom;
+    // relative_x/y are already zoom-scaled from the Pin component
+    // node_rect.x/y are screen coordinates (world * zoom + pan)
+    // So we just add them directly
+    let abs_x = node_rect.x + relative_x;
+    let abs_y = node_rect.y + relative_y;
     (abs_x, abs_y)
 }
 
@@ -844,9 +846,9 @@ impl NodeEditorBackground {
                     (start_offset, end_offset)
                 {
                     let (start_x, start_y) =
-                        compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect, zoom);
+                        compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect);
                     let (end_x, end_y) =
-                        compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect, zoom);
+                        compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect);
 
                     let path_cmd = generate_bezier_path_command(start_x, start_y, end_x, end_y, zoom);
 
@@ -891,8 +893,8 @@ impl NodeEditorBackground {
                 if let (Some(&(start_rel_x, start_rel_y)), Some(&(end_rel_x, end_rel_y))) =
                     (start_offset, end_offset)
                 {
-                    let (start_x, start_y) = compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect, zoom);
-                    let (end_x, end_y) = compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect, zoom);
+                    let (start_x, start_y) = compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect);
+                    let (end_x, end_y) = compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect);
 
                     let bezier = create_bezier_from_endpoints(start_x, start_y, end_x, end_y, zoom);
                     let distance = distance_to_bezier((position.x, position.y), &bezier);
@@ -2015,7 +2017,7 @@ impl NodeEditorOverlay {
             // Find the node rect
             if let Some(node_rect) = state.node_rects.get(&node_id) {
                 // Compute absolute position from relative offset
-                let (abs_x, abs_y) = compute_absolute_pin_position(rel_x, rel_y, node_rect, zoom);
+                let (abs_x, abs_y) = compute_absolute_pin_position(rel_x, rel_y, node_rect);
 
                 // Check if mouse is within hit radius
                 let dx = position.x - abs_x;
