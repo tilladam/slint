@@ -3,7 +3,7 @@
 // Demonstrates the NodeEditorBackground and NodeEditorOverlay components
 // for building visual node graph editors.
 
-use slint::{Color, Model, ModelRc, SharedString, VecModel};
+use slint::{Color, LinkData, Model, ModelRc, NodeData, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -29,54 +29,6 @@ fn are_pins_compatible(start_pin: i32, end_pin: i32) -> bool {
         return false;
     }
     is_output_pin(start_pin) != is_output_pin(end_pin)
-}
-
-/// Combine two semicolon-separated batch strings, handling empty cases
-fn combine_batches(a: &str, b: &str) -> String {
-    match (a.is_empty(), b.is_empty()) {
-        (true, _) => b.to_string(),
-        (_, true) => a.to_string(),
-        _ => format!("{};{}", a, b),
-    }
-}
-
-/// Build node rects batch string from model data using Slint-computed positions
-/// Format: "id,screen_x,screen_y,width,height;..."
-/// Slint computes positions using globals - Rust just queries
-fn build_node_rects_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> String {
-    (0..nodes.row_count())
-        .filter_map(|i| nodes.row_data(i))
-        .map(|node| {
-            // Call Slint pure functions to compute positions using globals
-            let screen_x = window.invoke_compute_node_screen_x(node.world_x);
-            let screen_y = window.invoke_compute_node_screen_y(node.world_y);
-            let width = window.invoke_compute_node_screen_width();
-            let height = window.invoke_compute_node_screen_height();
-            format!("{},{},{},{},{}",
-                node.id,
-                screen_x,
-                screen_y,
-                width,
-                height)
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
-/// Build filter node rects batch string using Slint-computed positions
-/// Format: "id,screen_x,screen_y,width,height;..."
-fn build_filter_node_rects_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNodeData>) -> String {
-    (0..filter_nodes.row_count())
-        .filter_map(|i| filter_nodes.row_data(i))
-        .map(|node| {
-            let screen_x = window.invoke_compute_node_screen_x(node.world_x);
-            let screen_y = window.invoke_compute_node_screen_y(node.world_y);
-            let width = window.invoke_compute_filter_screen_width();
-            let height = window.invoke_compute_filter_screen_height();
-            format!("{},{},{},{},{}", node.id, screen_x, screen_y, width, height)
-        })
-        .collect::<Vec<_>>()
-        .join(";")
 }
 
 /// Compute graph bounds from all nodes
@@ -187,67 +139,6 @@ fn update_minimap_data(
     window.set_graph_max_y(max_y);
 }
 
-/// Build filter node pins batch string using Slint-computed positions
-/// Filter nodes have 3 pins: data-input (1), data-output (2), control-input (3)
-///
-/// NOTE: Slint also provides relative offset callbacks that could eliminate core constants.
-fn build_filter_pins_batch(window: &MainWindow, filter_nodes: &VecModel<FilterNodeData>) -> String {
-    (0..filter_nodes.row_count())
-        .filter_map(|i| filter_nodes.row_data(i))
-        .flat_map(|node| {
-            // Data input pin (FilterPinTypes.data-input == 1): left side, row 1
-            let data_input_pin_id = node.id * 10 + 1;
-            let data_input_rel_x = window.invoke_compute_filter_data_input_pin_relative_x();
-            let data_input_rel_y = window.invoke_compute_filter_data_input_pin_relative_y();
-
-            // Data output pin (FilterPinTypes.data-output == 2): right side, row 1
-            let data_output_pin_id = node.id * 10 + 2;
-            let data_output_rel_x = window.invoke_compute_filter_data_output_pin_relative_x();
-            let data_output_rel_y = window.invoke_compute_filter_data_output_pin_relative_y();
-
-            // Control input pin (FilterPinTypes.control-input == 3): left side, row 2
-            let control_input_pin_id = node.id * 10 + 3;
-            let control_input_rel_x = window.invoke_compute_filter_control_input_pin_relative_x();
-            let control_input_rel_y = window.invoke_compute_filter_control_input_pin_relative_y();
-
-            vec![
-                format!("{},{},{}", data_input_pin_id, data_input_rel_x, data_input_rel_y),
-                format!("{},{},{}", data_output_pin_id, data_output_rel_x, data_output_rel_y),
-                format!("{},{},{}", control_input_pin_id, control_input_rel_x, control_input_rel_y),
-            ]
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
-/// Build pin relative offsets batch string from Slint-computed offsets
-/// Format: "pin_id,rel_x,rel_y;..." where rel_x/rel_y are unscaled offsets from node top-left
-/// Pin IDs use PinId.make(node-id, pin-type) encoding (see PinId global in node_editor_lib.slint)
-///
-/// The core computes absolute positions on-demand as: node_rect.pos + rel_offset * zoom
-/// This eliminates hardcoded layout constants from the core.
-fn build_pins_batch(window: &MainWindow, nodes: &VecModel<NodeData>) -> String {
-    (0..nodes.row_count())
-        .filter_map(|i| nodes.row_data(i))
-        .flat_map(|node| {
-            // Call Slint pure callbacks to get pin relative offsets
-            let input_pin_id = node.id * 10 + 1;  // PinTypes.input == 1
-            let input_rel_x = window.invoke_compute_input_pin_relative_x();
-            let input_rel_y = window.invoke_compute_input_pin_relative_y();
-
-            let output_pin_id = node.id * 10 + 2;  // PinTypes.output == 2
-            let output_rel_x = window.invoke_compute_output_pin_relative_x();
-            let output_rel_y = window.invoke_compute_output_pin_relative_y();
-
-            vec![
-                format!("{},{},{}", input_pin_id, input_rel_x, input_rel_y),
-                format!("{},{},{}", output_pin_id, output_rel_x, output_rel_y),
-            ]
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
 fn main() {
     let window = MainWindow::new().unwrap();
 
@@ -327,39 +218,6 @@ fn main() {
 
     // Note: Link path-commands are computed by core after pins are reported
 
-    // Report links to overlay for core-based position computation (using batch)
-    // Format: "id,start_pin,end_pin,color_argb;..."
-    let batch: Vec<String> = (0..links.row_count())
-        .filter_map(|i| links.row_data(i))
-        .map(|link| {
-            format!(
-                "{},{},{},{}",
-                link.id,
-                link.start_pin_id,
-                link.end_pin_id,
-                link.color.as_argb_encoded()
-            )
-        })
-        .collect();
-    window.set_pending_links_batch(SharedString::from(batch.join(";").as_str()));
-
-    // Report initial node rects, pin positions, and link bezier paths
-    // Positions computed by Slint using globals
-    // Build combined node rects batch (simple nodes + filter nodes)
-    // Positions computed by Slint using globals
-    let node_rects_batch = combine_batches(
-        &build_node_rects_batch(&window, &nodes),
-        &build_filter_node_rects_batch(&window, &filter_nodes),
-    );
-    window.set_pending_node_rects_batch(SharedString::from(node_rects_batch.as_str()));
-
-    // Build combined pins batch (simple nodes + filter nodes)
-    let pins_batch = combine_batches(
-        &build_pins_batch(&window, &nodes),
-        &build_filter_pins_batch(&window, &filter_nodes),
-    );
-    window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
-
     // Enable minimap
     window.set_minimap_enabled(true);
 
@@ -398,88 +256,10 @@ fn main() {
         }
     });
 
-    // Pure callback to get link path commands from core's link-bezier-paths
-    // This is called during rendering to get bezier paths directly from core
-    // Format of link-bezier-paths: "id|path_commands|color_argb;..."
-    let window_for_path = window.as_weak();
-    window.on_get_link_path_commands(move |link_id| {
-        if let Some(window) = window_for_path.upgrade() {
-            let bezier_paths_str = window.get_link_bezier_paths();
-            for link_str in bezier_paths_str.split(';') {
-                if link_str.is_empty() {
-                    continue;
-                }
-                let parts: Vec<&str> = link_str.split('|').collect();
-                if parts.len() >= 2 {
-                    if let Ok(id) = parts[0].parse::<i32>() {
-                        if id == link_id {
-                            return SharedString::from(parts[1]);
-                        }
-                    }
-                }
-            }
-        }
-        SharedString::default()
-    });
-
-    // Handle link position updates from core
-    // This is called whenever the core regenerates link positions (viewport changes, node moves, etc.)
-    // Now uses link-bezier-paths which contains core-generated SVG path commands
-    let links_for_sync = links.clone();
-    let window_for_sync = window.as_weak();
-    window.on_link_positions_updated(move || {
-        if let Some(window) = window_for_sync.upgrade() {
-            // Parse core-generated bezier paths
-            // Format: "id|path_commands|color_argb;..."
-            let bezier_paths_str = window.get_link_bezier_paths();
-
-            for link_str in bezier_paths_str.split(';') {
-                if link_str.is_empty() {
-                    continue;
-                }
-
-                // Split by '|' since path_commands contains spaces
-                let parts: Vec<&str> = link_str.split('|').collect();
-                if parts.len() >= 2 {
-                    if let Ok(id) = parts[0].parse::<i32>() {
-                        let path_commands = parts[1];
-
-                        // Find and update the link in the model
-                        for i in 0..links_for_sync.row_count() {
-                            if let Some(mut link) = links_for_sync.row_data(i) {
-                                if link.id == id {
-                                    link.path_commands = SharedString::from(path_commands);
-                                    links_for_sync.set_row_data(i, link);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-
     // Handle viewport changes - update node rects and pin positions when pan/zoom changes
     // Positions computed by Slint using globals
-    let nodes_for_viewport = nodes.clone();
-    let filter_nodes_for_viewport = filter_nodes.clone();
-    let window_for_viewport = window.as_weak();
     window.on_update_viewport(move |_zoom, _pan_x, _pan_y| {
-        // Rebuild node rects and pin positions using Slint-computed values
-        if let Some(window) = window_for_viewport.upgrade() {
-            let node_batch = combine_batches(
-                &build_node_rects_batch(&window, &nodes_for_viewport),
-                &build_filter_node_rects_batch(&window, &filter_nodes_for_viewport),
-            );
-            window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
-
-            let pins_batch = combine_batches(
-                &build_pins_batch(&window, &nodes_for_viewport),
-                &build_filter_pins_batch(&window, &filter_nodes_for_viewport),
-            );
-            window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
-        }
+        // Redundant batch updates removed - nodes and pins report themselves automatically via callbacks
     });
 
     // Handle link creation - validates compatibility and checks for duplicates
@@ -488,7 +268,7 @@ fn main() {
     let color_index_for_create = color_index.clone();
     let window_for_create = window.as_weak();
     window.on_create_link(move |start_pin, end_pin| {
-        let window = match window_for_create.upgrade() {
+        let _window = match window_for_create.upgrade() {
             Some(w) => w,
             None => return,
         };
@@ -531,16 +311,6 @@ fn main() {
             color,
             path_commands: SharedString::default(), // Will be computed by core
         });
-
-        // Report link to overlay for position computation (append to batch)
-        let current_batch = window.get_pending_links_batch();
-        let new_entry = format!("{},{},{},{}", id, output_pin, input_pin, color.as_argb_encoded());
-        let new_batch = if current_batch.is_empty() {
-            new_entry
-        } else {
-            format!("{};{}", current_batch, new_entry)
-        };
-        window.set_pending_links_batch(SharedString::from(new_batch.as_str()));
     });
 
     // Node selection is now handled by the overlay (overlay.clicked-node-id)
@@ -583,19 +353,6 @@ fn main() {
                 }
             }
         }
-
-        // Update node rects and pin positions in core so link positions are recomputed
-        let node_batch = combine_batches(
-            &build_node_rects_batch(&window, &nodes_for_drag),
-            &build_filter_node_rects_batch(&window, &filter_nodes_for_drag),
-        );
-        window.set_pending_node_rects_batch(SharedString::from(node_batch.as_str()));
-
-        let pins_batch = combine_batches(
-            &build_pins_batch(&window, &nodes_for_drag),
-            &build_filter_pins_batch(&window, &filter_nodes_for_drag),
-        );
-        window.set_pending_pins_batch(SharedString::from(pins_batch.as_str()));
 
         // Update minimap data
         update_minimap_data(&window, &nodes_for_drag, &filter_nodes_for_drag);
@@ -675,16 +432,6 @@ fn main() {
             links_for_delete.remove(i);
         }
 
-        // Report deleted link IDs to core so it can update its registry
-        if !deleted_link_ids.is_empty() {
-            let deleted_ids_str = deleted_link_ids
-                .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            window.set_pending_deleted_link_ids(SharedString::from(deleted_ids_str.as_str()));
-        }
-
         // Update minimap data
         update_minimap_data(&window, &nodes_for_delete, &filter_nodes_for_delete);
     });
@@ -722,19 +469,12 @@ fn main() {
             }
         }
 
-        // Remove links in reverse order to maintain valid indices
+        // Remove links in reverse order
         for &i in indices_to_remove.iter().rev() {
             links_for_link_delete.remove(i);
         }
-
-        // Report deleted link IDs to core so it can update its registry
-        let deleted_ids_str = ids_to_delete
-            .iter()
-            .map(|id| id.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        window.set_pending_deleted_link_ids(SharedString::from(deleted_ids_str.as_str()));
     });
+
 
     // Handle adding new nodes (Ctrl+N)
     let nodes_for_add = nodes.clone();

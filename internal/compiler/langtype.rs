@@ -699,6 +699,11 @@ pub enum BuiltinPublicStruct {
     Color,
     LogicalPosition,
     StandardListViewItem,
+    LinkData,
+    NodeRect,
+    PinPosition,
+    LinkPath,
+    NodeData,
 }
 
 impl BuiltinPublicStruct {
@@ -707,6 +712,11 @@ impl BuiltinPublicStruct {
             Self::Color => Some(SmolStr::new_static("color")),
             Self::LogicalPosition => Some(SmolStr::new_static("Point")),
             Self::StandardListViewItem => Some(SmolStr::new_static("StandardListViewItem")),
+            Self::LinkData => Some(SmolStr::new_static("LinkData")),
+            Self::NodeRect => Some(SmolStr::new_static("NodeRect")),
+            Self::PinPosition => Some(SmolStr::new_static("PinPosition")),
+            Self::LinkPath => Some(SmolStr::new_static("LinkPath")),
+            Self::NodeData => Some(SmolStr::new_static("NodeData")),
         }
     }
 }

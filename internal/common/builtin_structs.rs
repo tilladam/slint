@@ -224,6 +224,91 @@ macro_rules! for_each_builtin_structs {
                 }
                 private {}
             }
+
+            /// Represents a link between two pins in a node editor.
+            struct LinkData {
+                @name = BuiltinPublicStruct::LinkData,
+                export {
+                    /// Unique link identifier
+                    id: i32,
+                    /// Starting pin ID
+                    start_pin_id: i32,
+                    /// Ending pin ID
+                    end_pin_id: i32,
+                    /// Link color
+                    color: Color,
+                    /// SVG path commands
+                    path_commands: SharedString,
+                }
+                private {
+                }
+            }
+
+            /// Represents a node's rectangle in a node editor.
+            struct NodeRect {
+                @name = BuiltinPublicStruct::NodeRect,
+                export {
+                    /// Unique node identifier
+                    id: i32,
+                    /// Screen X position
+                    x: Coord,
+                    /// Screen Y position
+                    y: Coord,
+                    /// Width
+                    width: Coord,
+                    /// Height
+                    height: Coord,
+                }
+                private {
+                }
+            }
+
+            /// Represents a pin's relative position within a node.
+            struct PinPosition {
+                @name = BuiltinPublicStruct::PinPosition,
+                export {
+                    /// Unique pin identifier
+                    id: i32,
+                    /// Relative X offset from node top-left
+                    rel_x: Coord,
+                    /// Relative Y offset from node top-left
+                    rel_y: Coord,
+                }
+                private {
+                }
+            }
+
+            /// Represents a computed link path in a node editor.
+            struct LinkPath {
+                @name = BuiltinPublicStruct::LinkPath,
+                export {
+                    /// Unique link identifier
+                    id: i32,
+                    /// Core-generated SVG path commands
+                    path_commands: SharedString,
+                    /// Link color
+                    color: Color,
+                }
+                private {
+                }
+            }
+
+            /// Standard node data structure for node editors.
+            struct NodeData {
+                @name = BuiltinPublicStruct::NodeData,
+                export {
+                    /// Unique node identifier
+                    id: i32,
+                    /// Display title/label
+                    title: SharedString,
+                    /// X position in world coordinates (unscaled)
+                    world_x: f32,
+                    /// Y position in world coordinates (unscaled)
+                    world_y: f32,
+                }
+                private {
+                }
+            }
         ];
     };
 }

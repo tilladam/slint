@@ -29,6 +29,7 @@
 use super::{
     Item, ItemConsts, ItemRc, ItemRendererRef, KeyEventResult, RenderingResult,
 };
+use crate::item_tree::ItemWeak;
 use crate::graphics::{Brush, Color};
 use crate::input::{
     FocusEvent, FocusEventResult, FocusReason, InputEventFilterResult, InputEventResult, KeyEvent,
@@ -39,6 +40,8 @@ use crate::layout::{LayoutInfo, Orientation};
 use crate::lengths::{
     LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector,
 };
+use crate::model::{Model, ModelRc, ModelChangeListener, ModelChangeListenerContainer};
+use super::NodeRect;
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
 use crate::window::{WindowAdapter, WindowInner};
@@ -48,7 +51,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::rc::Rc;
 use alloc::string::String;
 use const_field_offset::FieldOffsets;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::pin::Pin;
 use i_slint_core_macros::*;
 
@@ -56,8 +59,64 @@ use i_slint_core_macros::*;
 // For now, we use simple void callbacks. The actual event data can be retrieved via properties.
 // TODO: Add proper callback argument types once builtin_structs integration is done.
 
+/// Model change listener for the links model
+/// This receives notifications when links are added, removed, or changed
+/// It shares a reference to the dirty flag with the BackgroundState
+struct BackgroundLinksListener {
+    links_dirty: Rc<Cell<bool>>,
+    item_weak: ItemWeak,
+}
+
+impl ModelChangeListener for BackgroundLinksListener {
+    fn row_added(self: Pin<&Self>, _index: usize, _count: usize) {
+        // Mark links as dirty when rows are added
+        self.links_dirty.set(true);
+        // Trigger re-render
+        self.trigger_update();
+    }
+
+    fn row_removed(self: Pin<&Self>, _index: usize, _count: usize) {
+        // Mark links as dirty when rows are removed
+        self.links_dirty.set(true);
+        // Trigger re-render
+        self.trigger_update();
+    }
+
+    fn row_changed(self: Pin<&Self>, _row: usize) {
+        // Mark links as dirty when a row is modified
+        self.links_dirty.set(true);
+        // Trigger re-render
+        self.trigger_update();
+    }
+
+    fn reset(self: Pin<&Self>) {
+        // Mark links as dirty on full reset
+        self.links_dirty.set(true);
+        // Trigger re-render
+        self.trigger_update();
+    }
+}
+
+impl BackgroundLinksListener {
+    fn trigger_update(&self) {
+        // Mark links as dirty so they'll be regenerated on next render
+        self.links_dirty.set(true);
+
+        // Trigger re-render by marking link_paths property as dirty
+        // This is CRITICAL - without this, Slint won't call render() again
+        if let Some(item_rc) = self.item_weak.upgrade() {
+            if let Some(bg) = item_rc.downcast::<NodeEditorBackground>() {
+                let bg_pin: core::pin::Pin<&NodeEditorBackground> = bg.as_pin_ref();
+                // Get and set the property to mark it dirty
+                let current: crate::model::ModelRc<super::LinkPath> =
+                    NodeEditorBackground::FIELD_OFFSETS.link_paths.apply_pin(bg_pin).get();
+                NodeEditorBackground::FIELD_OFFSETS.link_paths.apply_pin(bg_pin).set(current);
+            }
+        }
+    }
+}
+
 /// Internal state for the node editor background (grid caching)
-#[derive(Default)]
 struct BackgroundState {
     /// Cached grid parameters to detect changes
     last_width: f32,
@@ -67,25 +126,54 @@ struct BackgroundState {
     last_zoom: f32,
     last_spacing: f32,
 
+    /// Whether link paths need regeneration (shared with listener)
+    links_dirty: Rc<Cell<bool>>,
+
     // Link registry (moved from Overlay)
     /// Known links (link_id -> link record)
     links: BTreeMap<i32, LinkRecord>,
     /// Pin relative offsets (pin_id -> (rel_x, rel_y))
     pin_relative_offsets: BTreeMap<i32, (f32, f32)>,
     /// Node rectangles for link position calculation
-    node_rects: BTreeMap<i32, NodeRect>,
+    node_rects: BTreeMap<i32, super::NodeRect>,
+
+    /// Model change listener for links (keeps the listener alive)
+    links_listener: Option<Pin<Box<ModelChangeListenerContainer<BackgroundLinksListener>>>>,
+    /// Last links model reference (for detecting model changes)
+    last_links_model: Option<ModelRc<super::LinkData>>,
+}
+
+impl Default for BackgroundState {
+    fn default() -> Self {
+        Self {
+            last_width: 0.0,
+            last_height: 0.0,
+            last_pan_x: 0.0,
+            last_pan_y: 0.0,
+            last_zoom: 1.0,
+            last_spacing: 0.0,
+            links_dirty: Rc::new(Cell::new(false)),
+            links: BTreeMap::new(),
+            pin_relative_offsets: BTreeMap::new(),
+            node_rects: BTreeMap::new(),
+            links_listener: None,
+            last_links_model: None,
+        }
+    }
 }
 
 /// Wraps the background internal state properly with RefCell
 #[repr(C)]
 pub struct BackgroundData {
     state: RefCell<BackgroundState>,
+    item_weak: once_cell::unsync::OnceCell<ItemWeak>,
 }
 
 impl Default for BackgroundData {
     fn default() -> Self {
         Self {
             state: RefCell::new(BackgroundState::default()),
+            item_weak: once_cell::unsync::OnceCell::new(),
         }
     }
 }
@@ -316,7 +404,7 @@ fn create_bezier_from_endpoints(
 fn compute_absolute_pin_position(
     relative_x: f32,
     relative_y: f32,
-    node_rect: &NodeRect,
+    node_rect: &super::NodeRect,
     zoom: f32,
 ) -> (f32, f32) {
     let abs_x = node_rect.x + relative_x * zoom;
@@ -324,20 +412,7 @@ fn compute_absolute_pin_position(
     (abs_x, abs_y)
 }
 
-/// Node rectangle info for hit-testing and box selection
-#[derive(Clone, Copy, Debug, Default)]
-struct NodeRect {
-    /// Screen X position
-    x: f32,
-    /// Screen Y position
-    y: f32,
-    /// Width
-    width: f32,
-    /// Height
-    height: f32,
-}
-
-impl NodeRect {
+impl super::NodeRect {
     /// Check if this rect intersects with the given selection box
     fn intersects(&self, sel_x: f32, sel_y: f32, sel_width: f32, sel_height: f32) -> bool {
         self.x < sel_x + sel_width
@@ -384,7 +459,7 @@ struct NodeEditorState {
     /// Pin relative offsets (pin_id -> (rel_x, rel_y) in unscaled coordinates from node top-left)
     pin_relative_offsets: BTreeMap<i32, (f32, f32)>,
     /// Known node rectangles for hit-testing and box selection (node_id -> screen rect)
-    node_rects: BTreeMap<i32, NodeRect>,
+    node_rects: BTreeMap<i32, super::NodeRect>,
     /// Set of selected node IDs (owned by core)
     selected_node_ids: BTreeSet<i32>,
     /// Set of selected link IDs (owned by core)
@@ -457,6 +532,32 @@ pub struct NodeEditorBackground {
     /// Generated SVG path commands for grid lines (output, bind Path.commands to this)
     pub grid_commands: Property<SharedString>,
 
+    // === Direct model bindings (inputs) ===
+    /// Application's link model
+    pub links: Property<ModelRc<super::LinkData>>,
+    /// Node positions (from nodes)
+    pub node_rects: Property<ModelRc<super::NodeRect>>,
+    /// Pin positions (from layout)
+    pub pin_positions: Property<ModelRc<super::PinPosition>>,
+
+    // === Derived outputs (computed from models) ===
+    /// Computed from links + positions
+    pub link_paths: Property<ModelRc<super::LinkPath>>,
+
+    // === Node rectangle reporting (for link calculation) ===
+    pub reporting_node_id: Property<i32>,
+    pub reporting_node_x: Property<LogicalLength>,
+    pub reporting_node_y: Property<LogicalLength>,
+    pub reporting_node_width: Property<LogicalLength>,
+    pub reporting_node_height: Property<LogicalLength>,
+    pub node_rect_changed: Callback<()>,
+
+    // === Pin position reporting (for link calculation) ===
+    pub reporting_pin_id: Property<i32>,
+    pub reporting_pin_rel_x: Property<LogicalLength>,
+    pub reporting_pin_rel_y: Property<LogicalLength>,
+    pub pin_position_changed: Callback<()>,
+
     // Link reporting (input from application)
     /// Link ID being reported (set before calling link_reported)
     pub reporting_link_id: Property<i32>,
@@ -476,7 +577,6 @@ pub struct NodeEditorBackground {
     // Pin and node position reporting (needed for link calculation)
     /// Batch of pending pin positions (format: "id,rel_x,rel_y;...")
     pub pending_pins_batch: Property<SharedString>,
-    /// Batch of pending node rects (format: "id,x,y,w,h;...")
     pub pending_node_rects_batch: Property<SharedString>,
 
     // Link bezier paths (output - generated by core)
@@ -484,7 +584,8 @@ pub struct NodeEditorBackground {
     /// Format: "id|path_commands|color_argb;id|path_commands|color_argb;..."
     pub link_bezier_paths: Property<SharedString>,
     /// Callback when link positions have been updated
-    pub link_positions_changed: Callback<()>,
+    pub link_positions_changed: Callback<()>
+,
 
     // Query mechanism for link hit-testing
     pub query_link_at_x: Property<LogicalLength>,
@@ -504,6 +605,9 @@ pub struct NodeEditorBackground {
 
 impl Item for NodeEditorBackground {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {
+        // Store weak reference for use in ModelChangeListener
+        let _ = self.data.item_weak.set(_self_rc.downgrade());
+
         // Set up callback for link hit-testing query
         Self::FIELD_OFFSETS.handle_link_query.apply_pin(self).set_handler({
             let self_weak = _self_rc.downgrade();
@@ -520,6 +624,63 @@ impl Item for NodeEditorBackground {
             move |()| {
                 if let Some(self_rc) = self_weak.upgrade() {
                     Self::invoke_process_pending_reports(&self_rc);
+                }
+            }
+        });
+
+        // Set up callback for node rectangle reporting
+        Self::FIELD_OFFSETS.node_rect_changed.apply_pin(self).set_handler({
+            let self_weak = _self_rc.downgrade();
+            move |()| {
+                if let Some(self_rc) = self_weak.upgrade() {
+                    if let Some(bg) = self_rc.downcast::<NodeEditorBackground>() {
+                        let bg_pin = bg.as_pin_ref();
+                        let id = bg_pin.reporting_node_id();
+                        if id > 0 {
+                            let rect = super::NodeRect {
+                                id,
+                                x: bg_pin.reporting_node_x().get(),
+                                y: bg_pin.reporting_node_y().get(),
+                                width: bg_pin.reporting_node_width().get(),
+                                height: bg_pin.reporting_node_height().get(),
+                            };
+
+                            let mut state = bg_pin.data.state.borrow_mut();
+                            state.node_rects.insert(id, rect);
+                            state.links_dirty.set(true);
+                            drop(state);
+
+                            // Trigger re-render by marking link_paths property as dirty
+                            let current = Self::FIELD_OFFSETS.link_paths.apply_pin(bg_pin).get();
+                            Self::FIELD_OFFSETS.link_paths.apply_pin(bg_pin).set(current);
+                        }
+                    }
+                }
+            }
+        });
+
+        // Set up callback for pin position reporting
+        Self::FIELD_OFFSETS.pin_position_changed.apply_pin(self).set_handler({
+            let self_weak = _self_rc.downgrade();
+            move |()| {
+                if let Some(self_rc) = self_weak.upgrade() {
+                    if let Some(bg) = self_rc.downcast::<NodeEditorBackground>() {
+                        let bg_pin = bg.as_pin_ref();
+                        let id = bg_pin.reporting_pin_id();
+                        if id > 0 {
+                            let rel_x = bg_pin.reporting_pin_rel_x().get();
+                            let rel_y = bg_pin.reporting_pin_rel_y().get();
+
+                            let mut state = bg_pin.data.state.borrow_mut();
+                            state.pin_relative_offsets.insert(id, (rel_x, rel_y));
+                            state.links_dirty.set(true);
+                            drop(state);
+
+                            // Trigger re-render by marking link_paths property as dirty
+                            let current = Self::FIELD_OFFSETS.link_paths.apply_pin(bg_pin).get();
+                            Self::FIELD_OFFSETS.link_paths.apply_pin(bg_pin).set(current);
+                        }
+                    }
                 }
             }
         });
@@ -625,11 +786,22 @@ impl Item for NodeEditorBackground {
             drop(state);
         }
 
+        // Synchronize links model and attach listener if model changed
+        self.sync_links_model();
+
         // Process pending link/pin/node reports
+        // This must happen BEFORE regenerating link paths so we have position data
         self.process_pending_reports();
 
-        // Regenerate link bezier paths if data changed
-        // Note: regenerate_link_paths is called within process_pending_reports if needed
+        // Regenerate link paths if needed (AFTER processing reports)
+        let state = self.data.state.borrow();
+        if state.links_dirty.get() {
+            state.links_dirty.set(false);
+            drop(state);
+            self.regenerate_link_paths();
+        } else {
+            drop(state);
+        }
 
         // Continue rendering children (which includes the grid Path)
         RenderingResult::ContinueRenderingChildren
@@ -693,7 +865,7 @@ impl NodeEditorBackground {
                         parts[3].parse::<f32>(),
                         parts[4].parse::<f32>(),
                     ) {
-                        state.node_rects.insert(id, NodeRect { x, y, width: w, height: h });
+                        state.node_rects.insert(id, NodeRect { id, x, y, width: w, height: h });
                         needs_regeneration = true;
                     }
                 }
@@ -737,11 +909,15 @@ impl NodeEditorBackground {
             needs_regeneration = true;
         }
 
-        drop(state);
+        // NOTE: Model synchronization is now handled by sync_links_model() in render()
+        // which attaches a ModelChangeListener for reactive updates.
+        // No manual polling needed here.
 
         if needs_regeneration {
-            self.regenerate_link_paths();
+            state.links_dirty.set(true);
         }
+
+        drop(state);
     }
 
     /// Regenerate all link bezier paths based on current node rects and pin offsets
@@ -750,6 +926,7 @@ impl NodeEditorBackground {
         let zoom = self.zoom();
 
         let mut bezier_results = alloc::vec::Vec::new();
+        let mut link_paths = alloc::vec::Vec::new();
 
         for (link_id, link) in state.links.iter() {
             let start_node_id = pin_id::get_node_id(link.start_pin_id);
@@ -765,12 +942,20 @@ impl NodeEditorBackground {
                 if let (Some(&(start_rel_x, start_rel_y)), Some(&(end_rel_x, end_rel_y))) =
                     (start_offset, end_offset)
                 {
-                    let (start_x, start_y) = compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect, zoom);
-                    let (end_x, end_y) = compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect, zoom);
+                    let (start_x, start_y) =
+                        compute_absolute_pin_position(start_rel_x, start_rel_y, start_rect, zoom);
+                    let (end_x, end_y) =
+                        compute_absolute_pin_position(end_rel_x, end_rel_y, end_rect, zoom);
 
                     let color_argb = link.color.as_argb_encoded();
                     let path_cmd = generate_bezier_path_command(start_x, start_y, end_x, end_y, zoom);
                     bezier_results.push(alloc::format!("{}|{}|{}", link_id, path_cmd, color_argb));
+
+                    link_paths.push(super::LinkPath {
+                        id: *link_id,
+                        path_commands: SharedString::from(&path_cmd),
+                        color: link.color,
+                    });
                 }
             }
         }
@@ -778,7 +963,16 @@ impl NodeEditorBackground {
         drop(state);
 
         let bezier_data_str = bezier_results.join(";");
-        Self::FIELD_OFFSETS.link_bezier_paths.apply_pin(self).set(SharedString::from(&bezier_data_str));
+        Self::FIELD_OFFSETS
+            .link_bezier_paths
+            .apply_pin(self)
+            .set(SharedString::from(&bezier_data_str));
+
+        // Update the new structured model property
+        Self::FIELD_OFFSETS.link_paths.apply_pin(self).set(ModelRc::from(Rc::new(
+            crate::model::VecModel::from(link_paths),
+        )));
+
         self.link_positions_changed.call(&());
     }
 
@@ -844,6 +1038,70 @@ impl NodeEditorBackground {
     fn invoke_process_pending_reports(item_rc: &ItemRc) {
         if let Some(bg) = item_rc.downcast::<NodeEditorBackground>() {
             bg.as_pin_ref().process_pending_reports();
+        }
+    }
+
+    /// Synchronize the links model and attach ModelChangeListener if model changed
+    /// Called from render() to detect when the model property is updated
+    fn sync_links_model(self: Pin<&Self>) {
+        let links_property = Self::FIELD_OFFSETS.links.apply_pin(self);
+
+        // Always get the current model
+        let links_model = links_property.get();
+        let mut state = self.data.state.borrow_mut();
+
+        // Check if model reference changed (comparing to last known model)
+        let model_changed = match &state.last_links_model {
+            None => true, // First time, always setup
+            Some(last) => last != &links_model, // Compare references
+        };
+
+        if !model_changed {
+            return; // Same model, listener already attached
+        }
+
+        // Model changed - create new listener with shared dirty flag
+        // Get item_weak for triggering re-renders
+        let item_weak = self.data.item_weak.get()
+            .expect("item_weak should be set in init()")
+            .clone();
+
+        let listener = Box::pin(ModelChangeListenerContainer::new(
+            BackgroundLinksListener {
+                links_dirty: state.links_dirty.clone(),
+                item_weak,
+            }
+        ));
+
+        // Attach peer to model's tracker
+        let peer = listener.as_ref().model_peer();
+        links_model.model_tracker().attach_peer(peer);
+
+        // Store listener and model reference
+        state.links_listener = Some(listener);
+        state.last_links_model = Some(links_model.clone());
+
+        // Do full sync when model reference changes
+        self.sync_links_full_locked(&mut state, &links_model);
+
+        // Mark that we need to regenerate paths
+        state.links_dirty.set(true);
+        drop(state);
+    }
+
+    /// Synchronize the internal link registry from the declarative links model
+    /// Called with state already locked
+    fn sync_links_full_locked(self: Pin<&Self>, state: &mut BackgroundState, links_model: &ModelRc<super::LinkData>) {
+        // Rebuild registry from model
+        state.links.clear();
+        for i in 0..links_model.row_count() {
+            if let Some(link) = links_model.row_data(i) {
+                state.links.insert(link.id, LinkRecord {
+                    start_pin_id: link.start_pin_id,
+                    end_pin_id: link.end_pin_id,
+                    color: link.color,
+                });
+            }
         }
     }
 }
@@ -970,6 +1228,11 @@ pub struct NodeEditorOverlay {
     // === Pin position reporting (for hit-testing during link creation) ===
     /// Hit radius for pin detection
     pub pin_hit_radius: Property<LogicalLength>,
+    /// Pin reporting (for hit-testing)
+    pub reporting_pin_id: Property<i32>,
+    pub reporting_pin_rel_x: Property<LogicalLength>,
+    pub reporting_pin_rel_y: Property<LogicalLength>,
+    pub pin_position_changed: Callback<()>,
     /// Batch of pending pin positions to register (format: "id,x,y;...")
     /// Used when multiple pins report positions at once (e.g., on viewport change)
     pub pending_pins_batch: Property<SharedString>,
@@ -1048,7 +1311,27 @@ pub struct NodeEditorOverlay {
 }
 
 impl Item for NodeEditorOverlay {
-    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {
+        // Set up callback for pin position reporting
+        Self::FIELD_OFFSETS.pin_position_changed.apply_pin(self).set_handler({
+            let self_weak = _self_rc.downgrade();
+            move |()| {
+                if let Some(self_rc) = self_weak.upgrade() {
+                    if let Some(overlay) = self_rc.downcast::<NodeEditorOverlay>() {
+                        let overlay_pin = overlay.as_pin_ref();
+                        let id = overlay_pin.reporting_pin_id();
+                        if id > 0 {
+                            let rel_x = overlay_pin.reporting_pin_rel_x().get();
+                            let rel_y = overlay_pin.reporting_pin_rel_y().get();
+
+                            let mut state = overlay_pin.data.state.borrow_mut();
+                            state.pin_relative_offsets.insert(id, (rel_x, rel_y));
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -1398,6 +1681,7 @@ impl NodeEditorOverlay {
             state.node_rects.insert(
                 reporting_node,
                 NodeRect {
+                    id: reporting_node,
                     x: node_x,
                     y: node_y,
                     width: node_width,
@@ -1431,6 +1715,7 @@ impl NodeEditorOverlay {
                         state.node_rects.insert(
                             id,
                             NodeRect {
+                                id,
                                 x,
                                 y,
                                 width: w,

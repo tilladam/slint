@@ -219,8 +219,9 @@ pub use i_slint_core::component_factory::ComponentFactory;
 #[cfg(not(target_arch = "wasm32"))]
 pub use i_slint_core::graphics::{BorrowedOpenGLTextureBuilder, BorrowedOpenGLTextureOrigin};
 pub use i_slint_core::model::{
-    FilterModel, MapModel, Model, ModelExt, ModelNotify, ModelPeer, ModelRc, ModelTracker,
-    ReverseModel, SortModel, StandardListViewItem, TableColumn, VecModel,
+    FilterModel, LinkData, LinkPath, MapModel, Model, ModelExt, ModelNotify, ModelPeer, ModelRc,
+    ModelTracker, NodeData, NodeRect, PinPosition, ReverseModel, SortModel, StandardListViewItem,
+    TableColumn, VecModel,
 };
 pub use i_slint_core::timers::{Timer, TimerMode};
 pub use i_slint_core::translations::{SelectBundledTranslationError, select_bundled_translation};

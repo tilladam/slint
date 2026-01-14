@@ -194,36 +194,6 @@ export enum MinimapPosition {
     bottom-right,
 }
 
-/// Standard node data structure for applications.
-/// Contains the minimal required fields for node positioning and identification.
-/// Applications can extend this or create custom structures for domain-specific data.
-export struct NodeData {
-    /// Unique node identifier
-    id: int,
-    /// Display title/label
-    title: string,
-    /// X position in world coordinates (unscaled)
-    world-x: float,
-    /// Y position in world coordinates (unscaled)
-    world-y: float,
-}
-
-/// Standard link data structure for applications.
-/// Contains the minimal required fields for link rendering and identification.
-export struct LinkData {
-    /// Unique link identifier
-    id: int,
-    /// Starting pin ID (typically output pin)
-    start-pin-id: int,
-    /// Ending pin ID (typically input pin)
-    end-pin-id: int,
-    /// Link color
-    color: color,
-    /// Core-generated bezier path commands (set by application from core's output)
-    /// Format: "M x0 y0 C x1 y1 x2 y2 x3 y3" (SVG path syntax)
-    path-commands: string,
-}
-
 /// Minimap component for bird's-eye view of the node graph.
 ///
 /// Displays a scaled-down overview of all nodes and the current viewport.
@@ -464,6 +434,9 @@ export component BaseNode inherits Rectangle {
     /// Called when a pin drag ends (pin-id, screen-x, screen-y)
     callback pin-drag-ended(int, length, length);
 
+    /// Called when a pin reports its relative position (id, rel-x, rel-y)
+    callback pin-position-changed(int, length, length);
+
     /// Called when node is clicked (node-id, shift-held)
     callback clicked(int, bool);
 
@@ -632,11 +605,25 @@ export component Pin inherits Rectangle {
     /// Coordinates are already offset by node position
     callback drag-ended(int, length, length);
 
+    /// Callback to report pin relative position (id, rel-x, rel-y)
+    callback report-position(int, length, length);
+
     // Rectangle styling
     width: pin-size;
     height: pin-size;
     background: touch.has-hover ? hover-color : base-color;
     border-radius: pin-radius;
+
+    // Report position on init and when it changes
+    init => {
+        report-position(pin-id, center-x, center-y);
+    }
+    changed center-x => {
+        report-position(pin-id, center-x, center-y);
+    }
+    changed center-y => {
+        report-position(pin-id, center-x, center-y);
+    }
 
     // Drag interaction
     touch := TouchArea {
@@ -784,6 +771,23 @@ export component NodeEditor {
 
     // === Input: Pin position reporting ===
     in property <length> pin-hit-radius <=> overlay.pin-hit-radius;
+    in property <int> reporting-pin-id;
+    in property <length> reporting-pin-rel-x;
+    in property <length> reporting-pin-rel-y;
+
+    changed reporting-pin-id => {
+        background-layer.reporting-pin-id = reporting-pin-id;
+        overlay.reporting-pin-id = reporting-pin-id;
+    }
+    changed reporting-pin-rel-x => {
+        background-layer.reporting-pin-rel-x = reporting-pin-rel-x;
+        overlay.reporting-pin-rel-x = reporting-pin-rel-x;
+    }
+    changed reporting-pin-rel-y => {
+        background-layer.reporting-pin-rel-y = reporting-pin-rel-y;
+        overlay.reporting-pin-rel-y = reporting-pin-rel-y;
+    }
+
     // NOTE: Pin positions need to go to BOTH Background (for link rendering) AND Overlay (for pin hit-testing)
     in-out property <string> pending-pins-batch;
 
@@ -800,11 +804,33 @@ export component NodeEditor {
     out property <int> requested-link-end-pin: overlay.requested-link-end-pin;
 
     // === Input: Node rectangle reporting ===
-    in property <int> reporting-node-id <=> overlay.reporting-node-id;
-    in property <length> reporting-node-x <=> overlay.reporting-node-x;
-    in property <length> reporting-node-y <=> overlay.reporting-node-y;
-    in property <length> reporting-node-width <=> overlay.reporting-node-width;
-    in property <length> reporting-node-height <=> overlay.reporting-node-height;
+    in property <int> reporting-node-id;
+    in property <length> reporting-node-x;
+    in property <length> reporting-node-y;
+    in property <length> reporting-node-width;
+    in property <length> reporting-node-height;
+
+    changed reporting-node-id => {
+        background-layer.reporting-node-id = reporting-node-id;
+        overlay.reporting-node-id = reporting-node-id;
+    }
+    changed reporting-node-x => {
+        background-layer.reporting-node-x = reporting-node-x;
+        overlay.reporting-node-x = reporting-node-x;
+    }
+    changed reporting-node-y => {
+        background-layer.reporting-node-y = reporting-node-y;
+        overlay.reporting-node-y = reporting-node-y;
+    }
+    changed reporting-node-width => {
+        background-layer.reporting-node-width = reporting-node-width;
+        overlay.reporting-node-width = reporting-node-width;
+    }
+    changed reporting-node-height => {
+        background-layer.reporting-node-height = reporting-node-height;
+        overlay.reporting-node-height = reporting-node-height;
+    }
+
     // NOTE: Node rects need to go to BOTH Background (for link rendering) AND Overlay (for box selection & pin hit-testing)
     in-out property <string> pending-node-rects-batch;
 
@@ -815,6 +841,7 @@ export component NodeEditor {
     }
 
     // === Input: Link reporting (NOW BOUND TO BACKGROUND LAYER) ===
+    in property <[LinkData]> links <=> background-layer.links;
     in property <int> reporting-link-id <=> background-layer.reporting-link-id;
     in property <int> reporting-link-start-pin-id <=> background-layer.reporting-link-start-pin-id;
     in property <int> reporting-link-end-pin-id <=> background-layer.reporting-link-end-pin-id;
@@ -824,8 +851,8 @@ export component NodeEditor {
 
     // === Output: Link position data (FROM BACKGROUND LAYER) ===
     // NOTE: link-positions-data removed - legacy format no longer generated
-    /// Core-generated bezier paths for all links
-    in-out property <string> link-bezier-paths <=> background-layer.link-bezier-paths;
+    /// Structured bezier path data for all links
+    out property <[LinkPath]> link-paths <=> background-layer.link-paths;
 
     // === Output: Selection state ===
     /// Selected node IDs from box selection (comma-separated)
@@ -850,6 +877,16 @@ export component NodeEditor {
     callback start-link <=> overlay.start-link;
     callback link-reported <=> background-layer.link-reported;
     callback node-clicked <=> overlay.node-clicked;
+    callback node-rect-changed;
+    node-rect-changed => {
+        background-layer.node-rect-changed();
+        overlay.node-rect-changed();
+    }
+    callback pin-position-changed;
+    pin-position-changed => {
+        background-layer.pin-position-changed();
+        overlay.pin-position-changed();
+    }
 
     // === Callbacks: Events ===
     callback link-requested <=> overlay.link-requested;

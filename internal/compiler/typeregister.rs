@@ -424,6 +424,7 @@ impl TypeRegister {
             ($pub_type:ident, f32) => { Type::Float32 };
             ($pub_type:ident, SharedString) => { Type::String };
             ($pub_type:ident, Image) => { Type::Image };
+            ($pub_type:ident, Color) => { Type::Color };
             ($pub_type:ident, Coord) => { Type::LogicalLength };
             ($pub_type:ident, LogicalPosition) => { Type::Struct(logical_point_type()) };
             ($pub_type:ident, KeyboardModifiers) => { $pub_type.clone() };

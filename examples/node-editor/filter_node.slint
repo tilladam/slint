@@ -261,6 +261,7 @@ export component FilterNode inherits BaseNode {
         drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
         drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
         drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
+        report-position(id, x, y) => { root.pin-position-changed(id, x, y); }
     }
 
     // Control Input pin (yellow, left side, row 2)
@@ -277,6 +278,7 @@ export component FilterNode inherits BaseNode {
         drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
         drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
         drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
+        report-position(id, x, y) => { root.pin-position-changed(id, x, y); }
     }
 
     // Data Output pin (blue, right side, row 1)
@@ -293,5 +295,6 @@ export component FilterNode inherits BaseNode {
         drag-started(id, x, y) => { root.pin-drag-started(id, x, y); }
         drag-moved(id, x, y) => { root.pin-drag-moved(id, x, y); }
         drag-ended(id, x, y) => { root.pin-drag-ended(id, x, y); }
+        report-position(id, x, y) => { root.pin-position-changed(id, x, y); }
     }
 }
