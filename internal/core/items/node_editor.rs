@@ -1048,6 +1048,7 @@ impl NodeEditorBackground {
 
         // Always get the current model
         let links_model = links_property.get();
+
         let mut state = self.data.state.borrow_mut();
 
         // Check if model reference changed (comparing to last known model)
