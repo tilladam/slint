@@ -1359,12 +1359,17 @@ impl Item for NodeEditorOverlay {
                             std::println!("[OVERLAY] node_rect_changed: id = {}", id);
                         }
                         if id > 0 {
+                            let x = overlay_pin.reporting_node_x().get();
+                            let y = overlay_pin.reporting_node_y().get();
+                            let width = overlay_pin.reporting_node_width().get();
+                            let height = overlay_pin.reporting_node_height().get();
+
                             let rect = super::NodeRect {
                                 id,
-                                x: overlay_pin.reporting_node_x().get(),
-                                y: overlay_pin.reporting_node_y().get(),
-                                width: overlay_pin.reporting_node_width().get(),
-                                height: overlay_pin.reporting_node_height().get(),
+                                x,
+                                y,
+                                width,
+                                height,
                             };
 
                             let mut state = overlay_pin.data.state.borrow_mut();
@@ -1372,7 +1377,7 @@ impl Item for NodeEditorOverlay {
                             #[cfg(feature = "std")]
                             {
                                 extern crate std;
-                                std::println!("[OVERLAY] Stored node rect {}, total node_rects: {}", id, state.node_rects.len());
+                                std::println!("[OVERLAY] Stored node rect {} at ({}, {}), total node_rects: {}", id, x, y, state.node_rects.len());
                             }
                         }
                     }
@@ -1630,12 +1635,21 @@ impl NodeEditorOverlay {
     /// Called from both input_event_filter_before_children and render
     fn check_pending_link_start(self: Pin<&Self>) {
         let pending_pin = self.pending_link_pin_id();
+        {
+            extern crate std;
+            std::println!("[LINK_START] Checking pending_link_pin_id = {}", pending_pin);
+        }
         if pending_pin > 0 {
             let mut state = self.data.state.borrow_mut();
             if !state.is_creating_link {
                 // Start link creation from the pending properties
                 let start_x = self.pending_link_x().get();
                 let start_y = self.pending_link_y().get();
+
+                {
+                    extern crate std;
+                    std::println!("[LINK_START] Starting link creation from pin {}, pos ({}, {})", pending_pin, start_x, start_y);
+                }
 
                 state.is_creating_link = true;
                 state.link_start_pin = pending_pin;

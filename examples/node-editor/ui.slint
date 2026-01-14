@@ -89,6 +89,17 @@ component Node inherits BaseNode {
         }
     }
 
+    // Report pin positions after initialization (for newly added nodes)
+    init => {
+        // Pins report themselves via their own init handlers, but we also
+        // report here to ensure it happens even if pin init runs before node-id is set
+        if (self.node-id > 0) {
+            // Compute pin IDs inline to ensure correct evaluation
+            root.pin-position-changed(PinId.make(self.node-id, PinTypes.input), input-pin.center-x, input-pin.center-y);
+            root.pin-position-changed(PinId.make(self.node-id, PinTypes.output), output-pin.center-x, output-pin.center-y);
+        }
+    }
+
     // Input pin (green) - with drag-to-link support (on top of body TouchArea)
     input-pin := Pin {
         x: 8px * root.zoom;
@@ -421,12 +432,10 @@ export component MainWindow inherits Window {
                 editor.end-node-drag(delta-x, delta-y);
             }
             pin-position-changed(id, x, y) => {
-                editor.reporting-pin-id = id;
-                editor.reporting-pin-rel-x = x;
-                editor.reporting-pin-rel-y = y;
-                editor.pin-position-changed();
+                editor.pin-position-changed(id, x, y);
             }
             pin-drag-started(pin-id, x, y) => {
+                debug("[UI] Basic node pin-drag-started: pin=" + pin-id + ", pos=(" + x/1px + ", " + y/1px + ")");
                 // Start link creation using editor's state machine
                 editor.pending-link-pin-id = pin-id;
                 editor.pending-link-x = x;
@@ -446,12 +455,7 @@ export component MainWindow inherits Window {
                 // Editor handles validation and fires link-created or link-dropped callback
             }
             report-rect(id, x, y, w, h) => {
-                editor.reporting-node-id = id;
-                editor.reporting-node-x = x;
-                editor.reporting-node-y = y;
-                editor.reporting-node-width = w;
-                editor.reporting-node-height = h;
-                editor.node-rect-changed();
+                editor.node-rect-changed(id, x, y, w, h);
             }
         }
 
@@ -487,12 +491,10 @@ export component MainWindow inherits Window {
                 editor.end-node-drag(delta-x, delta-y);
             }
             pin-position-changed(id, x, y) => {
-                editor.reporting-pin-id = id;
-                editor.reporting-pin-rel-x = x;
-                editor.reporting-pin-rel-y = y;
-                editor.pin-position-changed();
+                editor.pin-position-changed(id, x, y);
             }
             pin-drag-started(pin-id, x, y) => {
+                debug("[UI] Filter node pin-drag-started: pin=" + pin-id + ", pos=(" + x/1px + ", " + y/1px + ")");
                 editor.pending-link-pin-id = pin-id;
                 editor.pending-link-x = x;
                 editor.pending-link-y = y;
@@ -508,12 +510,7 @@ export component MainWindow inherits Window {
                 editor.complete-link-creation = true;
             }
             report-rect(id, x, y, w, h) => {
-                editor.reporting-node-id = id;
-                editor.reporting-node-x = x;
-                editor.reporting-node-y = y;
-                editor.reporting-node-width = w;
-                editor.reporting-node-height = h;
-                editor.node-rect-changed();
+                editor.node-rect-changed(id, x, y, w, h);
             }
             filter-type-changed(id, idx) => {
                 root.filter-type-changed(id, idx);

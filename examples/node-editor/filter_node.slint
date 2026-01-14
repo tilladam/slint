@@ -247,6 +247,18 @@ export component FilterNode inherits BaseNode {
         }
     }
 
+    // Report pin positions after initialization (for newly added nodes)
+    init => {
+        // Pins report themselves via their own init handlers, but we also
+        // report here to ensure it happens even if pin init runs before node-id is set
+        if (self.node-id > 0) {
+            // Compute pin IDs inline to ensure correct evaluation
+            root.pin-position-changed(PinId.make(self.node-id, FilterPinTypes.data-input), data-input-pin.center-x, data-input-pin.center-y);
+            root.pin-position-changed(PinId.make(self.node-id, FilterPinTypes.control-input), control-input-pin.center-x, control-input-pin.center-y);
+            root.pin-position-changed(PinId.make(self.node-id, FilterPinTypes.data-output), data-output-pin.center-x, data-output-pin.center-y);
+        }
+    }
+
     // Data Input pin (green, left side, row 1)
     data-input-pin := Pin {
         x: root.pin-margin * root.zoom;

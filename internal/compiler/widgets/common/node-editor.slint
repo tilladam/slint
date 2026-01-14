@@ -469,17 +469,42 @@ export component BaseNode inherits Rectangle {
 
     // === Common Handlers ===
 
-    // Report rect on init
+    // Report rect on init (guarded in case node-id isn't set yet)
     init => {
-        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        if (node-id > 0) {
+            report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        }
     }
 
-    // Report rect whenever screen position changes (for link updates during drag)
+    // Report rect when node-id is set (for newly added nodes)
+    changed node-id => {
+        if (node-id > 0) {
+            report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        }
+    }
+
+    // Report rect whenever screen position OR size changes (for link updates during drag/zoom)
+    // Note: Using changed handlers can cause race conditions when multiple nodes update simultaneously.
+    // The report-rect callback should handle deduplication if needed.
     changed screen-x => {
-        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        if (node-id > 0) {
+            report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        }
     }
     changed screen-y => {
-        report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        if (node-id > 0) {
+            report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        }
+    }
+    changed width => {
+        if (node-id > 0) {
+            report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        }
+    }
+    changed height => {
+        if (node-id > 0) {
+            report-rect(node-id, screen-x, screen-y, self.width, self.height);
+        }
     }
 
     // === Drag Handling ===
@@ -616,13 +641,25 @@ export component Pin inherits Rectangle {
 
     // Report position on init and when it changes
     init => {
-        report-position(pin-id, center-x, center-y);
+        if (pin-id > 0) {
+            report-position(pin-id, center-x, center-y);
+        }
+    }
+    // Report position when pin-id is set (for newly added nodes)
+    changed pin-id => {
+        if (pin-id > 0) {
+            report-position(pin-id, center-x, center-y);
+        }
     }
     changed center-x => {
-        report-position(pin-id, center-x, center-y);
+        if (pin-id > 0) {
+            report-position(pin-id, center-x, center-y);
+        }
     }
     changed center-y => {
-        report-position(pin-id, center-x, center-y);
+        if (pin-id > 0) {
+            report-position(pin-id, center-x, center-y);
+        }
     }
 
     // Drag interaction
@@ -771,9 +808,9 @@ export component NodeEditor {
 
     // === Input: Pin position reporting ===
     in property <length> pin-hit-radius <=> overlay.pin-hit-radius;
-    in property <int> reporting-pin-id;
-    in property <length> reporting-pin-rel-x;
-    in property <length> reporting-pin-rel-y;
+    in-out property <int> reporting-pin-id;
+    in-out property <length> reporting-pin-rel-x;
+    in-out property <length> reporting-pin-rel-y;
 
     changed reporting-pin-id => {
         background-layer.reporting-pin-id = reporting-pin-id;
@@ -804,11 +841,11 @@ export component NodeEditor {
     out property <int> requested-link-end-pin: overlay.requested-link-end-pin;
 
     // === Input: Node rectangle reporting ===
-    in property <int> reporting-node-id;
-    in property <length> reporting-node-x;
-    in property <length> reporting-node-y;
-    in property <length> reporting-node-width;
-    in property <length> reporting-node-height;
+    in-out property <int> reporting-node-id;
+    in-out property <length> reporting-node-x;
+    in-out property <length> reporting-node-y;
+    in-out property <length> reporting-node-width;
+    in-out property <length> reporting-node-height;
 
     changed reporting-node-id => {
         background-layer.reporting-node-id = reporting-node-id;
@@ -877,13 +914,43 @@ export component NodeEditor {
     callback start-link <=> overlay.start-link;
     callback link-reported <=> background-layer.link-reported;
     callback node-clicked <=> overlay.node-clicked;
-    callback node-rect-changed;
-    node-rect-changed => {
+    callback node-rect-changed(/* id */ int, /* x */ length, /* y */ length, /* width */ length, /* height */ length);
+    node-rect-changed(id, x, y, width, height) => {
+        // Set properties directly on all layers to ensure synchronous propagation
+        // (bypassing changed handlers which execute asynchronously)
+        root.reporting-node-id = id;
+        root.reporting-node-x = x;
+        root.reporting-node-y = y;
+        root.reporting-node-width = width;
+        root.reporting-node-height = height;
+        background-layer.reporting-node-id = id;
+        background-layer.reporting-node-x = x;
+        background-layer.reporting-node-y = y;
+        background-layer.reporting-node-width = width;
+        background-layer.reporting-node-height = height;
+        overlay.reporting-node-id = id;
+        overlay.reporting-node-x = x;
+        overlay.reporting-node-y = y;
+        overlay.reporting-node-width = width;
+        overlay.reporting-node-height = height;
+        // Call native handlers (they'll read the properties we just set)
         background-layer.node-rect-changed();
         overlay.node-rect-changed();
     }
-    callback pin-position-changed;
-    pin-position-changed => {
+    callback pin-position-changed(/* id */ int, /* rel-x */ length, /* rel-y */ length);
+    pin-position-changed(id, rel-x, rel-y) => {
+        // Set properties directly on all layers to ensure synchronous propagation
+        // (bypassing changed handlers which execute asynchronously)
+        root.reporting-pin-id = id;
+        root.reporting-pin-rel-x = rel-x;
+        root.reporting-pin-rel-y = rel-y;
+        background-layer.reporting-pin-id = id;
+        background-layer.reporting-pin-rel-x = rel-x;
+        background-layer.reporting-pin-rel-y = rel-y;
+        overlay.reporting-pin-id = id;
+        overlay.reporting-pin-rel-x = rel-x;
+        overlay.reporting-pin-rel-y = rel-y;
+        // Call native handlers (they'll read the properties we just set)
         background-layer.pin-position-changed();
         overlay.pin-position-changed();
     }
