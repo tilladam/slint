@@ -157,29 +157,24 @@ impl<'a> LibInputHandler<'a> {
 
         Ok(mouse_pos_property)
     }
-}
 
-fn set_touch_pos(
-    positions: &mut [(u64, Option<LogicalPosition>); 5],
-    slot: u64,
-    pos: LogicalPosition,
-) {
-    if let Some(entry) = positions.iter_mut().find(|(s, _)| *s == slot) {
-        entry.1 = Some(pos);
-    } else if let Some(entry) = positions.iter_mut().find(|(_, p)| p.is_none()) {
-        *entry = (slot, Some(pos));
+    fn set_touch_pos(&mut self, slot: u64, pos: LogicalPosition) {
+        if let Some(entry) = self.last_touch_positions.iter_mut().find(|(s, _)| *s == slot) {
+            entry.1 = Some(pos);
+        } else if let Some(entry) =
+            self.last_touch_positions.iter_mut().find(|(_, p)| p.is_none())
+        {
+            *entry = (slot, Some(pos));
+        }
     }
-}
 
-fn take_touch_pos(
-    positions: &mut [(u64, Option<LogicalPosition>); 5],
-    slot: u64,
-) -> LogicalPosition {
-    positions
-        .iter_mut()
-        .find(|(s, _)| *s == slot)
-        .and_then(|entry| entry.1.take())
-        .unwrap_or_default()
+    fn take_touch_pos(&mut self, slot: u64) -> LogicalPosition {
+        self.last_touch_positions
+            .iter_mut()
+            .find(|(s, _)| *s == slot)
+            .and_then(|entry| entry.1.take())
+            .unwrap_or_default()
+    }
 }
 
 impl<'a> calloop::EventSource for LibInputHandler<'a> {
@@ -273,7 +268,7 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                             touch_down_event.y_transformed(screen_size.height as u32) as _,
                         );
                         let slot = touch_down_event.slot().unwrap_or(0) as u64;
-                        set_touch_pos(&mut self.last_touch_positions, slot, pos);
+                        self.set_touch_pos(slot, pos);
                         WindowInner::from_pub(window).process_touch_input(
                             slot,
                             logical_point_from_api(pos),
@@ -282,7 +277,7 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                     }
                     input::event::TouchEvent::Up(touch_up_event) => {
                         let slot = touch_up_event.slot().unwrap_or(0) as u64;
-                        let pos = take_touch_pos(&mut self.last_touch_positions, slot);
+                        let pos = self.take_touch_pos(slot);
                         WindowInner::from_pub(window).process_touch_input(
                             slot,
                             logical_point_from_api(pos),
@@ -295,7 +290,7 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                             touch_motion_event.y_transformed(screen_size.height as u32) as _,
                         );
                         let slot = touch_motion_event.slot().unwrap_or(0) as u64;
-                        set_touch_pos(&mut self.last_touch_positions, slot, pos);
+                        self.set_touch_pos(slot, pos);
                         WindowInner::from_pub(window).process_touch_input(
                             slot,
                             logical_point_from_api(pos),
@@ -304,7 +299,7 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                     }
                     input::event::TouchEvent::Cancel(touch_cancel_event) => {
                         let slot = touch_cancel_event.slot().unwrap_or(0) as u64;
-                        let pos = take_touch_pos(&mut self.last_touch_positions, slot);
+                        let pos = self.take_touch_pos(slot);
                         WindowInner::from_pub(window).process_touch_input(
                             slot,
                             logical_point_from_api(pos),
