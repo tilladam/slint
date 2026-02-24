@@ -537,15 +537,24 @@ impl TouchEventBuffer {
 }
 
 /// State of the multi-touch gesture recognizer.
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy)]
 enum GestureRecognitionState {
     /// 0-1 fingers; forwarding as mouse events.
     #[default]
     Idle,
     /// 2 fingers down, waiting for movement to exceed threshold.
-    TwoFingersDown,
+    TwoFingersDown {
+        finger_ids: (u64, u64),
+        initial_distance: f32,
+        last_angle: euclid::Angle<f32>,
+    },
     /// Actively synthesizing PinchGesture/RotationGesture events.
-    Pinching,
+    Pinching {
+        finger_ids: (u64, u64),
+        initial_distance: f32,
+        last_scale: f32,
+        last_angle: euclid::Angle<f32>,
+    },
 }
 
 /// Tracks all active touch points and recognizes pinch/rotation gestures.
@@ -558,15 +567,7 @@ struct TouchState {
     active_touches: TouchMap,
     /// The finger forwarded as mouse events during single-touch.
     primary_touch_id: Option<u64>,
-    /// The two finger IDs participating in the gesture (when in TwoFingersDown or Pinching).
-    gesture_finger_ids: Option<(u64, u64)>,
     gesture_state: GestureRecognitionState,
-    /// Distance between the two fingers when the gesture started.
-    initial_distance: f32,
-    /// Last reported cumulative scale (for computing incremental deltas).
-    last_scale: f32,
-    /// Angle between the two gesture fingers from the previous frame.
-    last_angle: euclid::Angle<f32>,
     /// Last single-finger tap (time + position) for double-tap detection.
     last_tap: Option<(crate::animations::Instant, LogicalPoint)>,
 }
@@ -576,11 +577,7 @@ impl Default for TouchState {
         Self {
             active_touches: TouchMap::default(),
             primary_touch_id: None,
-            gesture_finger_ids: None,
             gesture_state: GestureRecognitionState::Idle,
-            initial_distance: 0.0,
-            last_scale: 1.0,
-            last_angle: euclid::Angle::zero(),
             last_tap: None,
         }
     }
@@ -597,9 +594,26 @@ impl TouchState {
     /// 100 px² ≈ 10px radius, matching [`ClickState::check_repeat`](crate::input::ClickState).
     const DOUBLE_TAP_DISTANCE_SQ: f32 = 100.0;
 
+    /// Returns the finger IDs from the current gesture state, if any.
+    fn gesture_finger_ids(&self) -> Option<(u64, u64)> {
+        match self.gesture_state {
+            GestureRecognitionState::TwoFingersDown { finger_ids, .. }
+            | GestureRecognitionState::Pinching { finger_ids, .. } => Some(finger_ids),
+            GestureRecognitionState::Idle => None,
+        }
+    }
+
+    /// Returns (distance, angle) between two specific touch points.
+    fn geometry_for(&self, (id_a, id_b): (u64, u64)) -> Option<(f32, euclid::Angle<f32>)> {
+        let a = self.active_touches.get(id_a)?;
+        let b = self.active_touches.get(id_b)?;
+        let delta = (b.position - a.position).cast::<f32>();
+        Some((delta.length(), delta.angle_from_x_axis()))
+    }
+
     /// Returns the positions of the two gesture fingers, or `None` if not available.
     fn gesture_finger_positions(&self) -> Option<(&TouchPoint, &TouchPoint)> {
-        let (id_a, id_b) = self.gesture_finger_ids?;
+        let (id_a, id_b) = self.gesture_finger_ids()?;
         let a = self.active_touches.get(id_a)?;
         let b = self.active_touches.get(id_b)?;
         Some((a, b))
@@ -621,16 +635,7 @@ impl TouchState {
 
     /// Returns true if the given touch ID is one of the two gesture fingers.
     fn is_gesture_finger(&self, id: u64) -> bool {
-        self.gesture_finger_ids.is_some_and(|(a, b)| id == a || id == b)
-    }
-
-    /// Snapshot the current two-finger geometry as the baseline for gesture deltas.
-    fn snapshot_initial_geometry(&mut self) {
-        if let Some((dist, angle)) = self.gesture_geometry() {
-            self.initial_distance = dist;
-            self.last_scale = 1.0;
-            self.last_angle = angle;
-        }
+        self.gesture_finger_ids().is_some_and(|(a, b)| id == a || id == b)
     }
 
     /// Run the touch state machine for a single event and return the
@@ -701,9 +706,8 @@ impl TouchState {
             });
         } else if total == 2 {
             // Second finger: transition Idle → TwoFingersDown.
-            if let Some((id_a, id_b)) = self.active_touches.first_two_ids() {
-                self.gesture_finger_ids = Some((id_a, id_b));
-            }
+            let finger_ids = self.active_touches.first_two_ids()
+                .unwrap_or((0, 0));
 
             // Synthesize a Release for the primary finger to clear any
             // Flickable grab / delay state.
@@ -713,8 +717,14 @@ impl TouchState {
                 .map(|tp| tp.position)
                 .unwrap_or(position);
 
-            self.snapshot_initial_geometry();
-            self.gesture_state = GestureRecognitionState::TwoFingersDown;
+            // Compute initial geometry for threshold detection.
+            let (initial_distance, last_angle) = self.geometry_for(finger_ids)
+                .unwrap_or((0.0, euclid::Angle::zero()));
+            self.gesture_state = GestureRecognitionState::TwoFingersDown {
+                finger_ids,
+                initial_distance,
+                last_angle,
+            };
             // Clear double-tap state: a two-finger gesture interrupts the sequence.
             self.last_tap = None;
 
@@ -751,19 +761,25 @@ impl TouchState {
                     events.push(MouseEvent::Moved { position, is_touch: true });
                 }
             }
-            GestureRecognitionState::TwoFingersDown if is_gesture_finger => {
+            GestureRecognitionState::TwoFingersDown {
+                finger_ids, initial_distance, last_angle,
+            } if is_gesture_finger => {
                 if let Some((dist, angle)) = self.gesture_geometry() {
-                    let delta_dist = (dist - self.initial_distance).abs();
+                    let delta_dist = (dist - initial_distance).abs();
                     let delta_angle =
-                        (angle - self.last_angle).signed().to_degrees().abs();
+                        (angle - last_angle).signed().to_degrees().abs();
                     if delta_dist > Self::PINCH_THRESHOLD
                         || delta_angle > Self::ROTATION_THRESHOLD
                     {
-                        self.gesture_state = GestureRecognitionState::Pinching;
                         // Re-snapshot so the first gesture event starts from
                         // the current geometry rather than accumulating the
                         // threshold movement.
-                        self.snapshot_initial_geometry();
+                        self.gesture_state = GestureRecognitionState::Pinching {
+                            finger_ids,
+                            initial_distance: dist,
+                            last_scale: 1.0,
+                            last_angle: angle,
+                        };
 
                         let midpoint = self.gesture_midpoint().unwrap_or(position);
 
@@ -780,23 +796,31 @@ impl TouchState {
                     }
                 }
             }
-            GestureRecognitionState::Pinching if is_gesture_finger => {
+            GestureRecognitionState::Pinching {
+                initial_distance, last_scale, last_angle, ..
+            } if is_gesture_finger => {
                 if let Some((dist, angle)) = self.gesture_geometry() {
                     let midpoint = self.gesture_midpoint().unwrap_or(position);
 
-                    let current_scale = if self.initial_distance > 0.0 {
-                        dist / self.initial_distance
+                    let current_scale = if initial_distance > 0.0 {
+                        dist / initial_distance
                     } else {
                         1.0
                     };
-                    let scale_delta = current_scale - self.last_scale;
-                    self.last_scale = current_scale;
+                    let scale_delta = current_scale - last_scale;
 
                     // `.signed()` wraps to [-pi, pi] so crossing the ±180°
                     // atan2 boundary doesn't produce a full-revolution jump.
                     let rotation_delta =
-                        (angle - self.last_angle).signed().to_degrees();
-                    self.last_angle = angle;
+                        (angle - last_angle).signed().to_degrees();
+
+                    // Update the mutable state for next frame.
+                    if let GestureRecognitionState::Pinching {
+                        last_scale: ref mut ls, last_angle: ref mut la, ..
+                    } = self.gesture_state {
+                        *ls = current_scale;
+                        *la = angle;
+                    }
 
                     events.push(MouseEvent::PinchGesture {
                         position: midpoint,
@@ -842,9 +866,8 @@ impl TouchState {
                     events.push(MouseEvent::Exit);
                 }
             }
-            GestureRecognitionState::TwoFingersDown if is_gesture_finger => {
+            GestureRecognitionState::TwoFingersDown { .. } if is_gesture_finger => {
                 self.gesture_state = GestureRecognitionState::Idle;
-                self.gesture_finger_ids = None;
                 if !is_cancelled {
                     if let Some(remaining) = self.active_touches.first() {
                         let remaining_pos = remaining.position;
@@ -864,10 +887,9 @@ impl TouchState {
                     events.push(MouseEvent::Exit);
                 }
             }
-            GestureRecognitionState::Pinching if is_gesture_finger => {
+            GestureRecognitionState::Pinching { .. } if is_gesture_finger => {
                 let midpoint = self.gesture_midpoint().unwrap_or(position);
                 self.gesture_state = GestureRecognitionState::Idle;
-                self.gesture_finger_ids = None;
 
                 let gesture_phase =
                     if is_cancelled { TouchPhase::Cancelled } else { TouchPhase::Ended };
@@ -1117,12 +1139,12 @@ mod touch_tests {
         // Finger 2 down → synthesized release for finger 1.
         let evs = state.process(2, pt(200.0, 200.0), TouchPhase::Started, CLICK_INTERVAL);
         assert_eq!(classify(&evs), vec![Ev::Released(100.0, 200.0)]);
-        assert_eq!(state.gesture_state, GestureRecognitionState::TwoFingersDown);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::TwoFingersDown { .. }));
 
         // Move finger 2 far enough to trigger pinch (> 8px threshold).
         let evs = state.process(2, pt(220.0, 200.0), TouchPhase::Moved, CLICK_INTERVAL);
         assert_eq!(classify(&evs), vec![Ev::PinchStarted, Ev::RotationStarted]);
-        assert_eq!(state.gesture_state, GestureRecognitionState::Pinching);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::Pinching { .. }));
     }
 
     #[test]
@@ -1135,7 +1157,7 @@ mod touch_tests {
         // Small movement within threshold.
         let evs = state.process(2, pt(202.0, 200.0), TouchPhase::Moved, CLICK_INTERVAL);
         assert!(classify(&evs).is_empty());
-        assert_eq!(state.gesture_state, GestureRecognitionState::TwoFingersDown);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::TwoFingersDown { .. }));
     }
 
     #[test]
@@ -1148,7 +1170,7 @@ mod touch_tests {
 
         // Move finger 2 to (120, 0) to exceed threshold and start pinching.
         state.process(2, pt(120.0, 0.0), TouchPhase::Moved, CLICK_INTERVAL);
-        assert_eq!(state.gesture_state, GestureRecognitionState::Pinching);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::Pinching { .. }));
 
         // Now move finger 2 further to (180, 0).
         // New distance = 180, initial distance (re-snapshotted) = 120.
@@ -1174,7 +1196,7 @@ mod touch_tests {
 
         // Move finger 2 far enough to trigger gesture.
         state.process(2, pt(120.0, 0.0), TouchPhase::Moved, CLICK_INTERVAL);
-        assert_eq!(state.gesture_state, GestureRecognitionState::Pinching);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::Pinching { .. }));
 
         // Rotate ~45° clockwise: move finger 2 from (120, 0) to roughly
         // (70.7, 70.7) which is at 45° from origin.
@@ -1201,7 +1223,7 @@ mod touch_tests {
 
         // Trigger gesture by moving far enough.
         state.process(2, pt(-120.0, -10.0), TouchPhase::Moved, CLICK_INTERVAL);
-        assert_eq!(state.gesture_state, GestureRecognitionState::Pinching);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::Pinching { .. }));
 
         // Rotate across the ±180° boundary: move finger 2 to (-100, 10).
         // New angle = atan2(10, -100) ≈ 174.3°.
@@ -1237,7 +1259,7 @@ mod touch_tests {
         let evs = state.process(2, pt(120.0, 0.0), TouchPhase::Ended, CLICK_INTERVAL);
         let classified = classify(&evs);
         assert_eq!(classified, vec![Ev::PinchEnded, Ev::RotationEnded, Ev::Pressed(0.0, 0.0)]);
-        assert_eq!(state.gesture_state, GestureRecognitionState::Idle);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::Idle));
         assert_eq!(state.primary_touch_id, Some(1));
     }
 
@@ -1262,14 +1284,14 @@ mod touch_tests {
 
         state.process(1, pt(100.0, 200.0), TouchPhase::Started, CLICK_INTERVAL);
         state.process(2, pt(200.0, 200.0), TouchPhase::Started, CLICK_INTERVAL);
-        assert_eq!(state.gesture_state, GestureRecognitionState::TwoFingersDown);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::TwoFingersDown { .. }));
 
         // Lift finger 2 without exceeding movement threshold.
         let evs = state.process(2, pt(200.0, 200.0), TouchPhase::Ended, CLICK_INTERVAL);
         let classified = classify(&evs);
         // Remaining finger 1 gets re-pressed.
         assert_eq!(classified, vec![Ev::Pressed(100.0, 200.0)]);
-        assert_eq!(state.gesture_state, GestureRecognitionState::Idle);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::Idle));
         assert_eq!(state.primary_touch_id, Some(1));
     }
 
@@ -1403,11 +1425,11 @@ mod touch_tests {
         // Two fingers at the exact same position → distance = 0.
         state.process(1, pt(100.0, 100.0), TouchPhase::Started, CLICK_INTERVAL);
         state.process(2, pt(100.0, 100.0), TouchPhase::Started, CLICK_INTERVAL);
-        assert_eq!(state.gesture_state, GestureRecognitionState::TwoFingersDown);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::TwoFingersDown { .. }));
 
         // Move one finger far enough to trigger gesture.
         let evs = state.process(2, pt(120.0, 100.0), TouchPhase::Moved, CLICK_INTERVAL);
-        assert_eq!(state.gesture_state, GestureRecognitionState::Pinching);
+        assert!(matches!(state.gesture_state, GestureRecognitionState::Pinching { .. }));
         let classified = classify(&evs);
         assert_eq!(classified.len(), 2);
         assert_eq!(classified[0], Ev::PinchStarted);
