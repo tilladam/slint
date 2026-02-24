@@ -565,9 +565,8 @@ struct TouchState {
     initial_distance: f32,
     /// Last reported cumulative scale (for computing incremental deltas).
     last_scale: f32,
-    /// Raw atan2 angle (degrees) from the previous frame, used for per-frame
-    /// rotation delta computation via `normalize_angle(current - last)`.
-    last_angle: f32,
+    /// Angle between the two gesture fingers from the previous frame.
+    last_angle: euclid::Angle<f32>,
     /// Last single-finger tap (time + position) for double-tap detection.
     last_tap: Option<(crate::animations::Instant, LogicalPoint)>,
 }
@@ -581,7 +580,7 @@ impl Default for TouchState {
             gesture_state: GestureRecognitionState::Idle,
             initial_distance: 0.0,
             last_scale: 1.0,
-            last_angle: 0.0,
+            last_angle: euclid::Angle::zero(),
             last_tap: None,
         }
     }
@@ -609,20 +608,15 @@ impl TouchState {
     /// Returns the midpoint between the two gesture fingers, or `None`.
     fn gesture_midpoint(&self) -> Option<LogicalPoint> {
         let (a, b) = self.gesture_finger_positions()?;
-        Some(euclid::point2(
-            (a.position.x + b.position.x) / (2 as crate::Coord),
-            (a.position.y + b.position.y) / (2 as crate::Coord),
-        ))
+        let mid = a.position.cast::<f32>().lerp(b.position.cast::<f32>(), 0.5);
+        Some(mid.cast())
     }
 
-    /// Returns (distance, angle_in_degrees) between the two gesture fingers.
-    fn gesture_geometry(&self) -> Option<(f32, f32)> {
+    /// Returns (distance, angle) between the two gesture fingers.
+    fn gesture_geometry(&self) -> Option<(f32, euclid::Angle<f32>)> {
         let (a, b) = self.gesture_finger_positions()?;
-        let dx = b.position.x as f32 - a.position.x as f32;
-        let dy = b.position.y as f32 - a.position.y as f32;
-        let distance = num_traits::Float::sqrt(dx * dx + dy * dy);
-        let angle = num_traits::Float::atan2(dy, dx).to_degrees();
-        Some((distance, angle))
+        let delta = (b.position - a.position).cast::<f32>();
+        Some((delta.length(), delta.angle_from_x_axis()))
     }
 
     /// Returns true if the given touch ID is one of the two gesture fingers.
@@ -637,17 +631,6 @@ impl TouchState {
             self.last_scale = 1.0;
             self.last_angle = angle;
         }
-    }
-
-    /// Normalize an angle difference to [-180, 180].
-    fn normalize_angle(degrees: f32) -> f32 {
-        let mut d = degrees % 360.0;
-        if d > 180.0 {
-            d -= 360.0;
-        } else if d < -180.0 {
-            d += 360.0;
-        }
-        d
     }
 
     /// Run the touch state machine for a single event and return the
@@ -771,8 +754,10 @@ impl TouchState {
             GestureRecognitionState::TwoFingersDown if is_gesture_finger => {
                 if let Some((dist, angle)) = self.gesture_geometry() {
                     let delta_dist = (dist - self.initial_distance).abs();
-                    let delta_angle = Self::normalize_angle(angle - self.last_angle).abs();
-                    if delta_dist > Self::PINCH_THRESHOLD || delta_angle > Self::ROTATION_THRESHOLD
+                    let delta_angle =
+                        (angle - self.last_angle).signed().to_degrees().abs();
+                    if delta_dist > Self::PINCH_THRESHOLD
+                        || delta_angle > Self::ROTATION_THRESHOLD
                     {
                         self.gesture_state = GestureRecognitionState::Pinching;
                         // Re-snapshot so the first gesture event starts from
@@ -807,10 +792,10 @@ impl TouchState {
                     let scale_delta = current_scale - self.last_scale;
                     self.last_scale = current_scale;
 
-                    // `normalize_angle` wraps the raw delta to [-180, 180]
-                    // so that crossing the ±180° atan2 boundary doesn't
-                    // produce a full-revolution jump.
-                    let rotation_delta = Self::normalize_angle(angle - self.last_angle);
+                    // `.signed()` wraps to [-pi, pi] so crossing the ±180°
+                    // atan2 boundary doesn't produce a full-revolution jump.
+                    let rotation_delta =
+                        (angle - self.last_angle).signed().to_degrees();
                     self.last_angle = angle;
 
                     events.push(MouseEvent::PinchGesture {
@@ -1397,17 +1382,18 @@ mod touch_tests {
     }
 
     // -----------------------------------------------------------------------
-    // TouchState: normalize_angle
+    // Angle wrapping via Euclid
     // -----------------------------------------------------------------------
 
     #[test]
-    fn normalize_angle_values() {
-        assert!((TouchState::normalize_angle(0.0)).abs() < f32::EPSILON);
-        assert!((TouchState::normalize_angle(180.0) - 180.0).abs() < f32::EPSILON);
-        assert!((TouchState::normalize_angle(181.0) - (-179.0)).abs() < f32::EPSILON);
-        assert!((TouchState::normalize_angle(-181.0) - 179.0).abs() < f32::EPSILON);
-        assert!((TouchState::normalize_angle(360.0)).abs() < f32::EPSILON);
-        assert!((TouchState::normalize_angle(540.0) - 180.0).abs() < f32::EPSILON);
+    fn euclid_angle_signed_wrapping() {
+        use euclid::Angle;
+        let wrap = |deg: f32| Angle::degrees(deg).signed().to_degrees();
+        assert!(wrap(0.0).abs() < f32::EPSILON);
+        assert!((wrap(180.0) - 180.0).abs() < 0.01);
+        assert!((wrap(181.0) - (-179.0)).abs() < 0.01);
+        assert!((wrap(-181.0) - 179.0).abs() < 0.01);
+        assert!(wrap(360.0).abs() < 0.01);
     }
 
     #[test]
