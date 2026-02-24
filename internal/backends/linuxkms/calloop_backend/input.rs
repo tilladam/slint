@@ -116,8 +116,11 @@ pub struct LibInputHandler<'a> {
     libinput: input::Libinput,
     token: Option<calloop::Token>,
     mouse_pos: Pin<Rc<Property<Option<LogicalPosition>>>>,
-    /// Last known position per touch slot. Fixed-capacity to avoid heap
-    /// allocation — touchscreens rarely report more than 5 simultaneous contacts.
+    /// Last known position per touch slot. We must track positions because
+    /// touch-up events from libinput do not include coordinates — only the slot
+    /// identifier is available, so we replay the last known position.
+    /// Fixed-capacity to avoid heap allocation — touchscreens rarely report
+    /// more than 5 simultaneous contacts.
     last_touch_positions: [(u64, Option<LogicalPosition>); 5],
     window: &'a RefCell<Option<Rc<FullscreenWindowAdapter>>>,
     keystate: Option<xkb::State>,
