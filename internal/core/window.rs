@@ -568,10 +568,8 @@ struct TouchState {
     /// Raw atan2 angle (degrees) from the previous frame, used for per-frame
     /// rotation delta computation via `normalize_angle(current - last)`.
     last_angle: f32,
-    /// Time of the last single-finger tap (for double-tap detection).
-    last_tap_time: Option<crate::animations::Instant>,
-    /// Position of the last single-finger tap (for double-tap detection).
-    last_tap_position: Option<LogicalPoint>,
+    /// Last single-finger tap (time + position) for double-tap detection.
+    last_tap: Option<(crate::animations::Instant, LogicalPoint)>,
 }
 
 impl Default for TouchState {
@@ -584,8 +582,7 @@ impl Default for TouchState {
             initial_distance: 0.0,
             last_scale: 1.0,
             last_angle: 0.0,
-            last_tap_time: None,
-            last_tap_position: None,
+            last_tap: None,
         }
     }
 }
@@ -686,8 +683,7 @@ impl TouchState {
         let is_double_tap = if self.active_touches.len() == 0 {
             // Check for double-tap before inserting, so a second finger
             // arriving during the double-tap touch doesn't see a stale entry.
-            if let (Some(last_time), Some(last_pos)) = (self.last_tap_time, self.last_tap_position)
-            {
+            if let Some((last_time, last_pos)) = self.last_tap {
                 let now = crate::animations::Instant::now();
                 let elapsed = now - last_time;
                 let dist_sq = (position - last_pos).square_length() as f32;
@@ -702,8 +698,7 @@ impl TouchState {
         if is_double_tap {
             // Don't insert into active_touches: the finger-lift will
             // find nothing to remove and fall through harmlessly.
-            self.last_tap_time = None;
-            self.last_tap_position = None;
+            self.last_tap = None;
             events.push(MouseEvent::DoubleTapGesture { position });
             return;
         }
@@ -738,8 +733,7 @@ impl TouchState {
             self.snapshot_initial_geometry();
             self.gesture_state = GestureRecognitionState::TwoFingersDown;
             // Clear double-tap state: a two-finger gesture interrupts the sequence.
-            self.last_tap_time = None;
-            self.last_tap_position = None;
+            self.last_tap = None;
 
             events.push(MouseEvent::Released {
                 position: primary_pos,
@@ -764,12 +758,11 @@ impl TouchState {
                     // Clear double-tap state if the finger moved too far
                     // from the last tap, preventing false double-taps
                     // after drags.
-                    if let Some(last_pos) = self.last_tap_position {
+                    if let Some((_, last_pos)) = self.last_tap {
                         if (position - last_pos).square_length() as f32
                             >= Self::DOUBLE_TAP_DISTANCE_SQ
                         {
-                            self.last_tap_time = None;
-                            self.last_tap_position = None;
+                            self.last_tap = None;
                         }
                     }
                     events.push(MouseEvent::Moved { position, is_touch: true });
@@ -852,8 +845,8 @@ impl TouchState {
                 if self.primary_touch_id == Some(id) {
                     self.primary_touch_id = None;
                     if !is_cancelled {
-                        self.last_tap_time = Some(crate::animations::Instant::now());
-                        self.last_tap_position = Some(position);
+                        self.last_tap =
+                            Some((crate::animations::Instant::now(), position));
                     }
                     events.push(MouseEvent::Released {
                         position,
@@ -1110,7 +1103,7 @@ mod touch_tests {
         assert_eq!(classify(&evs), vec![Ev::Released(100.0, 200.0), Ev::Exit]);
 
         // Cancelled touch should NOT record tap state for double-tap.
-        assert!(state.last_tap_time.is_none());
+        assert!(state.last_tap.is_none());
     }
 
     #[test]
@@ -1322,14 +1315,14 @@ mod touch_tests {
         // First tap.
         state.process(1, pt(100.0, 200.0), TouchPhase::Started, CLICK_INTERVAL);
         state.process(1, pt(100.0, 200.0), TouchPhase::Ended, CLICK_INTERVAL);
-        assert!(state.last_tap_time.is_some());
+        assert!(state.last_tap.is_some());
 
         // Second tap at same position, within interval.
         let evs = state.process(1, pt(100.0, 200.0), TouchPhase::Started, CLICK_INTERVAL);
         assert_eq!(classify(&evs), vec![Ev::DoubleTap(100.0, 200.0)]);
 
         // Tap state cleared after double-tap.
-        assert!(state.last_tap_time.is_none());
+        assert!(state.last_tap.is_none());
     }
 
     #[test]
@@ -1353,13 +1346,13 @@ mod touch_tests {
         // First tap.
         state.process(1, pt(100.0, 200.0), TouchPhase::Started, CLICK_INTERVAL);
         state.process(1, pt(100.0, 200.0), TouchPhase::Ended, CLICK_INTERVAL);
-        assert!(state.last_tap_time.is_some());
+        assert!(state.last_tap.is_some());
 
         // New touch + drag beyond threshold.
         state.process(2, pt(100.0, 200.0), TouchPhase::Started, CLICK_INTERVAL);
         state.process(2, pt(120.0, 200.0), TouchPhase::Moved, CLICK_INTERVAL);
         // 20px > 10px radius, so tap state should be cleared.
-        assert!(state.last_tap_time.is_none());
+        assert!(state.last_tap.is_none());
 
         state.process(2, pt(120.0, 200.0), TouchPhase::Ended, CLICK_INTERVAL);
 
