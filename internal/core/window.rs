@@ -441,6 +441,7 @@ struct WindowPinnedFields {
 /// A single active touch point.
 #[derive(Clone, Copy, Default)]
 struct TouchPoint {
+    id: u64,
     position: LogicalPoint,
 }
 
@@ -453,36 +454,36 @@ const MAX_TRACKED_TOUCHES: usize = 5;
 
 #[derive(Clone)]
 struct TouchMap {
-    entries: [(u64, TouchPoint); MAX_TRACKED_TOUCHES],
+    entries: [TouchPoint; MAX_TRACKED_TOUCHES],
     len: usize,
 }
 
 impl Default for TouchMap {
     fn default() -> Self {
-        Self { entries: [(0, TouchPoint::default()); MAX_TRACKED_TOUCHES], len: 0 }
+        Self { entries: [TouchPoint::default(); MAX_TRACKED_TOUCHES], len: 0 }
     }
 }
 
 impl TouchMap {
     fn get(&self, id: u64) -> Option<&TouchPoint> {
-        self.entries[..self.len].iter().find(|(k, _)| *k == id).map(|(_, v)| v)
+        self.entries[..self.len].iter().find(|tp| tp.id == id)
     }
 
     fn get_mut(&mut self, id: u64) -> Option<&mut TouchPoint> {
-        self.entries[..self.len].iter_mut().find(|(k, _)| *k == id).map(|(_, v)| v)
+        self.entries[..self.len].iter_mut().find(|tp| tp.id == id)
     }
 
-    fn insert(&mut self, id: u64, point: TouchPoint) {
-        if let Some(existing) = self.entries[..self.len].iter_mut().find(|(k, _)| *k == id) {
-            existing.1 = point;
+    fn insert(&mut self, point: TouchPoint) {
+        if let Some(existing) = self.entries[..self.len].iter_mut().find(|tp| tp.id == point.id) {
+            *existing = point;
         } else if self.len < MAX_TRACKED_TOUCHES {
-            self.entries[self.len] = (id, point);
+            self.entries[self.len] = point;
             self.len += 1;
         }
     }
 
     fn remove(&mut self, id: u64) {
-        if let Some(idx) = self.entries[..self.len].iter().position(|(k, _)| *k == id) {
+        if let Some(idx) = self.entries[..self.len].iter().position(|tp| tp.id == id) {
             self.len -= 1;
             self.entries[idx] = self.entries[self.len];
         }
@@ -494,12 +495,12 @@ impl TouchMap {
 
     /// Returns the first two distinct IDs, or `None` if fewer than 2 entries.
     fn first_two_ids(&self) -> Option<(u64, u64)> {
-        if self.len >= 2 { Some((self.entries[0].0, self.entries[1].0)) } else { None }
+        if self.len >= 2 { Some((self.entries[0].id, self.entries[1].id)) } else { None }
     }
 
     /// Returns the first entry, if any.
-    fn first(&self) -> Option<(u64, &TouchPoint)> {
-        if self.len > 0 { Some((self.entries[0].0, &self.entries[0].1)) } else { None }
+    fn first(&self) -> Option<&TouchPoint> {
+        if self.len > 0 { Some(&self.entries[0]) } else { None }
     }
 }
 
@@ -707,7 +708,7 @@ impl TouchState {
             return;
         }
 
-        self.active_touches.insert(id, TouchPoint { position });
+        self.active_touches.insert(TouchPoint { id, position });
 
         let total = self.active_touches.len();
         if total == 1 {
@@ -867,9 +868,9 @@ impl TouchState {
                 self.gesture_state = GestureRecognitionState::Idle;
                 self.gesture_finger_ids = None;
                 if !is_cancelled {
-                    if let Some((remaining_id, remaining)) = self.active_touches.first() {
+                    if let Some(remaining) = self.active_touches.first() {
                         let remaining_pos = remaining.position;
-                        self.primary_touch_id = Some(remaining_id);
+                        self.primary_touch_id = Some(remaining.id);
                         events.push(MouseEvent::Pressed {
                             position: remaining_pos,
                             button: PointerEventButton::Left,
@@ -894,7 +895,7 @@ impl TouchState {
                     if is_cancelled { TouchPhase::Cancelled } else { TouchPhase::Ended };
 
                 let remaining = if !is_cancelled {
-                    self.active_touches.first().map(|(rid, rp)| (rid, rp.position))
+                    self.active_touches.first().map(|tp| (tp.id, tp.position))
                 } else {
                     None
                 };
@@ -956,7 +957,7 @@ mod touch_tests {
     fn touch_map_insert_and_get() {
         let mut map = TouchMap::default();
         assert_eq!(map.len(), 0);
-        map.insert(1, TouchPoint { position: pt(10.0, 20.0) });
+        map.insert(TouchPoint { id: 1, position: pt(10.0, 20.0) });
         assert_eq!(map.len(), 1);
         assert!(map.get(1).is_some());
         assert!((map.get(1).unwrap().position.x - 10.0).abs() < f32::EPSILON);
@@ -966,8 +967,8 @@ mod touch_tests {
     #[test]
     fn touch_map_update_existing() {
         let mut map = TouchMap::default();
-        map.insert(1, TouchPoint { position: pt(10.0, 20.0) });
-        map.insert(1, TouchPoint { position: pt(30.0, 40.0) });
+        map.insert(TouchPoint { id: 1, position: pt(10.0, 20.0) });
+        map.insert(TouchPoint { id: 1, position: pt(30.0, 40.0) });
         assert_eq!(map.len(), 1);
         assert!((map.get(1).unwrap().position.x - 30.0).abs() < f32::EPSILON);
     }
@@ -975,8 +976,8 @@ mod touch_tests {
     #[test]
     fn touch_map_remove() {
         let mut map = TouchMap::default();
-        map.insert(1, TouchPoint { position: pt(10.0, 20.0) });
-        map.insert(2, TouchPoint { position: pt(30.0, 40.0) });
+        map.insert(TouchPoint { id: 1, position: pt(10.0, 20.0) });
+        map.insert(TouchPoint { id: 2, position: pt(30.0, 40.0) });
         assert_eq!(map.len(), 2);
         map.remove(1);
         assert_eq!(map.len(), 1);
@@ -987,7 +988,7 @@ mod touch_tests {
     #[test]
     fn touch_map_remove_nonexistent() {
         let mut map = TouchMap::default();
-        map.insert(1, TouchPoint { position: pt(10.0, 20.0) });
+        map.insert(TouchPoint { id: 1, position: pt(10.0, 20.0) });
         map.remove(99);
         assert_eq!(map.len(), 1);
     }
@@ -996,11 +997,11 @@ mod touch_tests {
     fn touch_map_capacity() {
         let mut map = TouchMap::default();
         for i in 0..MAX_TRACKED_TOUCHES {
-            map.insert(i as u64, TouchPoint { position: pt(i as f32, 0.0) });
+            map.insert(TouchPoint { id: i as u64, position: pt(i as f32, 0.0) });
         }
         assert_eq!(map.len(), MAX_TRACKED_TOUCHES);
         // Inserting beyond capacity is silently ignored.
-        map.insert(99, TouchPoint { position: pt(99.0, 0.0) });
+        map.insert(TouchPoint { id: 99, position: pt(99.0, 0.0) });
         assert_eq!(map.len(), MAX_TRACKED_TOUCHES);
         assert!(map.get(99).is_none());
     }
@@ -1009,9 +1010,9 @@ mod touch_tests {
     fn touch_map_first_two_ids() {
         let mut map = TouchMap::default();
         assert!(map.first_two_ids().is_none());
-        map.insert(5, TouchPoint { position: pt(0.0, 0.0) });
+        map.insert(TouchPoint { id: 5, position: pt(0.0, 0.0) });
         assert!(map.first_two_ids().is_none());
-        map.insert(10, TouchPoint { position: pt(0.0, 0.0) });
+        map.insert(TouchPoint { id: 10, position: pt(0.0, 0.0) });
         assert_eq!(map.first_two_ids(), Some((5, 10)));
     }
 
@@ -1019,16 +1020,16 @@ mod touch_tests {
     fn touch_map_first() {
         let mut map = TouchMap::default();
         assert!(map.first().is_none());
-        map.insert(7, TouchPoint { position: pt(1.0, 2.0) });
-        let (id, tp) = map.first().unwrap();
-        assert_eq!(id, 7);
+        map.insert(TouchPoint { id: 7, position: pt(1.0, 2.0) });
+        let tp = map.first().unwrap();
+        assert_eq!(tp.id, 7);
         assert!((tp.position.x - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn touch_map_get_mut() {
         let mut map = TouchMap::default();
-        map.insert(1, TouchPoint { position: pt(0.0, 0.0) });
+        map.insert(TouchPoint { id: 1, position: pt(0.0, 0.0) });
         map.get_mut(1).unwrap().position = pt(5.0, 6.0);
         assert!((map.get(1).unwrap().position.x - 5.0).abs() < f32::EPSILON);
     }
