@@ -543,11 +543,7 @@ enum GestureRecognitionState {
     #[default]
     Idle,
     /// 2 fingers down, waiting for movement to exceed threshold.
-    TwoFingersDown {
-        finger_ids: (u64, u64),
-        initial_distance: f32,
-        last_angle: euclid::Angle<f32>,
-    },
+    TwoFingersDown { finger_ids: (u64, u64), initial_distance: f32, last_angle: euclid::Angle<f32> },
     /// Actively synthesizing PinchGesture/RotationGesture events.
     Pinching {
         finger_ids: (u64, u64),
@@ -706,8 +702,7 @@ impl TouchState {
             });
         } else if total == 2 {
             // Second finger: transition Idle → TwoFingersDown.
-            let finger_ids = self.active_touches.first_two_ids()
-                .unwrap_or((0, 0));
+            let finger_ids = self.active_touches.first_two_ids().unwrap_or((0, 0));
 
             // Synthesize a Release for the primary finger to clear any
             // Flickable grab / delay state.
@@ -718,8 +713,8 @@ impl TouchState {
                 .unwrap_or(position);
 
             // Compute initial geometry for threshold detection.
-            let (initial_distance, last_angle) = self.geometry_for(finger_ids)
-                .unwrap_or((0.0, euclid::Angle::zero()));
+            let (initial_distance, last_angle) =
+                self.geometry_for(finger_ids).unwrap_or((0.0, euclid::Angle::zero()));
             self.gesture_state = GestureRecognitionState::TwoFingersDown {
                 finger_ids,
                 initial_distance,
@@ -762,14 +757,14 @@ impl TouchState {
                 }
             }
             GestureRecognitionState::TwoFingersDown {
-                finger_ids, initial_distance, last_angle,
+                finger_ids,
+                initial_distance,
+                last_angle,
             } if is_gesture_finger => {
                 if let Some((dist, angle)) = self.gesture_geometry() {
                     let delta_dist = (dist - initial_distance).abs();
-                    let delta_angle =
-                        (angle - last_angle).signed().to_degrees().abs();
-                    if delta_dist > Self::PINCH_THRESHOLD
-                        || delta_angle > Self::ROTATION_THRESHOLD
+                    let delta_angle = (angle - last_angle).signed().to_degrees().abs();
+                    if delta_dist > Self::PINCH_THRESHOLD || delta_angle > Self::ROTATION_THRESHOLD
                     {
                         // Re-snapshot so the first gesture event starts from
                         // the current geometry rather than accumulating the
@@ -802,22 +797,21 @@ impl TouchState {
                 if let Some((dist, angle)) = self.gesture_geometry() {
                     let midpoint = self.gesture_midpoint().unwrap_or(position);
 
-                    let current_scale = if initial_distance > 0.0 {
-                        dist / initial_distance
-                    } else {
-                        1.0
-                    };
+                    let current_scale =
+                        if initial_distance > 0.0 { dist / initial_distance } else { 1.0 };
                     let scale_delta = current_scale - last_scale;
 
                     // `.signed()` wraps to [-pi, pi] so crossing the ±180°
                     // atan2 boundary doesn't produce a full-revolution jump.
-                    let rotation_delta =
-                        (angle - last_angle).signed().to_degrees();
+                    let rotation_delta = (angle - last_angle).signed().to_degrees();
 
                     // Update the mutable state for next frame.
                     if let GestureRecognitionState::Pinching {
-                        last_scale: ref mut ls, last_angle: ref mut la, ..
-                    } = self.gesture_state {
+                        last_scale: ref mut ls,
+                        last_angle: ref mut la,
+                        ..
+                    } = self.gesture_state
+                    {
                         *ls = current_scale;
                         *la = angle;
                     }
@@ -854,8 +848,7 @@ impl TouchState {
                 if self.primary_touch_id == Some(id) {
                     self.primary_touch_id = None;
                     if !is_cancelled {
-                        self.last_tap =
-                            Some((crate::animations::Instant::now(), position));
+                        self.last_tap = Some((crate::animations::Instant::now(), position));
                     }
                     events.push(MouseEvent::Released {
                         position,

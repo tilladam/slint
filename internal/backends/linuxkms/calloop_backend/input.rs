@@ -161,8 +161,7 @@ impl<'a> LibInputHandler<'a> {
     fn set_touch_pos(&mut self, slot: u64, pos: LogicalPosition) {
         if let Some(entry) = self.last_touch_positions.iter_mut().find(|(s, _)| *s == slot) {
             entry.1 = Some(pos);
-        } else if let Some(entry) =
-            self.last_touch_positions.iter_mut().find(|(_, p)| p.is_none())
+        } else if let Some(entry) = self.last_touch_positions.iter_mut().find(|(_, p)| p.is_none())
         {
             *entry = (slot, Some(pos));
         }
