@@ -636,9 +636,7 @@ fn pointer_logical_position(
     offset: PhysicalPosition,
     scale_factor: f32,
 ) -> LogicalPosition {
-    let phys_x = x - offset.x as f32;
-    let phys_y = y - offset.y as f32;
-    LogicalPosition::new(phys_x / scale_factor, phys_y / scale_factor)
+    PhysicalPosition::new(x as i32 - offset.x, y as i32 - offset.y).to_logical(scale_factor)
 }
 
 fn position_for_event(
