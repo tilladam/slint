@@ -510,6 +510,7 @@ impl TouchMap {
 /// margin without heap allocation.
 const MAX_TOUCH_EVENTS: usize = 4;
 
+#[derive(Clone)]
 struct TouchEventBuffer {
     events: [Option<MouseEvent>; MAX_TOUCH_EVENTS],
     len: usize,
@@ -526,11 +527,6 @@ impl TouchEventBuffer {
             self.events[self.len] = Some(event);
             self.len += 1;
         }
-    }
-
-    #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = &MouseEvent> {
-        self.events[..self.len].iter().filter_map(|e| e.as_ref())
     }
 
     fn into_iter(self) -> impl Iterator<Item = MouseEvent> {
@@ -1060,7 +1056,8 @@ mod touch_tests {
 
     fn classify(events: &TouchEventBuffer) -> Vec<Ev> {
         events
-            .iter()
+            .clone()
+            .into_iter()
             .map(|e| match e {
                 MouseEvent::Pressed { position, .. } => Ev::Pressed(position.x, position.y),
                 MouseEvent::Released { position, .. } => Ev::Released(position.x, position.y),
@@ -1068,13 +1065,13 @@ mod touch_tests {
                 MouseEvent::Exit => Ev::Exit,
                 MouseEvent::PinchGesture { delta, phase, .. } => match phase {
                     TouchPhase::Started => Ev::PinchStarted,
-                    TouchPhase::Moved => Ev::PinchMoved(*delta),
+                    TouchPhase::Moved => Ev::PinchMoved(delta),
                     TouchPhase::Ended => Ev::PinchEnded,
                     TouchPhase::Cancelled => Ev::PinchCancelled,
                 },
                 MouseEvent::RotationGesture { delta, phase, .. } => match phase {
                     TouchPhase::Started => Ev::RotationStarted,
-                    TouchPhase::Moved => Ev::RotationMoved(*delta),
+                    TouchPhase::Moved => Ev::RotationMoved(delta),
                     TouchPhase::Ended => Ev::RotationEnded,
                     TouchPhase::Cancelled => Ev::RotationCancelled,
                 },
