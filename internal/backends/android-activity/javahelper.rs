@@ -4,11 +4,13 @@
 use super::*;
 use i_slint_core::SharedString;
 use i_slint_core::api::{PhysicalPosition, PhysicalSize};
-use i_slint_core::unicode_utils::{byte_offset_to_utf16_offset, utf16_offset_to_byte_offset_clamped};
 use i_slint_core::graphics::{Color, euclid};
 use i_slint_core::items::{ColorScheme, InputType};
 use i_slint_core::lengths::PhysicalEdges;
 use i_slint_core::platform::WindowAdapter;
+use i_slint_core::unicode_utils::{
+    byte_offset_to_utf16_offset, utf16_offset_to_byte_offset_clamped,
+};
 use jni::JNIEnv;
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::sys::{jboolean, jint};
@@ -395,9 +397,6 @@ extern "system" fn Java_SlintAndroidJavaHelper_updateText(
     })
     .unwrap()
 }
-
-
-
 
 #[unsafe(no_mangle)]
 extern "system" fn Java_SlintAndroidJavaHelper_setNightMode(
