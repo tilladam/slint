@@ -265,7 +265,7 @@ fn tool_definitions() -> serde_json::Value {
         "tools": [
             {
                 "name": "list_windows",
-                "description": "List all windows in the connected Slint application. Returns window handles that can be used with other tools.",
+                "description": "List all windows in the connected Slint application. Returns window handles that can be used with other tools. This is typically the first tool to call.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -274,7 +274,7 @@ fn tool_definitions() -> serde_json::Value {
             },
             {
                 "name": "get_window_properties",
-                "description": "Get properties of a window (size, position, fullscreen/maximized/minimized state, root element handle).",
+                "description": "Get properties of a window (size, position, fullscreen/maximized/minimized state, root element handle). The returned root_element_handle is the entry point for get_element_tree, get_element_properties, and query_element_descendants.",
                 "inputSchema": {
                     "type": "object",
                     "properties": { "window_handle": wh },
@@ -283,7 +283,7 @@ fn tool_definitions() -> serde_json::Value {
             },
             {
                 "name": "find_elements_by_id",
-                "description": "Find elements by their qualified ID (e.g., 'App::mybutton'). Returns element handles.",
+                "description": "Find elements by their qualified ID (e.g., 'App::mybutton'). Returns element handles. Use get_element_tree first to discover available element IDs.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -307,7 +307,7 @@ fn tool_definitions() -> serde_json::Value {
             },
             {
                 "name": "query_element_descendants",
-                "description": "Query descendants of an element using a chain of match instructions. Each instruction narrows the search. Use match_descendants to search recursively, then filter by id, type_name, or accessible_role.",
+                "description": "Query descendants of an element using a chain of match instructions. Each instruction narrows the search. Use match_descendants to search recursively, then filter by id, type_name, or accessible_role. More efficient than get_element_tree for targeted searches.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -337,7 +337,7 @@ fn tool_definitions() -> serde_json::Value {
             },
             {
                 "name": "take_screenshot",
-                "description": "Take a screenshot of a window. Returns the image as base64-encoded PNG.",
+                "description": "Take a screenshot of a window. Returns an MCP image content block that clients can render inline.",
                 "inputSchema": {
                     "type": "object",
                     "properties": { "window_handle": wh_short.clone() },
@@ -398,7 +398,7 @@ fn tool_definitions() -> serde_json::Value {
             },
             {
                 "name": "get_element_tree",
-                "description": "Get the full element tree starting from a root element. Returns a hierarchical JSON structure with all element properties. This is a bulk operation that avoids multiple round-trips.",
+                "description": "Get the full element tree starting from a root element. Returns a hierarchical JSON structure with all element properties. Start with max_depth=2 or 3 for an overview, then drill deeper as needed.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -1085,7 +1085,21 @@ impl McpServer {
                     "serverInfo": {
                         "name": "slint-mcp-server",
                         "version": "0.1.0"
-                    }
+                    },
+                    "instructions": concat!(
+                        "This server connects to a running Slint application and lets you inspect and interact with its UI. ",
+                        "The app must be built with `--features system-testing` and `SLINT_EMIT_DEBUG_INFO=1`, ",
+                        "then launched with `SLINT_TEST_SERVER=localhost:<port>` so it connects to this server.\n\n",
+                        "Recommended workflow:\n",
+                        "1. list_windows — get window handles\n",
+                        "2. get_window_properties — get the root_element_handle\n",
+                        "3. get_element_tree (max_depth=2-3) — explore the UI hierarchy\n",
+                        "4. Use find_elements_by_id or query_element_descendants for targeted lookups\n",
+                        "5. get_element_properties — inspect specific elements\n",
+                        "6. take_screenshot — see the current visual state\n\n",
+                        "Handles (window_handle, element_handle) are {index, generation} objects returned by the tools above. ",
+                        "They remain valid as long as the app is connected and the UI element exists."
+                    )
                 }),
             ),
             "notifications/initialized" => {

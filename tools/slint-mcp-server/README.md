@@ -87,3 +87,31 @@ Add to your MCP client configuration (e.g., Claude Desktop):
 > take_screenshot { "window_handle": { "index": 0, "generation": 0 } }
 { "content": [{ "type": "image", "data": "iVBORw0KGgo...", "mimeType": "image/png" }] }
 ```
+
+## Recommended CLAUDE.md Snippet
+
+If you're using Claude Code with a Slint project, add the following to your project's `CLAUDE.md` so Claude knows how to build and inspect your app:
+
+````markdown
+## Slint UI Introspection
+
+This project uses the Slint UI framework. To inspect the running application:
+
+### Build for introspection
+```bash
+SLINT_EMIT_DEBUG_INFO=1 cargo build --features system-testing
+```
+
+### Run with the MCP server
+```bash
+SLINT_TEST_SERVER=localhost:4242 cargo run --features system-testing
+```
+
+The `slint-mcp-server` MCP tool is available for inspecting the running app. Typical workflow:
+1. `list_windows` — discover open windows
+2. `get_window_properties` — get window info and the root element handle
+3. `get_element_tree` (start with max_depth=2 or 3) — explore the UI hierarchy
+4. `find_elements_by_id` or `query_element_descendants` — find specific elements
+5. `get_element_properties` — read properties of a specific element
+6. `take_screenshot` — capture the current visual state
+````
