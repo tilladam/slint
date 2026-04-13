@@ -5032,6 +5032,7 @@ dependencies = [
  "pbjson-build",
  "prost",
  "prost-build",
+ "prost-types",
  "protox",
  "serde",
  "serde_json",
