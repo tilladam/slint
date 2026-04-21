@@ -1,0 +1,55 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: MIT
+
+import { VerticalBox, Button, Slider, AboutSlint } from "std-widgets.slint";
+
+export component Scene inherits Window {
+    // Transparent background so the custom wgpu scene shows through
+    background: #00000000;
+
+    in-out property <int> click-count: 0;
+    in-out property <float> slider-value: 0;
+
+    VerticalBox {
+        alignment: start;
+
+        Text {
+            text: "Slint on FemtoVG + WGPU";
+            color: white;
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        Text {
+            text: "Clicks: " + click-count;
+            color: #aaaaaa;
+            font-size: 18px;
+        }
+
+        Button {
+            text: "Press me";
+            clicked => {
+                click-count += 1;
+            }
+        }
+
+        Slider {
+            maximum: 100;
+            value: slider-value;
+        }
+
+        AboutSlint {}
+    }
+
+    // Animate the slider continuously so there is always something moving
+    animate slider-value {
+        duration: 2s;
+        easing: ease-in-out;
+        iteration-count: -1;
+        direction: alternate;
+    }
+
+    init => {
+        slider-value = 100;
+    }
+}

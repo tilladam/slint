@@ -1,0 +1,39 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "femtovg_wgpu"
+version = "1.17.0"
+authors = ["Slint Developers <info@slint.dev>"]
+edition.workspace = true
+build = "build.rs"
+license = "MIT"
+publish = false
+default-run = "femtovg_wgpu"
+
+[[bin]]
+name = "femtovg_wgpu"
+path = "src/main.rs"
+
+[[bin]]
+name = "postprocess"
+path = "src/postprocess.rs"
+
+[dependencies]
+# backend-winit is needed by the postprocess binary (BackendSelector).
+# The main binary uses its own winit + custom HeadlessPlatform instead.
+slint = { path = "../../api/rs/slint", default-features = false, features = [
+    "renderer-femtovg-wgpu",
+    "unstable-wgpu-28",
+    "backend-winit",
+    "std",
+    "compat-1-2",
+] }
+wgpu-28 = { workspace = true, features = ["wgsl"] }
+image = { workspace = true }
+bytemuck = { workspace = true }
+pollster = "0.4"
+winit = { version = "0.30.2", default-features = false, features = ["rwh_06"] }
+
+[build-dependencies]
+slint-build = { path = "../../api/rs/build" }
