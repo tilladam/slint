@@ -56,10 +56,17 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // Apply barrel distortion
     let distorted_uv = barrel_distort(uv, curvature_amount);
 
-    // Black outside the curved screen area
+    // Transparent outside the curved screen area to show the "case" background
     if distorted_uv.x < 0.0 || distorted_uv.x > 1.0 || distorted_uv.y < 0.0 || distorted_uv.y > 1.0 {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
+
+    // Inner shadow at the edge of the "tube"
+    let edge_dist = min(
+        min(distorted_uv.x, 1.0 - distorted_uv.x),
+        min(distorted_uv.y, 1.0 - distorted_uv.y)
+    );
+    let inner_shadow = smoothstep(0.0, 0.05, edge_dist);
 
     // Chromatic aberration: offset R and B channels slightly
     let aberration = params.chromatic_aberration * 0.005;
@@ -79,7 +86,7 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // Vignette: darken the edges
     let centered = uv * 2.0 - 1.0;
     let vignette = 1.0 - params.vignette_intensity * dot(centered, centered);
-    color = vec4<f32>(color.rgb * max(vignette, 0.0), color.a);
+    color = vec4<f32>(color.rgb * max(vignette, 0.0) * inner_shadow, color.a);
 
     // Subtle phosphor glow (slightly boost brightness near the center)
     let glow = 1.0 + 0.05 * (1.0 - dot(centered, centered));

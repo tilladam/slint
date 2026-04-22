@@ -17,6 +17,18 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CrtParams {
+    resolution: [f32; 2],
+    time: f32,
+    scanline_intensity: f32,
+    curvature: f32,
+    chromatic_aberration: f32,
+    vignette_intensity: f32,
+    _pad: f32,
+}
+
 struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -26,10 +38,11 @@ struct GpuState {
     bg_pipeline: wgpu::RenderPipeline,
     bg_uniform_buffer: wgpu::Buffer,
     bg_bind_group: wgpu::BindGroup,
-    // Compositing
-    composite_pipeline: wgpu::RenderPipeline,
-    composite_bind_group_layout: wgpu::BindGroupLayout,
-    composite_sampler: wgpu::Sampler,
+    // CRT Post-processing
+    crt_pipeline: wgpu::RenderPipeline,
+    crt_bind_group_layout: wgpu::BindGroupLayout,
+    crt_sampler: wgpu::Sampler,
+    crt_uniform_buffer: wgpu::Buffer,
     // Slint offscreen texture
     slint_texture: wgpu::Texture,
     start_time: std::time::Instant,
@@ -168,22 +181,29 @@ impl App {
             cache: None,
         });
 
-        // --- Composite pipeline ---
-        let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("composite shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../composite.wgsl").into()),
+        // --- CRT Post-processing pipeline ---
+        let crt_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("CRT shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../crt_postprocess.wgsl").into()),
         });
 
-        let composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("composite sampler"),
+        let crt_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("CRT sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
 
-        let composite_bind_group_layout =
+        let crt_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("CRT uniforms"),
+            size: std::mem::size_of::<CrtParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let crt_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("composite bind group layout"),
+                label: Some("CRT bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -201,27 +221,36 @@ impl App {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
-        let composite_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("composite pipeline layout"),
-                bind_group_layouts: &[&composite_bind_group_layout],
-                immediate_size: 0,
-            });
+        let crt_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("CRT pipeline layout"),
+            bind_group_layouts: &[&crt_bind_group_layout],
+            immediate_size: 0,
+        });
 
-        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("composite pipeline"),
-            layout: Some(&composite_pipeline_layout),
+        let crt_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("CRT pipeline"),
+            layout: Some(&crt_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &composite_shader,
+                module: &crt_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &composite_shader,
+                module: &crt_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -272,9 +301,10 @@ impl App {
             bg_pipeline,
             bg_uniform_buffer,
             bg_bind_group,
-            composite_pipeline,
-            composite_bind_group_layout,
-            composite_sampler,
+            crt_pipeline,
+            crt_bind_group_layout,
+            crt_sampler,
+            crt_uniform_buffer,
             slint_texture,
             start_time: std::time::Instant::now(),
         });
@@ -284,6 +314,7 @@ impl App {
     fn render(&mut self) {
         let gpu = self.gpu.as_ref().unwrap();
         let window = self.window.as_ref().unwrap();
+        let slint_app = self.slint_app.as_ref().unwrap();
 
         let elapsed = gpu.start_time.elapsed().as_secs_f32();
 
@@ -343,11 +374,23 @@ impl App {
             }
         }
 
-        // Pass 3: Composite Slint texture over background
+        // Pass 3: Composite Slint texture over background WITH CRT EFFECT
+        // Update CRT uniforms from Slint properties
+        let params = CrtParams {
+            resolution: [gpu.surface_config.width as f32, gpu.surface_config.height as f32],
+            time: elapsed,
+            scanline_intensity: slint_app.get_scanline_intensity(),
+            curvature: slint_app.get_curvature(),
+            chromatic_aberration: slint_app.get_chromatic_aberration(),
+            vignette_intensity: slint_app.get_vignette_intensity(),
+            _pad: 0.0,
+        };
+        gpu.queue.write_buffer(&gpu.crt_uniform_buffer, 0, bytemuck::bytes_of(&params));
+
         let slint_view = gpu.slint_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let composite_bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("composite bind group"),
-            layout: &gpu.composite_bind_group_layout,
+        let crt_bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("CRT bind group"),
+            layout: &gpu.crt_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -355,7 +398,11 @@ impl App {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&gpu.composite_sampler),
+                    resource: wgpu::BindingResource::Sampler(&gpu.crt_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: gpu.crt_uniform_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -364,7 +411,7 @@ impl App {
             gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("composite pass"),
+                label: Some("CRT composite pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -379,8 +426,8 @@ impl App {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            rpass.set_pipeline(&gpu.composite_pipeline);
-            rpass.set_bind_group(0, &composite_bind_group, &[]);
+            rpass.set_pipeline(&gpu.crt_pipeline);
+            rpass.set_bind_group(0, &crt_bind_group, &[]);
             rpass.draw(0..3, 0..1);
         }
 

@@ -1,47 +1,84 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: MIT
 
-import { VerticalBox, Button, Slider, AboutSlint } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, Slider, GroupBox, AboutSlint } from "std-widgets.slint";
 
 export component Scene inherits Window {
-    // Transparent background so the custom wgpu scene shows through
+    // Transparent background so we can see the custom wgpu scene behind us
     background: #00000000;
+
+    // Controls for the global post-processing effect
+    in-out property <float> scanline-intensity: 0.4;
+    in-out property <float> curvature: 0.3;
+    in-out property <float> chromatic-aberration: 0.25;
+    in-out property <float> vignette-intensity: 0.5;
 
     in-out property <int> click-count: 0;
     in-out property <float> slider-value: 0;
 
     VerticalBox {
         alignment: start;
+        padding: 20px;
 
         Text {
-            text: "Slint on FemtoVG + WGPU";
+            text: "Slint Full-Window Post-Processing";
             color: white;
             font-size: 28px;
             font-weight: 700;
         }
 
-        Text {
-            text: "Clicks: " + click-count;
-            color: #aaaaaa;
-            font-size: 18px;
-        }
+        HorizontalBox {
+            alignment: start;
+            spacing: 20px;
 
-        Button {
-            text: "Press me";
-            clicked => {
-                click-count += 1;
+            // App Content
+            GroupBox {
+                title: "App Content";
+                VerticalBox {
+                    Text {
+                        text: "Clicks: " + click-count;
+                        color: #aaaaaa;
+                        font-size: 18px;
+                    }
+                    Button {
+                        text: "Press me";
+                        clicked => { click-count += 1; }
+                    }
+                    Slider {
+                        maximum: 100;
+                        value: slider-value;
+                    }
+                }
+            }
+
+            // Global Shader Controls
+            GroupBox {
+                title: "Global Shader Controls";
+                width: 300px;
+                VerticalBox {
+                    HorizontalBox {
+                        Text { text: "Scanlines:"; vertical-alignment: center; }
+                        Slider { minimum: 0; maximum: 1; value: scanline-intensity; changed(v) => { scanline-intensity = v; } }
+                    }
+                    HorizontalBox {
+                        Text { text: "Curvature:"; vertical-alignment: center; }
+                        Slider { minimum: 0; maximum: 1; value: curvature; changed(v) => { curvature = v; } }
+                    }
+                    HorizontalBox {
+                        Text { text: "Chromatic:"; vertical-alignment: center; }
+                        Slider { minimum: 0; maximum: 1; value: chromatic-aberration; changed(v) => { chromatic-aberration = v; } }
+                    }
+                    HorizontalBox {
+                        Text { text: "Vignette:"; vertical-alignment: center; }
+                        Slider { minimum: 0; maximum: 1; value: vignette-intensity; changed(v) => { vignette-intensity = v; } }
+                    }
+                }
             }
         }
 
-        Slider {
-            maximum: 100;
-            value: slider-value;
-        }
-
-        AboutSlint {}
+        AboutSlint { vertical-stretch: 1; }
     }
 
-    // Animate the slider continuously so there is always something moving
     animate slider-value {
         duration: 2s;
         easing: ease-in-out;

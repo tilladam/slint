@@ -34,27 +34,24 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    let t = uniforms.time * 0.8;
+    let t = uniforms.time * 0.4;
 
-    // Animated gradient with bold, sweeping color waves
-    let r = 0.3 + 0.3 * sin(uv.x * 4.0 + t * 1.2);
-    let g = 0.2 + 0.25 * sin(uv.y * 3.0 - t * 0.9 + 2.0);
-    let b = 0.4 + 0.35 * sin((uv.x + uv.y) * 2.5 + t * 1.5 + 1.0);
+    // Warm, wooden/leather brown tones for a TV case feel
+    let base_r = 0.25 + 0.05 * sin(uv.x * 2.0 + t);
+    let base_g = 0.15 + 0.03 * cos(uv.y * 2.0 - t * 0.5);
+    let base_b = 0.08 + 0.02 * sin((uv.x + uv.y) * 1.5 + t * 0.7);
 
-    // Moving radial glow that orbits the center
-    let center = vec2<f32>(0.5 + 0.25 * sin(t * 0.7), 0.5 + 0.25 * cos(t * 0.5));
-    let dist = length(uv - center);
-    let glow = 0.4 * exp(-dist * dist * 3.0);
-
-    // Second glow on the opposite side
-    let center2 = vec2<f32>(0.5 - 0.2 * sin(t * 0.6 + 1.0), 0.5 - 0.2 * cos(t * 0.8));
-    let dist2 = length(uv - center2);
-    let glow2 = 0.25 * exp(-dist2 * dist2 * 5.0);
+    // Subtle grain or wood-like streaks
+    let grain = 0.02 * sin(uv.x * 100.0) * cos(uv.y * 5.0);
+    
+    // Vignette for the "case" itself
+    let dist_from_center = length(uv - vec2<f32>(0.5, 0.5));
+    let case_vignette = smoothstep(0.8, 0.3, dist_from_center);
 
     return vec4<f32>(
-        r + glow + glow2 * 0.3,
-        g + glow * 0.6 + glow2,
-        b + glow * 0.3 + glow2 * 0.5,
+        (base_r + grain) * case_vignette,
+        (base_g + grain) * case_vignette,
+        (base_b + grain) * case_vignette,
         1.0
     );
 }
