@@ -413,6 +413,38 @@ impl BackendSelector {
             }
         };
 
+        #[cfg(feature = "system-testing")]
+        {
+            i_slint_core::thread_local! {
+                static SYSTEM_TESTING_HOOK_REGISTERED: core::cell::Cell<bool> =
+                    const { core::cell::Cell::new(false) };
+            }
+            SYSTEM_TESTING_HOOK_REGISTERED.with(|registered| {
+                if !registered.replace(true) {
+                    i_slint_core::context::add_platform_init_hook(Box::new(|| {
+                        i_slint_backend_testing::systest::init();
+                    }));
+                }
+            });
+        }
+
+        #[cfg(feature = "mcp")]
+        {
+            i_slint_core::thread_local! {
+                static MCP_HOOK_REGISTERED: core::cell::Cell<bool> =
+                    const { core::cell::Cell::new(false) };
+            }
+            MCP_HOOK_REGISTERED.with(|registered| {
+                if !registered.replace(true) {
+                    i_slint_core::context::add_platform_init_hook(Box::new(|| {
+                        if let Err(e) = i_slint_backend_testing::mcp_server::init() {
+                            i_slint_core::debug_log!("MCP server init failed: {e:?}");
+                        }
+                    }));
+                }
+            });
+        }
+
         i_slint_core::platform::set_platform(backend).map_err(PlatformError::SetPlatformError)
     }
 
