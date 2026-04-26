@@ -424,7 +424,84 @@ impl RendererSealed for FemtoVGWGPURenderer {
         i_slint_core::graphics::SharedPixelBuffer<i_slint_core::graphics::Rgba8Pixel>,
         PlatformError,
     > {
-        self.0.take_snapshot()
+        use i_slint_core::graphics::{Rgba8Pixel, SharedPixelBuffer};
+
+        let backend = &self.0.graphics_backend;
+        let device = &backend.device;
+        let queue = &backend.queue;
+
+        let size = RendererSealed::window_adapter(&self.0)
+            .map(|a| a.size())
+            .unwrap_or_default();
+        if size.width == 0 || size.height == 0 {
+            return Err("take_snapshot: window size is zero".into());
+        }
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("slint_take_snapshot"),
+            size: wgpu::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        self.render_to_texture(&texture)?;
+
+        let unpadded_bytes_per_row = size.width * 4;
+        let bytes_per_row = (unpadded_bytes_per_row + wgpu::COPY_BYTES_PER_ROW_ALIGNMENT - 1)
+            & !(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT - 1);
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("slint_take_snapshot_readback"),
+            size: (bytes_per_row * size.height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        rx.recv().unwrap().map_err(|e| format!("take_snapshot: map_async failed: {e}"))?;
+
+        let mapped = slice.get_mapped_range();
+        let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(size.width, size.height);
+        let dst = pixels.make_mut_bytes();
+        for (row_idx, src_row) in mapped.chunks(bytes_per_row as usize).enumerate() {
+            let row_bytes = unpadded_bytes_per_row as usize;
+            let dst_start = row_idx * row_bytes;
+            dst[dst_start..dst_start + row_bytes].copy_from_slice(&src_row[..row_bytes]);
+        }
+        drop(mapped);
+        readback_buffer.unmap();
+
+        Ok(pixels)
     }
 
     fn supports_transformations(&self) -> bool {
