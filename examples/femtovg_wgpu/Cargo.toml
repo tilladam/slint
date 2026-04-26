@@ -19,6 +19,9 @@ path = "src/main.rs"
 name = "postprocess"
 path = "src/postprocess.rs"
 
+[features]
+mcp = ["slint/mcp"]
+
 [dependencies]
 # backend-winit is needed by the postprocess binary (BackendSelector).
 # The main binary uses its own winit + custom HeadlessPlatform instead.

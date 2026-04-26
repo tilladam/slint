@@ -6,8 +6,9 @@
 
 use crate::headless::HeadlessWindowAdapter;
 use crate::Scene;
-use slint::platform::WindowEvent;
+use slint::platform::{ChannelEventLoopReceiver, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition};
+use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::sync::Arc;
 use wgpu_28 as wgpu;
@@ -54,11 +55,24 @@ struct App {
     slint_adapter: Option<Rc<HeadlessWindowAdapter>>,
     slint_app: Option<Scene>,
     cursor_pos: Option<LogicalPosition>,
+    slint_proxy: slint::platform::ChannelEventLoopProxy,
+    slint_receiver: ChannelEventLoopReceiver,
 }
 
 impl App {
-    fn new() -> Self {
-        Self { window: None, gpu: None, slint_adapter: None, slint_app: None, cursor_pos: None }
+    fn new(
+        slint_proxy: slint::platform::ChannelEventLoopProxy,
+        slint_receiver: ChannelEventLoopReceiver,
+    ) -> Self {
+        Self {
+            window: None,
+            gpu: None,
+            slint_adapter: None,
+            slint_app: None,
+            cursor_pos: None,
+            slint_proxy,
+            slint_receiver,
+        }
     }
 
     fn init_gpu(&mut self, window: Arc<Window>) {
@@ -270,11 +284,10 @@ impl App {
         let slint_texture = create_slint_texture(&device, size.width.max(1), size.height.max(1));
 
         // --- Initialize Slint ---
-        let platform = crate::headless::HeadlessPlatform::new(
-            instance,
-            device.clone(),
-            queue.clone(),
-        );
+        let platform = crate::headless::HeadlessPlatform::new(instance, device.clone(), queue.clone())
+            .with_proxy(self.slint_proxy.clone());
+        #[cfg(feature = "mcp")]
+        slint::mcp::register();
         slint::platform::set_platform(Box::new(platform)).expect("Failed to set Slint platform");
 
         let slint_app = Scene::new().expect("Failed to create Scene");
@@ -465,7 +478,15 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<()> for App {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {}
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.slint_receiver.drain() == ControlFlow::Break(()) {
+            event_loop.exit();
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -575,8 +596,13 @@ fn create_slint_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu:
 }
 
 pub fn run() {
-    let event_loop = EventLoop::new().expect("Failed to create event loop");
+    let event_loop = EventLoop::<()>::with_user_event().build().expect("Failed to create event loop");
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
-    let mut app = App::new();
+    let winit_proxy = event_loop.create_proxy();
+    let (slint_proxy, slint_receiver) =
+        slint::platform::channel_event_loop_proxy(Some(Box::new(move || {
+            let _ = winit_proxy.send_event(());
+        })));
+    let mut app = App::new(slint_proxy, slint_receiver);
     event_loop.run_app(&mut app).expect("Event loop failed");
 }

@@ -7,7 +7,9 @@
 //! [`FemtoVGWGPURenderer`] for offscreen rendering to wgpu textures.
 
 use slint::platform::femtovg_renderer::FemtoVGWGPURenderer;
-use slint::platform::{Platform, WindowAdapter, WindowEvent};
+use slint::platform::{
+    ChannelEventLoopProxy, EventLoopProxy, Platform, WindowAdapter, WindowEvent,
+};
 use slint::{PhysicalSize, Window};
 use std::cell::Cell;
 use std::rc::{Rc, Weak};
@@ -80,18 +82,22 @@ pub struct HeadlessPlatform {
     instance: wgpu::Instance,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    proxy: Option<ChannelEventLoopProxy>,
 }
 
 impl HeadlessPlatform {
     pub fn new(instance: wgpu::Instance, device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        Self { instance, device, queue }
+        Self { instance, device, queue, proxy: None }
+    }
+
+    pub fn with_proxy(mut self, proxy: ChannelEventLoopProxy) -> Self {
+        self.proxy = Some(proxy);
+        self
     }
 }
 
 impl Platform for HeadlessPlatform {
-    fn create_window_adapter(
-        &self,
-    ) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+    fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         let adapter = HeadlessWindowAdapter::new(
             self.instance.clone(),
             self.device.clone(),
@@ -101,6 +107,10 @@ impl Platform for HeadlessPlatform {
             *a.borrow_mut() = Some(Rc::downgrade(&adapter));
         });
         Ok(adapter)
+    }
+
+    fn new_event_loop_proxy(&self) -> Option<Box<dyn EventLoopProxy>> {
+        self.proxy.as_ref().map(|p| Box::new(p.clone()) as Box<dyn EventLoopProxy>)
     }
 
     fn duration_since_start(&self) -> core::time::Duration {
