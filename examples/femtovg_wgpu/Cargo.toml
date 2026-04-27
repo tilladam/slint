@@ -36,7 +36,6 @@ wgpu-28 = { workspace = true, features = ["wgsl"] }
 image = { workspace = true }
 bytemuck = { workspace = true }
 pollster = "0.4"
-winit = { version = "0.30.2", default-features = false, features = ["rwh_06"] }
 
 [build-dependencies]
 slint-build = { path = "../../api/rs/build" }
