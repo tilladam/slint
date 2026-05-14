@@ -3,22 +3,22 @@
 
 // Test the propagation of maximum and minimum size through nested grid layouts
 
-Btn := Rectangle {
-    property <string> text;
+component Btn inherits Rectangle {
+    in-out property <string> text;
 
     t := Text {
         text: root.text;
         width: 100%; height: 100%;
     }
 
-    accessible-label: text;
+    accessible-label: root.text;
     accessible-role: button;
 }
 
-Cb := Rectangle {
-    property <string> text;
-    accessible-label: text;
-    t := Text { }
+component Cb inherits Rectangle {
+    in-out property <string> text;
+    accessible-label: root.text;
+    t := Text { x:0;y:0; }
     accessible-description <=> t.text;
     accessible-role: checkbox;
     accessible-checked: true;
@@ -33,7 +33,7 @@ component ComboBox inherits Rectangle {
     }
 }
 
-TestCase := Rectangle {
+component TestCase inherits Rectangle {
     width: 300phx;
     height: 300phx;
 
@@ -56,19 +56,19 @@ TestCase := Rectangle {
         ComboBox {}
     }
 
-    for t in ["abc"] : Text { text: t; accessible-description: t;  }
+    for t in ["abc"] : Text { x:0;y:0; text: t; accessible-description: t;  }
 
-    property<AccessibleRole> materialized_b1_role: b1.accessible_role;
-    property<string> materialized_b2_label: b2.accessible-label;
-    property<string> materialized_vl_label: vl.accessible-label;
-    property<AccessibleRole> materialized_vl_role: vl.accessible-role;
-    property<AccessibleRole> materialized_txt_role: txt.accessible-role;
-    property<string> materialized_txt_label: txt.accessible-label;
+    in-out property<AccessibleRole> materialized_b1_role: b1.accessible_role;
+    in-out property<string> materialized_b2_label: b2.accessible-label;
+    in-out property<string> materialized_vl_label: vl.accessible-label;
+    in-out property<AccessibleRole> materialized_vl_role: vl.accessible-role;
+    in-out property<AccessibleRole> materialized_txt_role: txt.accessible-role;
+    in-out property<string> materialized_txt_label: txt.accessible-label;
 
-    property <bool> test:
-        materialized_b1_role == AccessibleRole.button && materialized_b2_label == "minus"
-        && materialized_vl_label == "" && materialized_vl_role == AccessibleRole.none
-        && materialized_txt_label == "automatic text value" && materialized_txt_role == AccessibleRole.text
+    in-out property <bool> test:
+        root.materialized_b1_role == AccessibleRole.button && root.materialized_b2_label == "minus"
+        && root.materialized_vl_label == "" && root.materialized_vl_role == AccessibleRole.none
+        && root.materialized_txt_label == "automatic text value" && root.materialized_txt_role == AccessibleRole.text
         && cb.accessible-checked && !b1.accessible-checked;
 }
 
