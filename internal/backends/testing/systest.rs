@@ -205,6 +205,12 @@ impl TestingClient {
             Req::RequestClearEventLog(..) => {
                 Resp::ClearEventLogResponse(dispatch::clear_event_log(&self.state))
             }
+            Req::RequestStartEventRecording(..) => {
+                Resp::StartEventRecordingResponse(dispatch::start_event_recording(&self.state))
+            }
+            Req::RequestStopEventRecording(..) => {
+                Resp::StopEventRecordingResponse(dispatch::stop_event_recording(&self.state))
+            }
             // MCP-only tools — not supported over the binary system-testing transport
             Req::RequestDispatchKeyEvent(..) | Req::RequestGetElementTree(..) => {
                 return Err("this request is only supported via the MCP transport".into());
@@ -216,6 +222,7 @@ impl TestingClient {
 pub fn init() -> Result<(), EventLoopError> {
     introspection::ensure_window_tracking()?;
     let state = introspection::shared_state();
+    state.start_recording();
 
     let Some(client) = TestingClient::new(state) else {
         return Ok(());
