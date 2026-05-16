@@ -65,12 +65,13 @@ export component OutlineView inherits VerticalLayout {
                         if !open-timer.running {
                             open-timer.running = true;
                         }
-                        return false;
+                        return DragAction.none;
                     }
-                    return Api.outline-can-drop(event.data, item.uri, item.offset, DropLocation.onto);
+                    return Api.outline-can-drop(event.data, item.uri, item.offset, DropLocation.onto) ? DragAction.copy : DragAction.none;
                 }
                 dropped(event) => {
                     Api.outline-drop(event.data, item.uri, item.offset, DropLocation.onto);
+                    return event.proposed-action;
                 }
             }
 
@@ -83,10 +84,11 @@ export component OutlineView inherits VerticalLayout {
                 width: parent.width - self.x;
 
                 can-drop(event) => {
-                    return Api.outline-can-drop(event.data, item.uri, item.offset, DropLocation.before);
+                    return Api.outline-can-drop(event.data, item.uri, item.offset, DropLocation.before) ? DragAction.copy : DragAction.none;
                 }
                 dropped(event) => {
                     Api.outline-drop(event.data, item.uri, item.offset, DropLocation.before);
+                    return event.proposed-action;
                 }
                 Rectangle {
                     height: 1px;
@@ -104,10 +106,11 @@ export component OutlineView inherits VerticalLayout {
                 enabled: item.indent-level > 0;
 
                 can-drop(event) => {
-                    return Api.outline-can-drop(event.data, item.uri, item.offset, DropLocation.after);
+                    return Api.outline-can-drop(event.data, item.uri, item.offset, DropLocation.after) ? DragAction.copy : DragAction.none;
                 }
                 dropped(event) => {
                     Api.outline-drop(event.data, item.uri, item.offset, DropLocation.after);
+                    return event.proposed-action;
                 }
                 Rectangle {
                     height: 1px;

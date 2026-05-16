@@ -646,27 +646,81 @@ impl WindowInner {
         let was_dragging = mouse_input_state.drag_data.is_some();
         let old_cursor = core::mem::replace(&mut mouse_input_state.cursor, MouseCursor::Default);
 
+        // drag-finished firing is deferred until after dispatch so the DropArea has had
+        // a chance to fire its own `dropped` callback first; that callback returns the
+        // final action, which the runtime then forwards to the source.
+        let mut pending_drag_finished: Option<(
+            crate::item_tree::ItemWeak,
+            Option<crate::item_tree::ItemWeak>,
+        )> = None;
+
         if let Some(mut drop_event) = mouse_input_state.drag_data.clone() {
             match &event {
                 MouseEvent::Released { position, button: PointerEventButton::Left, .. } => {
-                    drop_event.position = crate::lengths::logical_position_to_api(*position);
-                    event = MouseEvent::Drop(drop_event);
                     mouse_input_state.drag_data = None;
-                    mouse_input_state.drag_source = None;
+                    let source = mouse_input_state.drag_source.take();
+                    if let Some(target_weak) = mouse_input_state.drop_target.take() {
+                        // Seed `proposed-action` for the dropped callback with the action the
+                        // target last chose during hover; the callback's return value will
+                        // become the final action reported to the source.
+                        let hovered = target_weak
+                            .upgrade()
+                            .and_then(|t| t.downcast::<crate::items::DropArea>())
+                            .map(|d| d.as_pin_ref().current_action())
+                            .unwrap_or(crate::items::DragAction::None);
+                        drop_event.proposed_action = hovered;
+                        drop_event.position = crate::lengths::logical_position_to_api(*position);
+                        event = MouseEvent::Drop(drop_event);
+                        if let Some(s) = source {
+                            pending_drag_finished = Some((s, Some(target_weak)));
+                        }
+                    } else {
+                        // No DropArea accepted the most recent DragMove. Tear the drag
+                        // down via Exit instead of converting to Drop so a non-accepting
+                        // DropArea under the cursor doesn't fire `dropped`, and so the
+                        // underlying Release doesn't reach hit-tested items as a
+                        // spurious click.
+                        event = MouseEvent::Exit;
+                        if let Some(s) = source {
+                            pending_drag_finished = Some((s, None));
+                        }
+                    }
                 }
                 MouseEvent::Moved { position, .. } => {
                     drop_event.position = crate::lengths::logical_position_to_api(*position);
-                    // Mirror the position into the persistent state so the renderer can
-                    // place the drag-image overlay without re-deriving the cursor location.
+                    // Recompute the proposed action from current modifier state so the target's
+                    // `can-drop` callback sees an up-to-date `event.proposed-action`.
+                    let preferred = mouse_input_state
+                        .drag_source
+                        .as_ref()
+                        .and_then(|s| s.upgrade())
+                        .and_then(|i| i.downcast::<crate::items::DragArea>())
+                        .map(|d| d.as_pin_ref().preferred_action())
+                        .unwrap_or(crate::items::DragAction::Copy);
+                    drop_event.proposed_action = crate::items::compute_proposed_action(
+                        self.context().0.modifiers.get().into(),
+                        drop_event.allow_copy,
+                        drop_event.allow_move,
+                        drop_event.allow_link,
+                        preferred,
+                    );
+                    // Mirror the position and proposed action into the persistent state so the
+                    // renderer can place the drag-image overlay without re-deriving the cursor
+                    // location, and so a subsequent synthetic Moved (e.g. fired from a modifier
+                    // key press) starts from the right position.
                     if let Some(d) = mouse_input_state.drag_data.as_mut() {
                         d.position = drop_event.position;
+                        d.proposed_action = drop_event.proposed_action;
                     }
                     mouse_input_state.cursor = MouseCursor::NoDrop;
                     event = MouseEvent::DragMove(drop_event);
                 }
                 MouseEvent::Exit => {
                     mouse_input_state.drag_data = None;
-                    mouse_input_state.drag_source = None;
+                    mouse_input_state.drop_target = None;
+                    if let Some(s) = mouse_input_state.drag_source.take() {
+                        pending_drag_finished = Some((s, None));
+                    }
                 }
                 _ => {}
             }
@@ -833,6 +887,32 @@ impl WindowInner {
             window_adapter.request_redraw();
         }
 
+        if let Some((source_weak, target_weak)) = pending_drag_finished
+            && let Some(source) = source_weak.upgrade()
+            && let Some(drag_area) = source.downcast::<crate::items::DragArea>()
+        {
+            // The action `dropped` returned is now sitting on the target's `current_action`.
+            // For a cancelled drag (no target) we just report None.
+            let target = target_weak
+                .and_then(|w| w.upgrade())
+                .and_then(|i| i.downcast::<crate::items::DropArea>());
+            let action = target
+                .as_ref()
+                .map(|d| d.as_pin_ref().current_action())
+                .unwrap_or(crate::items::DragAction::None);
+            let drag_area = drag_area.as_pin_ref();
+            drag_area.dragging.set(false);
+            crate::items::DragArea::FIELD_OFFSETS
+                .drag_finished()
+                .apply_pin(drag_area)
+                .call(&(action,));
+            // The drag is over: reset the target's `current_action` so it matches
+            // `contains_drag` and the docstring ("none when no drag is hovering").
+            if let Some(target) = target {
+                target.as_pin_ref().current_action.set(crate::items::DragAction::None);
+            }
+        }
+
         if let Some(popup_id) = popup_to_close {
             WindowInner::from_pub(parent_adapter.window()).close_popup(popup_id);
         }
@@ -893,6 +973,23 @@ impl WindowInner {
         ) {
             // Updates the key modifiers depending on the key code and pressed state.
             self.context().0.modifiers.set(updated_modifier);
+
+            // If a drag is in flight, synthesize a Moved at the last drag position so
+            // the new modifier state flows into `event.proposed-action` and the target's
+            // `can-drop` re-runs — letting the user change copy/move/link with Ctrl/Shift
+            // without having to move the mouse first.
+            let drag_pos = {
+                let state = self.mouse_input_state.take();
+                let pos = state.drag_data.as_ref().map(|d| d.position);
+                self.mouse_input_state.replace(state);
+                pos
+            };
+            if let Some(pos) = drag_pos {
+                self.process_mouse_input(MouseEvent::Moved {
+                    position: crate::lengths::logical_point_from_api(pos),
+                    touch_finger_id: 0,
+                });
+            }
         }
 
         internal_key_event.key_event.modifiers =
