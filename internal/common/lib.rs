@@ -17,6 +17,7 @@ pub mod key_codes;
 pub mod sharedfontique;
 
 pub mod styled_text;
+pub mod unicode_utils;
 
 /// Detect the native style depending on the platform
 pub fn get_native_style(has_qt: bool, target: &str) -> &'static str {
