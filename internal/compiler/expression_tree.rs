@@ -123,8 +123,14 @@ pub enum BuiltinFunction {
     StopTimer,
     RestartTimer,
     OpenUrl,
+    BringAllToFront,
     ParseMarkdown,
     StringToStyledText,
+    /// Converts a color to a hex string wrapped in StyledText.
+    /// Used for `<font color='\{expr}'>` interpolation in `@markdown`,
+    /// because `parse_interpolated` takes `StyledText` arguments.
+    ColorToStyledText,
+    DecimalSeparator,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +206,7 @@ declare_builtin_function_types!(
     ASin: (Type::Float32) -> Type::Angle,
     ATan: (Type::Float32) -> Type::Angle,
     ATan2: (Type::Float32, Type::Float32) -> Type::Angle,
+    DecimalSeparator: () -> Type::String,
     Log: (Type::Float32, Type::Float32) -> Type::Float32,
     Ln: (Type::Float32) -> Type::Float32,
     Pow: (Type::Float32, Type::Float32) -> Type::Float32,
@@ -301,8 +308,10 @@ declare_builtin_function_types!(
     StopTimer: (Type::ElementReference) -> Type::Void,
     RestartTimer: (Type::ElementReference) -> Type::Void,
     ParseMarkdown: (Type::String, Type::Array(Type::StyledText.into())) -> Type::StyledText,
-    StringToStyledText: (Type::String) -> Type::StyledText
+    StringToStyledText: (Type::String) -> Type::StyledText,
+    ColorToStyledText: (Type::Color) -> Type::StyledText
     OpenUrl: (Type::String) -> Type::Bool,
+    BringAllToFront: () -> Type::Void,
 );
 
 impl Default for BuiltinFunctionTypes {
@@ -340,6 +349,7 @@ impl BuiltinFunction {
             BuiltinFunction::DateNow => false,
             BuiltinFunction::ValidDate => false,
             BuiltinFunction::ParseDate => false,
+            BuiltinFunction::DecimalSeparator => false,
             // Even if it is not pure, we optimize it away anyway
             BuiltinFunction::Debug => true,
             BuiltinFunction::Mod
@@ -411,7 +421,9 @@ impl BuiltinFunction {
             BuiltinFunction::RestartTimer => false,
             BuiltinFunction::ParseMarkdown => false,
             BuiltinFunction::StringToStyledText => true,
+            BuiltinFunction::ColorToStyledText => true,
             BuiltinFunction::OpenUrl => false,
+            BuiltinFunction::BringAllToFront => false,
         }
     }
 
@@ -432,6 +444,7 @@ impl BuiltinFunction {
             BuiltinFunction::DateNow => true,
             BuiltinFunction::ValidDate => true,
             BuiltinFunction::ParseDate => true,
+            BuiltinFunction::DecimalSeparator => true,
             // Even if it has technically side effect, we still consider it as pure for our purpose
             BuiltinFunction::Debug => true,
             BuiltinFunction::Mod
@@ -496,7 +509,9 @@ impl BuiltinFunction {
             BuiltinFunction::RestartTimer => false,
             BuiltinFunction::ParseMarkdown => true,
             BuiltinFunction::StringToStyledText => true,
+            BuiltinFunction::ColorToStyledText => true,
             BuiltinFunction::OpenUrl => false,
+            BuiltinFunction::BringAllToFront => false,
         }
     }
 }
@@ -1304,7 +1319,7 @@ impl Expression {
             },
             Expression::EmptyDataTransfer => true,
             Expression::StoreLocalVariable { value, .. } => value.is_constant(ga),
-            // We only load what we store, and stores are alredy checked
+            // We only load what we store, and stores are already checked
             Expression::ReadLocalVariable { .. } => true,
             Expression::EasingCurve(_) => true,
             Expression::LinearGradient { angle, stops } => {
