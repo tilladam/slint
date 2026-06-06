@@ -275,7 +275,7 @@ pub enum Expression {
         plural: Option<Box<Expression>>,
     },
 
-    Predicate {
+    Closure {
         arg_name: SmolStr,
         expression: Box<Expression>,
     },
@@ -293,7 +293,7 @@ impl Expression {
             | Type::ElementReference
             | Type::LayoutCache
             | Type::ArrayOfU16
-            | Type::Predicate => return None,
+            | Type::Closure => return None,
             Type::Float32
             | Type::Duration
             | Type::Int32
@@ -406,7 +406,7 @@ impl Expression {
             Self::EmptyComponentFactory => Type::ComponentFactory,
             Self::EmptyDataTransfer => Type::DataTransfer,
             Self::TranslationReference { .. } => Type::String,
-            Self::Predicate { .. } => Type::Predicate,
+            Self::Closure { .. } => Type::Closure,
         }
     }
 }
@@ -538,7 +538,7 @@ macro_rules! visit_impl {
                     $visitor(plural);
                 }
             }
-            Expression::Predicate { expression, .. } => {
+            Expression::Closure { expression, .. } => {
                 $visitor(expression);
             }
         }
