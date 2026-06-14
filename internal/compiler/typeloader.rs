@@ -1387,11 +1387,18 @@ impl TypeLoader {
                 }
             };
             match source_code_result {
-                Ok(source) => syntax_nodes::Document::new(crate::parser::parse(
-                    source,
-                    Some(&path_canon),
-                    state.borrow_mut().diag,
-                )),
+                Ok(source) => syntax_nodes::Document::new(if let Some(builtin) = builtin {
+                    // Builtin sources (std-widgets, styles, …) are immutable; cache the parsed
+                    // green tree across invocations instead of re-parsing every expansion.
+                    crate::parser::parse_builtin_cached(
+                        builtin,
+                        source,
+                        Some(&path_canon),
+                        state.borrow_mut().diag,
+                    )
+                } else {
+                    crate::parser::parse(source, Some(&path_canon), state.borrow_mut().diag)
+                }),
                 Err(err)
                     if !resolved
                         && matches!(err.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) =>
