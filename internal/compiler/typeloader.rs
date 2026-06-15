@@ -19,32 +19,8 @@ use crate::{fileaccess, langtype, layout, parser};
 use core::future::Future;
 use itertools::Itertools;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct BuiltinSemanticCacheKey {
-    resolved_style: String,
-    enable_experimental: bool,
-    debug_hooks: bool,
-    translation_domain: Option<String>,
-    default_translation_context: BuiltinDefaultTranslationContext,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum BuiltinDefaultTranslationContext {
-    ComponentName,
-    None,
-}
-
-impl From<&crate::DefaultTranslationContext> for BuiltinDefaultTranslationContext {
-    fn from(value: &crate::DefaultTranslationContext) -> Self {
-        match value {
-            crate::DefaultTranslationContext::ComponentName => Self::ComponentName,
-            crate::DefaultTranslationContext::None => Self::None,
-        }
-    }
-}
-
 thread_local! {
-    static BUILTIN_SEMANTIC_CACHE: RefCell<HashMap<BuiltinSemanticCacheKey, TypeLoader>> =
+    static BUILTIN_SEMANTIC_CACHE: RefCell<HashMap<crate::frozen_builtins::FrozenBuiltinCacheKey, TypeLoader>> =
         Default::default();
 }
 
@@ -999,38 +975,15 @@ impl TypeLoader {
         myself
     }
 
-    fn builtin_semantic_cache_key(&self) -> Option<BuiltinSemanticCacheKey> {
+    fn builtin_semantic_cache_key(&self) -> Option<crate::frozen_builtins::FrozenBuiltinCacheKey> {
         Self::builtin_semantic_cache_key_for(&self.compiler_config, &self.resolved_style)
     }
 
     fn builtin_semantic_cache_key_for(
         compiler_config: &CompilerConfiguration,
         resolved_style: &str,
-    ) -> Option<BuiltinSemanticCacheKey> {
-        // Prototype constraint: include paths are allowed to override `std-widgets.slint` and
-        // style files, so only cache the pure embedded-builtin configuration for now.
-        if !compiler_config.include_paths.is_empty() {
-            return None;
-        }
-        if compiler_config.open_import_callback.is_some()
-            || compiler_config.resource_url_mapper.is_some()
-        {
-            return None;
-        }
-
-        let known_builtin_style =
-            fileaccess::styles().into_iter().any(|style| style == resolved_style);
-        if !known_builtin_style {
-            return None;
-        }
-
-        Some(BuiltinSemanticCacheKey {
-            resolved_style: resolved_style.into(),
-            enable_experimental: compiler_config.enable_experimental,
-            debug_hooks: compiler_config.debug_hooks.is_some(),
-            translation_domain: compiler_config.translation_domain.clone(),
-            default_translation_context: (&compiler_config.default_translation_context).into(),
-        })
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinCacheKey> {
+        crate::frozen_builtins::FrozenBuiltinCacheKey::from_config(compiler_config, resolved_style)
     }
 
     fn restore_builtin_semantic_cache_for(
@@ -1051,6 +1004,8 @@ impl TypeLoader {
     pub(crate) fn store_builtin_semantic_cache(&self) {
         let Some(key) = self.builtin_semantic_cache_key() else { return };
 
+        self.store_frozen_builtin_cache();
+
         let Some(mut cached) = snapshot(self) else { return };
         cached.retain_only_builtin_documents();
 
@@ -1061,6 +1016,20 @@ impl TypeLoader {
         BUILTIN_SEMANTIC_CACHE.with(|cache| {
             cache.borrow_mut().entry(key).or_insert(cached);
         });
+    }
+
+    pub(crate) fn store_frozen_builtin_cache(&self) {
+        let Some(key) = self.builtin_semantic_cache_key() else { return };
+        crate::frozen_builtins::store(key, self.freeze_builtin_semantic_metadata());
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn cached_frozen_builtin_metadata(
+        compiler_config: &CompilerConfiguration,
+        resolved_style: &str,
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinLibrary> {
+        let key = Self::builtin_semantic_cache_key_for(compiler_config, resolved_style)?;
+        crate::frozen_builtins::get(&key)
     }
 
     fn retain_only_builtin_documents(&mut self) {
@@ -2103,6 +2072,20 @@ fn bench_snapshot_vs_recompile() {
     let snapshot_ms = mean_ms(&|| {
         std::hint::black_box(snapshot(&template).expect("snapshot failed"));
     });
+    let freeze_ms = mean_ms(&|| {
+        std::hint::black_box(template.freeze_builtin_semantic_metadata());
+    });
+
+    let mut cached_cc = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    cached_cc.style = Some("fluent".into());
+    let frozen_key =
+        crate::frozen_builtins::FrozenBuiltinCacheKey::from_config(&cached_cc, "fluent").unwrap();
+    crate::frozen_builtins::store(frozen_key.clone(), template.freeze_builtin_semantic_metadata());
+    let frozen_lookup_ms = mean_ms(&|| {
+        std::hint::black_box(
+            crate::frozen_builtins::get(&frozen_key).expect("frozen metadata cache miss"),
+        );
+    });
 
     eprintln!("\nsnapshot vs recompile ({iters} iters each):");
     eprintln!("  new loader + load std-widgets : {fresh_import:7.2} ms  (what snapshot replaces)");
@@ -2110,6 +2093,8 @@ fn bench_snapshot_vs_recompile() {
     eprintln!("  => std-widgets load portion   : {:7.2} ms", fresh_import - fresh_trivial);
     eprintln!("  snapshot(template)            : {snapshot_ms:7.2} ms");
     eprintln!("  => saving vs new+load         : {:7.2} ms", fresh_import - snapshot_ms);
+    eprintln!("  freeze metadata               : {freeze_ms:7.2} ms");
+    eprintln!("  frozen cache lookup+clone     : {frozen_lookup_ms:7.2} ms");
 }
 
 #[test]
@@ -2296,6 +2281,37 @@ fn test_frozen_builtin_metadata_is_process_global_safe() {
         .iter()
         .find(|doc| doc.path == "builtin:/fluent/std-widgets.slint")
         .expect("std-widgets metadata should be frozen");
+
+    assert!(std_widgets.exports.iter().any(|export| {
+        export.name == "Button"
+            && export.kind == crate::frozen_builtins::FrozenBuiltinExportKind::Component
+    }));
+}
+
+#[test]
+fn test_frozen_builtin_metadata_is_stored_in_process_global_cache() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, _loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = TypeLoader::cached_frozen_builtin_metadata(&compiler_config, "fluent")
+        .expect("frozen builtin metadata should be cached");
+    let std_widgets = frozen
+        .documents
+        .iter()
+        .find(|doc| doc.path == "builtin:/fluent/std-widgets.slint")
+        .expect("std-widgets metadata should be cached");
 
     assert!(std_widgets.exports.iter().any(|export| {
         export.name == "Button"
