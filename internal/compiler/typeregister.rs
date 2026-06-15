@@ -10,8 +10,8 @@ use std::rc::Rc;
 
 use crate::expression_tree::BuiltinFunction;
 use crate::langtype::{
-    BuiltinElement, BuiltinPropertyDefault, BuiltinPropertyInfo, BuiltinStruct, ElementType,
-    Enumeration, Function, PropertyLookupResult, Struct, Type,
+    BuiltinElement, BuiltinPropertyDefault, BuiltinPropertyInfo, BuiltinStruct, DefaultSizeBinding,
+    ElementType, Enumeration, Function, NativeClass, PropertyLookupResult, Struct, Type,
 };
 use crate::object_tree::{Component, PropertyVisibility};
 use crate::typeloader;
@@ -516,6 +516,61 @@ impl TypeRegister {
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn rehydrate_builtin_registry_shell(
+        frozen: &crate::frozen_builtins::FrozenBuiltinRegistry,
+    ) -> Rc<RefCell<Self>> {
+        let mut registry = TypeRegister {
+            supported_property_animation_types: frozen
+                .supported_property_animation_types
+                .iter()
+                .cloned()
+                .collect(),
+            context_restricted_types: frozen
+                .context_restricted_types
+                .iter()
+                .map(|restriction| {
+                    (
+                        SmolStr::new(restriction.name.as_str()),
+                        restriction.contexts.iter().map(|ctx| SmolStr::new(ctx.as_str())).collect(),
+                    )
+                })
+                .collect(),
+            expose_internal_types: frozen.expose_internal_types,
+            ..Default::default()
+        };
+
+        for ty in &frozen.types {
+            if let Some(ty) = primitive_type_from_name(ty) {
+                registry.insert_type(ty);
+            }
+        }
+
+        for frozen_element in &frozen.elements {
+            if frozen_element.kind != "builtin" {
+                continue;
+            }
+            let native_class = NativeClass::new(frozen_element.native_class.as_str());
+            let mut builtin = BuiltinElement::new(Rc::new(native_class));
+            builtin.name = frozen_element.name.as_str().into();
+            builtin.additional_accept_self = frozen_element.additional_accept_self;
+            builtin.accepts_focus = frozen_element.accepts_focus;
+            builtin.is_global = frozen_element.is_global;
+            builtin.is_internal = frozen_element.is_internal;
+            builtin.is_non_item_type = frozen_element.is_non_item_type;
+            builtin.default_size_binding =
+                default_size_binding_from_name(frozen_element.default_size_binding.as_str());
+            registry.add_builtin(Rc::new(builtin));
+        }
+
+        registry.property_animation_type =
+            registry.lookup_element(&frozen.property_animation_type).unwrap_or(ElementType::Error);
+        registry.empty_type =
+            registry.lookup_element(&frozen.empty_type).unwrap_or(ElementType::Error);
+
+        Rc::new(RefCell::new(registry))
+    }
+
     /// Insert a type into the type register with its builtin type name.
     ///
     /// Returns false if it replaced an existing type.
@@ -889,6 +944,41 @@ fn element_type_kind(element_type: &ElementType) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
+fn primitive_type_from_name(name: &str) -> Option<Type> {
+    Some(match name {
+        "float" => Type::Float32,
+        "int" => Type::Int32,
+        "string" => Type::String,
+        "physical-length" => Type::PhysicalLength,
+        "length" => Type::LogicalLength,
+        "color" => Type::Color,
+        "component-factory" => Type::ComponentFactory,
+        "duration" => Type::Duration,
+        "image" => Type::Image,
+        "bool" => Type::Bool,
+        "model" => Type::Model,
+        "percent" => Type::Percent,
+        "easing" => Type::Easing,
+        "angle" => Type::Angle,
+        "brush" => Type::Brush,
+        "relative-font-size" => Type::Rem,
+        "styled-text" => Type::StyledText,
+        "keys" => Type::Keys,
+        "data-transfer" => Type::DataTransfer,
+        _ => return None,
+    })
+}
+
+#[allow(dead_code)]
+fn default_size_binding_from_name(name: &str) -> DefaultSizeBinding {
+    match name {
+        "ExpandsToParentGeometry" => DefaultSizeBinding::ExpandsToParentGeometry,
+        "ImplicitSize" => DefaultSizeBinding::ImplicitSize,
+        _ => DefaultSizeBinding::None,
+    }
+}
+
 /// Type definitions for each builtin struct
 pub mod builtin_structs {
     use super::*;
@@ -1024,5 +1114,12 @@ mod tests {
             .context_restricted_types
             .iter()
             .any(|restriction| !restriction.name.is_empty() && !restriction.contexts.is_empty()));
+
+        let rehydrated = TypeRegister::rehydrate_builtin_registry_shell(&frozen);
+        assert_eq!(rehydrated.borrow().lookup("length"), Type::LogicalLength);
+        assert!(matches!(
+            rehydrated.borrow().lookup_element("Rectangle"),
+            Ok(ElementType::Builtin(_))
+        ));
     }
 }

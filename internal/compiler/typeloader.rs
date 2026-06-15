@@ -2160,6 +2160,17 @@ fn bench_snapshot_vs_recompile() {
     let parent_registry_freeze_ms = mean_ms(&|| {
         std::hint::black_box(parent_registry.borrow().freeze_builtin_registry_metadata());
     });
+    let frozen_parent_registry = parent_registry.borrow().freeze_builtin_registry_metadata();
+    let parent_registry_shell_rehydrate_ms = mean_ms(&|| {
+        std::hint::black_box(TypeRegister::rehydrate_builtin_registry_shell(
+            &frozen_parent_registry,
+        ));
+    });
+    let skeleton_rehydrate_with_shell_parent_ms = mean_ms(&|| {
+        let parent_registry =
+            TypeRegister::rehydrate_builtin_registry_shell(&frozen_parent_registry);
+        std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
+    });
     let skeleton_rehydrate_with_snapshot_parent_ms = mean_ms(&|| {
         let parent_registry = snapshot_parent_registry();
         std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
@@ -2181,6 +2192,8 @@ fn bench_snapshot_vs_recompile() {
     eprintln!("  parent registry fresh         : {parent_registry_fresh_ms:7.2} ms");
     eprintln!("  parent registry snapshot      : {parent_registry_snapshot_ms:7.2} ms");
     eprintln!("  parent registry freeze        : {parent_registry_freeze_ms:7.2} ms");
+    eprintln!("  parent registry shell rehyd   : {parent_registry_shell_rehydrate_ms:7.2} ms");
+    eprintln!("  skeleton + shell parent       : {skeleton_rehydrate_with_shell_parent_ms:7.2} ms");
     eprintln!(
         "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
     );
