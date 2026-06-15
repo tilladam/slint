@@ -2243,6 +2243,15 @@ fn bench_snapshot_vs_recompile() {
     });
     let frozen_binary_encoded =
         postcard::to_allocvec(&frozen).expect("binary artifact encode failed");
+    let frozen_binary_artifact_path = std::env::temp_dir()
+        .join(format!("slint-frozen-builtin-artifact-{}-{iters}.postcard", std::process::id()));
+    std::fs::write(&frozen_binary_artifact_path, &frozen_binary_encoded)
+        .expect("failed to write binary artifact");
+    let frozen_binary_file_read_ms = mean_ms(&|| {
+        std::hint::black_box(
+            std::fs::read(&frozen_binary_artifact_path).expect("binary artifact read failed"),
+        );
+    });
     let frozen_binary_decode_ms = mean_ms(&|| {
         std::hint::black_box(
             postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(
@@ -2319,6 +2328,17 @@ fn bench_snapshot_vs_recompile() {
             &frozen,
         ));
     });
+    let frozen_binary_file_loader_rehydrate_ms = mean_ms(&|| {
+        let encoded =
+            std::fs::read(&frozen_binary_artifact_path).expect("binary artifact read failed");
+        let frozen = postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(&encoded)
+            .expect("binary artifact decode failed");
+        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
+            cached_cc.clone(),
+            "fluent".into(),
+            &frozen,
+        ));
+    });
     let skeleton_rehydrate_with_cached_shell_parent_ms = mean_ms(&|| {
         let parent_registry =
             TypeRegister::rehydrate_builtin_registry_shell(&cached_frozen_parent_registry);
@@ -2347,6 +2367,7 @@ fn bench_snapshot_vs_recompile() {
         frozen_encoded.len()
     );
     eprintln!("  binary artifact encode        : {frozen_binary_encode_ms:7.2} ms");
+    eprintln!("  binary artifact file read     : {frozen_binary_file_read_ms:7.2} ms");
     eprintln!(
         "  binary artifact decode        : {frozen_binary_decode_ms:7.2} ms  ({} bytes postcard)",
         frozen_binary_encoded.len()
@@ -2366,10 +2387,12 @@ fn bench_snapshot_vs_recompile() {
     eprintln!(
         "  binary decode + loader rehyd  : {frozen_binary_decode_loader_rehydrate_ms:7.2} ms"
     );
+    eprintln!("  file + binary decode + loader : {frozen_binary_file_loader_rehydrate_ms:7.2} ms");
     eprintln!(
         "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
     );
     eprintln!("  skeleton rehydrate + builtins : {skeleton_rehydrate_with_parent_ms:7.2} ms");
+    std::fs::remove_file(&frozen_binary_artifact_path).ok();
 }
 
 #[test]
@@ -2716,6 +2739,44 @@ fn test_frozen_builtin_binary_artifact_static_slice_rehydrates_loader() {
     let button =
         spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
             .expect("Button should import from a decoded binary frozen artifact");
+    assert!(!import_diags.has_errors());
+    assert_eq!(button.id.as_str(), "Button");
+}
+
+#[test]
+fn test_frozen_builtin_binary_artifact_file_rehydrates_loader() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = loader.freeze_builtin_semantic_metadata();
+    let encoded = postcard::to_allocvec(&frozen).expect("frozen artifact should serialize");
+    let path = std::env::temp_dir()
+        .join(format!("slint-frozen-builtin-artifact-test-{}.postcard", std::process::id()));
+    std::fs::write(&path, &encoded).expect("frozen artifact file should be written");
+
+    let encoded = std::fs::read(&path).expect("frozen artifact file should be read");
+    std::fs::remove_file(&path).ok();
+    let decoded: crate::frozen_builtins::FrozenBuiltinLibrary =
+        postcard::from_bytes(&encoded).expect("frozen artifact should deserialize from file");
+
+    let mut loader =
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded);
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import from a file-backed binary frozen artifact");
     assert!(!import_diags.has_errors());
     assert_eq!(button.id.as_str(), "Button");
 }
