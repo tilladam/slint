@@ -945,6 +945,10 @@ impl TypeLoader {
         if let Some(cached) = Self::restore_frozen_builtin_cache_for(&compiler_config, &style) {
             return cached;
         }
+        if let Some(cached) = Self::restore_generated_builtin_artifact_for(&compiler_config, &style)
+        {
+            return cached;
+        }
 
         let myself = Self {
             global_type_registry: if compiler_config.enable_experimental {
@@ -1014,6 +1018,39 @@ impl TypeLoader {
             resolved_style.into(),
             &frozen,
         ))
+    }
+
+    fn restore_generated_builtin_artifact_for(
+        compiler_config: &CompilerConfiguration,
+        resolved_style: &str,
+    ) -> Option<Self> {
+        let key = Self::builtin_semantic_cache_key_for(compiler_config, resolved_style)?;
+        let artifact = crate::frozen_builtins::generated_artifact(&key)?;
+        Self::rehydrate_generated_builtin_artifact_bytes(
+            compiler_config.clone(),
+            resolved_style.into(),
+            artifact,
+        )
+    }
+
+    #[cfg(test)]
+    fn rehydrate_generated_builtin_artifact_bytes(
+        compiler_config: CompilerConfiguration,
+        resolved_style: String,
+        artifact: &'static [u8],
+    ) -> Option<Self> {
+        let frozen =
+            postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(artifact).ok()?;
+        Some(Self::rehydrate_frozen_builtin_artifact(compiler_config, resolved_style, &frozen))
+    }
+
+    #[cfg(not(test))]
+    fn rehydrate_generated_builtin_artifact_bytes(
+        _compiler_config: CompilerConfiguration,
+        _resolved_style: String,
+        _artifact: &'static [u8],
+    ) -> Option<Self> {
+        None
     }
 
     fn rehydrate_frozen_builtin_artifact(
@@ -2243,6 +2280,15 @@ fn bench_snapshot_vs_recompile() {
     });
     let frozen_binary_encoded =
         postcard::to_allocvec(&frozen).expect("binary artifact encode failed");
+    let generated_static_artifact: &'static [u8] =
+        Box::leak(frozen_binary_encoded.clone().into_boxed_slice());
+    crate::frozen_builtins::store_generated_artifact(frozen_key.clone(), generated_static_artifact);
+    let generated_artifact_lookup_ms = mean_ms(&|| {
+        std::hint::black_box(
+            crate::frozen_builtins::generated_artifact(&frozen_key)
+                .expect("generated artifact lookup failed"),
+        );
+    });
     let frozen_binary_artifact_path = std::env::temp_dir()
         .join(format!("slint-frozen-builtin-artifact-{}-{iters}.postcard", std::process::id()));
     std::fs::write(&frozen_binary_artifact_path, &frozen_binary_encoded)
@@ -2339,6 +2385,12 @@ fn bench_snapshot_vs_recompile() {
             &frozen,
         ));
     });
+    let generated_loader_rehydrate_ms = mean_ms(&|| {
+        std::hint::black_box(
+            TypeLoader::restore_generated_builtin_artifact_for(&cached_cc, "fluent")
+                .expect("generated artifact restore failed"),
+        );
+    });
     let skeleton_rehydrate_with_cached_shell_parent_ms = mean_ms(&|| {
         let parent_registry =
             TypeRegister::rehydrate_builtin_registry_shell(&cached_frozen_parent_registry);
@@ -2367,6 +2419,7 @@ fn bench_snapshot_vs_recompile() {
         frozen_encoded.len()
     );
     eprintln!("  binary artifact encode        : {frozen_binary_encode_ms:7.2} ms");
+    eprintln!("  generated artifact lookup     : {generated_artifact_lookup_ms:7.2} ms");
     eprintln!("  binary artifact file read     : {frozen_binary_file_read_ms:7.2} ms");
     eprintln!(
         "  binary artifact decode        : {frozen_binary_decode_ms:7.2} ms  ({} bytes postcard)",
@@ -2388,6 +2441,7 @@ fn bench_snapshot_vs_recompile() {
         "  binary decode + loader rehyd  : {frozen_binary_decode_loader_rehydrate_ms:7.2} ms"
     );
     eprintln!("  file + binary decode + loader : {frozen_binary_file_loader_rehydrate_ms:7.2} ms");
+    eprintln!("  generated artifact restore    : {generated_loader_rehydrate_ms:7.2} ms");
     eprintln!(
         "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
     );
@@ -2777,6 +2831,49 @@ fn test_frozen_builtin_binary_artifact_file_rehydrates_loader() {
     let button =
         spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
             .expect("Button should import from a file-backed binary frozen artifact");
+    assert!(!import_diags.has_errors());
+    assert_eq!(button.id.as_str(), "Button");
+}
+
+#[test]
+fn test_type_loader_new_uses_generated_builtin_artifact() {
+    let mut artifact_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    artifact_config.style = Some("fluent".into());
+    artifact_config.include_paths = vec![PathBuf::from("/__slint_generated_artifact_seed__")];
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, seed_loader) =
+        spin_on::spin_on(crate::compile_syntax_node(doc_node, parse_diags, artifact_config));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = seed_loader.freeze_builtin_semantic_metadata();
+    let encoded = postcard::to_allocvec(&frozen).expect("frozen artifact should serialize");
+    let static_artifact: &'static [u8] = Box::leak(encoded.into_boxed_slice());
+
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.style = Some("fluent".into());
+    compiler_config.translation_domain =
+        Some(format!("generated-artifact-test-{}", std::process::id()));
+    let key = TypeLoader::builtin_semantic_cache_key_for(&compiler_config, "fluent")
+        .expect("generated artifact test key should be cacheable");
+    crate::frozen_builtins::store_generated_artifact(key, static_artifact);
+
+    let mut loader_diags = BuildDiagnostics::default();
+    let mut loader = TypeLoader::new(compiler_config, &mut loader_diags);
+    assert!(!loader_diags.has_errors());
+    assert!(loader.get_document(Path::new("builtin:/fluent/std-widgets.slint")).is_some());
+
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import from the generated artifact fallback");
     assert!(!import_diags.has_errors());
     assert_eq!(button.id.as_str(), "Button");
 }

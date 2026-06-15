@@ -296,6 +296,10 @@ pub(crate) struct FrozenBuiltinContextRestriction {
 static FROZEN_BUILTIN_CACHE: OnceLock<Mutex<HashMap<FrozenBuiltinCacheKey, FrozenBuiltinLibrary>>> =
     OnceLock::new();
 
+#[cfg(test)]
+static GENERATED_BUILTIN_ARTIFACTS: OnceLock<Mutex<HashMap<FrozenBuiltinCacheKey, &'static [u8]>>> =
+    OnceLock::new();
+
 pub(crate) fn store(key: FrozenBuiltinCacheKey, library: FrozenBuiltinLibrary) {
     if library.documents.is_empty() {
         return;
@@ -311,4 +315,23 @@ pub(crate) fn store(key: FrozenBuiltinCacheKey, library: FrozenBuiltinLibrary) {
 
 pub(crate) fn get(key: &FrozenBuiltinCacheKey) -> Option<FrozenBuiltinLibrary> {
     FROZEN_BUILTIN_CACHE.get()?.lock().unwrap().get(key).cloned()
+}
+
+#[cfg(test)]
+pub(crate) fn store_generated_artifact(key: FrozenBuiltinCacheKey, artifact: &'static [u8]) {
+    if artifact.is_empty() {
+        return;
+    }
+
+    GENERATED_BUILTIN_ARTIFACTS.get_or_init(Default::default).lock().unwrap().insert(key, artifact);
+}
+
+#[cfg(test)]
+pub(crate) fn generated_artifact(key: &FrozenBuiltinCacheKey) -> Option<&'static [u8]> {
+    GENERATED_BUILTIN_ARTIFACTS.get()?.lock().unwrap().get(key).copied()
+}
+
+#[cfg(not(test))]
+pub(crate) fn generated_artifact(_key: &FrozenBuiltinCacheKey) -> Option<&'static [u8]> {
+    None
 }
