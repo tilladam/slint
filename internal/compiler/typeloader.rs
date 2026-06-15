@@ -2236,6 +2236,21 @@ fn bench_snapshot_vs_recompile() {
                 .expect("frozen artifact decode failed"),
         );
     });
+    let frozen_binary_encode_ms = mean_ms(&|| {
+        std::hint::black_box(
+            postcard::to_allocvec(&frozen).expect("binary artifact encode failed"),
+        );
+    });
+    let frozen_binary_encoded =
+        postcard::to_allocvec(&frozen).expect("binary artifact encode failed");
+    let frozen_binary_decode_ms = mean_ms(&|| {
+        std::hint::black_box(
+            postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(
+                &frozen_binary_encoded,
+            )
+            .expect("binary artifact decode failed"),
+        );
+    });
     let parent_registry = TypeRegister::builtin();
     let skeleton_rehydrate_ms = mean_ms(&|| {
         std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
@@ -2293,6 +2308,17 @@ fn bench_snapshot_vs_recompile() {
             &frozen,
         ));
     });
+    let frozen_binary_decode_loader_rehydrate_ms = mean_ms(&|| {
+        let frozen = postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(
+            &frozen_binary_encoded,
+        )
+        .expect("binary artifact decode failed");
+        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
+            cached_cc.clone(),
+            "fluent".into(),
+            &frozen,
+        ));
+    });
     let skeleton_rehydrate_with_cached_shell_parent_ms = mean_ms(&|| {
         let parent_registry =
             TypeRegister::rehydrate_builtin_registry_shell(&cached_frozen_parent_registry);
@@ -2320,6 +2346,11 @@ fn bench_snapshot_vs_recompile() {
         "  frozen artifact decode        : {frozen_decode_ms:7.2} ms  ({} bytes JSON)",
         frozen_encoded.len()
     );
+    eprintln!("  binary artifact encode        : {frozen_binary_encode_ms:7.2} ms");
+    eprintln!(
+        "  binary artifact decode        : {frozen_binary_decode_ms:7.2} ms  ({} bytes postcard)",
+        frozen_binary_encoded.len()
+    );
     eprintln!("  skeleton rehydrate            : {skeleton_rehydrate_ms:7.2} ms");
     eprintln!("  parent registry fresh         : {parent_registry_fresh_ms:7.2} ms");
     eprintln!("  parent registry snapshot      : {parent_registry_snapshot_ms:7.2} ms");
@@ -2332,6 +2363,9 @@ fn bench_snapshot_vs_recompile() {
     eprintln!("  frozen artifact rehydrate     : {frozen_artifact_rehydrate_ms:7.2} ms");
     eprintln!("  frozen loader rehydrate       : {frozen_loader_rehydrate_ms:7.2} ms");
     eprintln!("  decode + loader rehydrate     : {frozen_decode_loader_rehydrate_ms:7.2} ms");
+    eprintln!(
+        "  binary decode + loader rehyd  : {frozen_binary_decode_loader_rehydrate_ms:7.2} ms"
+    );
     eprintln!(
         "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
     );
@@ -2648,6 +2682,42 @@ fn test_frozen_builtin_artifact_serialization_round_trip_rehydrates_loader() {
         parent_registry.borrow().lookup_element("Platform"),
         Ok(langtype::ElementType::Component(component)) if component.is_global()
     ));
+}
+
+#[test]
+fn test_frozen_builtin_binary_artifact_static_slice_rehydrates_loader() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = loader.freeze_builtin_semantic_metadata();
+    let encoded = postcard::to_allocvec(&frozen).expect("frozen artifact should serialize");
+    assert!(!encoded.is_empty());
+
+    // Stand-in for the final generated `static FROZEN_BUILTINS: &[u8] = include_bytes!(...)`.
+    let static_artifact: &'static [u8] = Box::leak(encoded.into_boxed_slice());
+    let decoded: crate::frozen_builtins::FrozenBuiltinLibrary =
+        postcard::from_bytes(static_artifact).expect("frozen artifact should deserialize");
+
+    let mut loader =
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded);
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import from a decoded binary frozen artifact");
+    assert!(!import_diags.has_errors());
+    assert_eq!(button.id.as_str(), "Button");
 }
 
 #[test]

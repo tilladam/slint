@@ -5373,6 +5373,7 @@ dependencies = [
  "nalgebra",
  "num_enum 0.7.6",
  "pathdiff",
+ "postcard",
  "proc-macro2",
  "quote",
  "rayon",
