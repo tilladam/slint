@@ -942,6 +942,9 @@ impl TypeLoader {
         if let Some(cached) = Self::restore_builtin_semantic_cache_for(&compiler_config, &style) {
             return cached;
         }
+        if let Some(cached) = Self::restore_frozen_builtin_cache_for(&compiler_config, &style) {
+            return cached;
+        }
 
         let myself = Self {
             global_type_registry: if compiler_config.enable_experimental {
@@ -999,6 +1002,88 @@ impl TypeLoader {
             restored.resolved_style = resolved_style.into();
             Some(restored)
         })
+    }
+
+    fn restore_frozen_builtin_cache_for(
+        compiler_config: &CompilerConfiguration,
+        resolved_style: &str,
+    ) -> Option<Self> {
+        let frozen = Self::cached_frozen_builtin_metadata(compiler_config, resolved_style)?;
+        Some(Self::rehydrate_frozen_builtin_artifact(
+            compiler_config.clone(),
+            resolved_style.into(),
+            &frozen,
+        ))
+    }
+
+    fn rehydrate_frozen_builtin_artifact(
+        compiler_config: CompilerConfiguration,
+        resolved_style: String,
+        frozen: &crate::frozen_builtins::FrozenBuiltinLibrary,
+    ) -> Self {
+        let global_type_registry = frozen.rehydrate_parent_registry();
+        let builtin_registry = frozen.rehydrate_component_skeletons(&global_type_registry);
+        let mut all_documents = LoadedDocuments::default();
+
+        for frozen_document in &frozen.documents {
+            let path = PathBuf::from(&frozen_document.path);
+            let mut parse_diags = BuildDiagnostics::default();
+            let doc_node: syntax_nodes::Document =
+                crate::parser::parse(String::new(), Some(&path), &mut parse_diags).into();
+            let name_ident: crate::parser::SyntaxNode = doc_node.clone().into();
+
+            let mut local_registry = TypeRegister::new(&global_type_registry);
+            let inner_components = frozen_document
+                .components
+                .iter()
+                .filter_map(|component| match builtin_registry.lookup_element(&component.id) {
+                    Ok(langtype::ElementType::Component(component)) => {
+                        local_registry.add(component.clone());
+                        Some(component)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+
+            let mut exports = Exports::default();
+            let exports_to_add = frozen_document.exports.iter().filter_map(|export| {
+                let exported_name = ExportedName {
+                    name: SmolStr::new(export.name.as_str()),
+                    name_ident: name_ident.clone(),
+                };
+                let exported = match export.kind {
+                    crate::frozen_builtins::FrozenBuiltinExportKind::Component => {
+                        match builtin_registry.lookup_element(&export.name) {
+                            Ok(langtype::ElementType::Component(component)) => {
+                                itertools::Either::Left(component)
+                            }
+                            _ => return None,
+                        }
+                    }
+                    crate::frozen_builtins::FrozenBuiltinExportKind::Type => {
+                        let ty = builtin_registry.lookup(&export.name);
+                        if ty == langtype::Type::Invalid {
+                            return None;
+                        }
+                        itertools::Either::Right(ty)
+                    }
+                };
+                Some((exported_name, exported))
+            });
+            let mut export_diags = BuildDiagnostics::default();
+            exports.add_reexports(exports_to_add, &mut export_diags);
+
+            let document = Document {
+                node: Some(doc_node),
+                inner_components,
+                local_registry,
+                exports,
+                ..Default::default()
+            };
+            all_documents.docs.insert(path, (LoadedDocument::Document(document), Vec::new()));
+        }
+
+        Self { global_type_registry, compiler_config, resolved_style, all_documents }
     }
 
     pub(crate) fn store_builtin_semantic_cache(&self) {
@@ -2180,6 +2265,14 @@ fn bench_snapshot_vs_recompile() {
         let parent_registry = frozen.rehydrate_parent_registry();
         std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
     });
+    let frozen_loader_rehydrate_ms = mean_ms(&|| {
+        let frozen = crate::frozen_builtins::get(&frozen_key).expect("frozen metadata cache miss");
+        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
+            cached_cc.clone(),
+            "fluent".into(),
+            &frozen,
+        ));
+    });
     let skeleton_rehydrate_with_cached_shell_parent_ms = mean_ms(&|| {
         let parent_registry =
             TypeRegister::rehydrate_builtin_registry_shell(&cached_frozen_parent_registry);
@@ -2212,6 +2305,7 @@ fn bench_snapshot_vs_recompile() {
         "  skeleton + cached shell parent: {skeleton_rehydrate_with_cached_shell_parent_ms:7.2} ms"
     );
     eprintln!("  frozen artifact rehydrate     : {frozen_artifact_rehydrate_ms:7.2} ms");
+    eprintln!("  frozen loader rehydrate       : {frozen_loader_rehydrate_ms:7.2} ms");
     eprintln!(
         "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
     );
@@ -2455,6 +2549,39 @@ fn test_frozen_builtin_metadata_is_stored_in_process_global_cache() {
         parent_registry.borrow().lookup_element("Platform"),
         Ok(langtype::ElementType::Component(component)) if component.is_global()
     ));
+}
+
+#[test]
+fn test_frozen_builtin_artifact_rehydrates_loader_documents() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, _loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = TypeLoader::cached_frozen_builtin_metadata(&compiler_config, "fluent")
+        .expect("frozen builtin metadata should be cached");
+    let mut loader =
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &frozen);
+
+    assert!(loader.get_document(Path::new("builtin:/fluent/std-widgets.slint")).is_some());
+    assert!(loader.get_document(Path::new("builtin:/fluent/style-base.slint")).is_some());
+
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import from the rehydrated frozen artifact");
+    assert!(!import_diags.has_errors());
+    assert_eq!(button.id.as_str(), "Button");
 }
 
 #[test]
