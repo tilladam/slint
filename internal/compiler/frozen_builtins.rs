@@ -82,10 +82,15 @@ impl From<&crate::DefaultTranslationContext> for FrozenDefaultTranslationContext
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FrozenBuiltinLibrary {
+    pub(crate) parent_registry: FrozenBuiltinRegistry,
     pub(crate) documents: Vec<FrozenBuiltinDocument>,
 }
 
 impl FrozenBuiltinLibrary {
+    pub(crate) fn rehydrate_parent_registry(&self) -> Rc<RefCell<TypeRegister>> {
+        TypeRegister::rehydrate_builtin_registry_shell(&self.parent_registry)
+    }
+
     pub(crate) fn rehydrate_component_skeletons(
         &self,
         parent_registry: &Rc<RefCell<TypeRegister>>,

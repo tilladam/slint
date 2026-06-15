@@ -1092,7 +1092,10 @@ impl TypeLoader {
             })
             .collect::<Vec<_>>();
         documents.sort_by(|lhs, rhs| lhs.path.cmp(&rhs.path));
-        crate::frozen_builtins::FrozenBuiltinLibrary { documents }
+        crate::frozen_builtins::FrozenBuiltinLibrary {
+            parent_registry: self.global_type_registry.borrow().freeze_builtin_registry_metadata(),
+            documents,
+        }
     }
 
     fn freeze_builtin_component_skeleton(
@@ -2161,6 +2164,7 @@ fn bench_snapshot_vs_recompile() {
         std::hint::black_box(parent_registry.borrow().freeze_builtin_registry_metadata());
     });
     let frozen_parent_registry = parent_registry.borrow().freeze_builtin_registry_metadata();
+    let cached_frozen_parent_registry = frozen.parent_registry.clone();
     let parent_registry_shell_rehydrate_ms = mean_ms(&|| {
         std::hint::black_box(TypeRegister::rehydrate_builtin_registry_shell(
             &frozen_parent_registry,
@@ -2169,6 +2173,16 @@ fn bench_snapshot_vs_recompile() {
     let skeleton_rehydrate_with_shell_parent_ms = mean_ms(&|| {
         let parent_registry =
             TypeRegister::rehydrate_builtin_registry_shell(&frozen_parent_registry);
+        std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
+    });
+    let frozen_artifact_rehydrate_ms = mean_ms(&|| {
+        let frozen = crate::frozen_builtins::get(&frozen_key).expect("frozen metadata cache miss");
+        let parent_registry = frozen.rehydrate_parent_registry();
+        std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
+    });
+    let skeleton_rehydrate_with_cached_shell_parent_ms = mean_ms(&|| {
+        let parent_registry =
+            TypeRegister::rehydrate_builtin_registry_shell(&cached_frozen_parent_registry);
         std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
     });
     let skeleton_rehydrate_with_snapshot_parent_ms = mean_ms(&|| {
@@ -2194,6 +2208,10 @@ fn bench_snapshot_vs_recompile() {
     eprintln!("  parent registry freeze        : {parent_registry_freeze_ms:7.2} ms");
     eprintln!("  parent registry shell rehyd   : {parent_registry_shell_rehydrate_ms:7.2} ms");
     eprintln!("  skeleton + shell parent       : {skeleton_rehydrate_with_shell_parent_ms:7.2} ms");
+    eprintln!(
+        "  skeleton + cached shell parent: {skeleton_rehydrate_with_cached_shell_parent_ms:7.2} ms"
+    );
+    eprintln!("  frozen artifact rehydrate     : {frozen_artifact_rehydrate_ms:7.2} ms");
     eprintln!(
         "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
     );
@@ -2394,6 +2412,12 @@ fn test_frozen_builtin_metadata_is_process_global_safe() {
             && !component.root_element.base_type.is_empty()
             && !component.root_element.children.is_empty()
     }));
+    assert!(frozen.parent_registry.elements.iter().any(|element| element.name == "Rectangle"));
+    let parent_registry = frozen.rehydrate_parent_registry();
+    assert!(matches!(
+        parent_registry.borrow().lookup_element("Rectangle"),
+        Ok(langtype::ElementType::Builtin(_))
+    ));
 }
 
 #[test]
@@ -2425,6 +2449,12 @@ fn test_frozen_builtin_metadata_is_stored_in_process_global_cache() {
         export.name == "Button"
             && export.kind == crate::frozen_builtins::FrozenBuiltinExportKind::Component
     }));
+    assert!(frozen.parent_registry.elements.iter().any(|element| element.name == "Platform"));
+    let parent_registry = frozen.rehydrate_parent_registry();
+    assert!(matches!(
+        parent_registry.borrow().lookup_element("Platform"),
+        Ok(langtype::ElementType::Component(component)) if component.is_global()
+    ));
 }
 
 #[test]
