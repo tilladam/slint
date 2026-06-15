@@ -461,33 +461,35 @@ impl TypeRegister {
             .elements
             .iter()
             .map(|(name, element_type)| {
-                let mut element = crate::frozen_builtins::FrozenBuiltinRegistryElement {
-                    name: name.to_string(),
-                    kind: element_type_kind(element_type).into(),
-                    ..Default::default()
-                };
                 if let ElementType::Builtin(builtin) = element_type {
-                    element.native_class = builtin.native_class.class_name.to_string();
-                    element.property_count = builtin.properties.len();
-                    element.properties = freeze_builtin_registry_properties(&builtin.properties);
-                    element.native_properties =
-                        freeze_native_registry_properties(&builtin.native_class.properties);
-                    element.accepted_child_types = builtin
-                        .additional_accepted_child_types
-                        .keys()
-                        .map(ToString::to_string)
-                        .collect();
-                    element.accepted_child_types.sort();
-                    element.additional_accept_self = builtin.additional_accept_self;
-                    element.accepts_focus = builtin.accepts_focus;
-                    element.is_global = builtin.is_global;
-                    element.is_internal = builtin.is_internal;
-                    element.is_non_item_type = builtin.is_non_item_type;
-                    element.default_size_binding = format!("{:?}", builtin.default_size_binding);
+                    freeze_builtin_registry_element(name.as_str(), "builtin", builtin)
+                } else {
+                    crate::frozen_builtins::FrozenBuiltinRegistryElement {
+                        name: name.to_string(),
+                        kind: element_type_kind(element_type).into(),
+                        ..Default::default()
+                    }
                 }
-                element
             })
             .collect::<Vec<_>>();
+        let mut seen_elements =
+            elements.iter().map(|element| element.name.clone()).collect::<HashSet<_>>();
+        let mut child_stack = self
+            .elements
+            .values()
+            .filter_map(|element_type| match element_type {
+                ElementType::Builtin(builtin) => Some(builtin),
+                _ => None,
+            })
+            .flat_map(|builtin| builtin.additional_accepted_child_types.values().cloned())
+            .collect::<Vec<_>>();
+        while let Some(child) = child_stack.pop() {
+            if !seen_elements.insert(child.name.to_string()) {
+                continue;
+            }
+            child_stack.extend(child.additional_accepted_child_types.values().cloned());
+            elements.push(freeze_builtin_registry_element(child.name.as_str(), "builtin", &child));
+        }
         elements.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
         let mut supported_property_animation_types =
@@ -579,6 +581,37 @@ impl TypeRegister {
             builtin.default_size_binding =
                 default_size_binding_from_name(frozen_element.default_size_binding.as_str());
             registry.add_builtin(Rc::new(builtin));
+        }
+
+        for frozen_element in &frozen.elements {
+            if frozen_element.kind != "builtin" || frozen_element.accepted_child_types.is_empty() {
+                continue;
+            }
+
+            let child_types = frozen_element
+                .accepted_child_types
+                .iter()
+                .filter_map(|child_name| {
+                    let child = match registry.elements.get(child_name.as_str()) {
+                        Some(ElementType::Builtin(child)) => Some(child.clone()),
+                        _ => registry.elements.values().find_map(|element_type| {
+                            let ElementType::Builtin(child) = element_type else {
+                                return None;
+                            };
+                            (child.native_class.class_name == child_name.as_str())
+                                .then(|| child.clone())
+                        }),
+                    }?;
+                    Some((SmolStr::new(child_name.as_str()), child))
+                })
+                .collect::<HashMap<_, _>>();
+
+            let Some(ElementType::Builtin(parent)) =
+                registry.elements.get_mut(frozen_element.name.as_str())
+            else {
+                continue;
+            };
+            Rc::make_mut(parent).additional_accepted_child_types = child_types;
         }
 
         registry.property_animation_type =
@@ -997,6 +1030,32 @@ fn default_size_binding_from_name(name: &str) -> DefaultSizeBinding {
     }
 }
 
+fn freeze_builtin_registry_element(
+    name: &str,
+    kind: &str,
+    builtin: &BuiltinElement,
+) -> crate::frozen_builtins::FrozenBuiltinRegistryElement {
+    let mut accepted_child_types =
+        builtin.additional_accepted_child_types.keys().map(ToString::to_string).collect::<Vec<_>>();
+    accepted_child_types.sort();
+
+    crate::frozen_builtins::FrozenBuiltinRegistryElement {
+        name: name.to_string(),
+        kind: kind.into(),
+        native_class: builtin.native_class.class_name.to_string(),
+        property_count: builtin.properties.len(),
+        properties: freeze_builtin_registry_properties(&builtin.properties),
+        native_properties: freeze_native_registry_properties(&builtin.native_class.properties),
+        accepted_child_types,
+        additional_accept_self: builtin.additional_accept_self,
+        accepts_focus: builtin.accepts_focus,
+        is_global: builtin.is_global,
+        is_internal: builtin.is_internal,
+        is_non_item_type: builtin.is_non_item_type,
+        default_size_binding: format!("{:?}", builtin.default_size_binding),
+    }
+}
+
 fn freeze_builtin_registry_properties(
     properties: &BTreeMap<SmolStr, BuiltinPropertyInfo>,
 ) -> Vec<crate::frozen_builtins::FrozenBuiltinRegistryProperty> {
@@ -1268,6 +1327,26 @@ mod tests {
         assert_eq!(
             text_input.lookup_property("set-selection-offsets").builtin_function,
             Some(BuiltinFunction::SetSelectionOffsets)
+        );
+
+        let rehydrated_registry = rehydrated.borrow();
+        let (frozen_parent, rehydrated_parent) = frozen
+            .elements
+            .iter()
+            .filter(|element| !element.accepted_child_types.is_empty())
+            .find_map(|frozen_parent| {
+                let rehydrated_parent =
+                    rehydrated_registry.lookup_element(&frozen_parent.name).ok()?;
+                (!rehydrated_parent.as_builtin().additional_accepted_child_types.is_empty())
+                    .then_some((frozen_parent, rehydrated_parent))
+            })
+            .expect("expected at least one rehydrated builtin with accepted child types");
+        assert!(
+            rehydrated_parent
+                .as_builtin()
+                .additional_accepted_child_types
+                .keys()
+                .any(|child| frozen_parent.accepted_child_types.contains(&child.to_string()))
         );
     }
 }
