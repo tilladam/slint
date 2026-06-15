@@ -44,6 +44,8 @@ bundle-translations = ["dep:rspolib", "i-slint-common/locale-decimal-separator"]
 # Enable experimental library module support
 experimental-library-module = []
 
+frozen-builtin-artifacts = ["dep:postcard", "dep:serde", "dep:spin_on"]
+
 default = []
 
 [dependencies]
@@ -66,6 +68,7 @@ itertools = { workspace = true }
 url = "2.2.1"
 linked_hash_set = "0.1.4"
 typed-index-collections = { workspace = true }
+spin_on = { workspace = true, optional = true }
 
 # for processing and embedding the rendered image (texture)
 image = { workspace = true, optional = true, features = ["default"] }
@@ -84,6 +87,7 @@ pathdiff = { version = "0.2.3", optional = true }
 
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+postcard = { version = "1.1.3", features = ["alloc"], optional = true }
 flate2 = { version = "1.1.5", optional = true }
 base64 = { version = "0.22.1", optional = true }
 data-url = "0.3.2"

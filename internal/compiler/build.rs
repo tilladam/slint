@@ -44,11 +44,18 @@ fn widget_library() -> &'static [(&'static str, &'static BuiltinDirectory<'stati
 
     println!("cargo:rustc-env=SLINT_WIDGETS_LIBRARY={}", output_file_path.display());
 
-    let mut frozen_artifact_file =
-        BufWriter::new(std::fs::File::create(&frozen_artifact_output_file_path)?);
-    write!(
-        frozen_artifact_file,
-        r#"
+    if let Some(generated_artifact_module) =
+        std::env::var_os("SLINT_FROZEN_BUILTIN_ARTIFACTS_MODULE")
+    {
+        let generated_artifact_module = PathBuf::from(generated_artifact_module);
+        println!("cargo:rerun-if-changed={}", generated_artifact_module.display());
+        std::fs::copy(&generated_artifact_module, &frozen_artifact_output_file_path)?;
+    } else {
+        let mut frozen_artifact_file =
+            BufWriter::new(std::fs::File::create(&frozen_artifact_output_file_path)?);
+        write!(
+            frozen_artifact_file,
+            r#"
 pub(crate) fn generated_artifact(
     _key: &super::FrozenBuiltinCacheKey,
 ) -> Option<&'static [u8]> {{
@@ -59,8 +66,9 @@ pub(crate) fn artifact_count() -> usize {{
     0
 }}
 "#
-    )?;
-    frozen_artifact_file.flush()?;
+        )?;
+        frozen_artifact_file.flush()?;
+    }
 
     Ok(())
 }

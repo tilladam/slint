@@ -78,6 +78,7 @@ members = [
   'tests/issues/test-11836-project/test-library',
   'tests/backends/',
   'tools/compiler',
+  'tools/frozen-builtin-artifacts',
   'docs/slint-doc-generator',
   'tools/figma_import',
   'tools/lsp',

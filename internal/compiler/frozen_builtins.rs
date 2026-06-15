@@ -29,7 +29,10 @@ mod generated_builtin_artifacts {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinCacheKey {
     pub(crate) resolved_style: String,
     pub(crate) enable_experimental: bool,
@@ -71,7 +74,10 @@ impl FrozenBuiltinCacheKey {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) enum FrozenDefaultTranslationContext {
     ComponentName,
     None,
@@ -87,7 +93,10 @@ impl From<&crate::DefaultTranslationContext> for FrozenDefaultTranslationContext
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinLibrary {
     pub(crate) parent_registry: FrozenBuiltinRegistry,
     pub(crate) documents: Vec<FrozenBuiltinDocument>,
@@ -196,7 +205,10 @@ impl FrozenBuiltinLibrary {
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinDocument {
     pub(crate) path: String,
     pub(crate) imports: Vec<String>,
@@ -207,28 +219,40 @@ pub(crate) struct FrozenBuiltinDocument {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinExport {
     pub(crate) name: String,
     pub(crate) kind: FrozenBuiltinExportKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) enum FrozenBuiltinExportKind {
     Component,
     Type,
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinComponent {
     pub(crate) id: String,
     pub(crate) root_element: FrozenBuiltinElement,
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinElement {
     pub(crate) id: String,
     pub(crate) base_type: String,
@@ -239,7 +263,10 @@ pub(crate) struct FrozenBuiltinElement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinPropertyDeclaration {
     pub(crate) name: String,
     pub(crate) ty: String,
@@ -247,7 +274,10 @@ pub(crate) struct FrozenBuiltinPropertyDeclaration {
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinRegistry {
     pub(crate) types: Vec<String>,
     pub(crate) elements: Vec<FrozenBuiltinRegistryElement>,
@@ -259,7 +289,10 @@ pub(crate) struct FrozenBuiltinRegistry {
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) name: String,
     pub(crate) kind: String,
@@ -281,7 +314,10 @@ pub(crate) struct FrozenBuiltinRegistryElement {
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinRegistryProperty {
     pub(crate) name: String,
     pub(crate) ty: String,
@@ -291,7 +327,10 @@ pub(crate) struct FrozenBuiltinRegistryProperty {
 }
 
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifacts"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinContextRestriction {
     pub(crate) name: String,
     pub(crate) contexts: Vec<String>,
@@ -348,7 +387,7 @@ pub(crate) fn generated_artifact_count() -> usize {
     generated_builtin_artifacts::artifact_count()
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "frozen-builtin-artifacts"))]
 pub(crate) fn render_generated_artifacts_module(
     entries: &[(FrozenBuiltinCacheKey, Vec<u8>)],
 ) -> String {
@@ -383,7 +422,38 @@ pub(crate) fn render_generated_artifacts_module(
     source
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "frozen-builtin-artifacts"))]
+pub(crate) fn render_generated_artifacts_include_module(
+    entries: &[(FrozenBuiltinCacheKey, std::path::PathBuf)],
+) -> String {
+    let mut source = String::new();
+
+    for (index, (_key, path)) in entries.iter().enumerate() {
+        source.push_str(&format!(
+            "static ARTIFACT_{index}: &[u8] = include_bytes!(r#\"{}\"#);\n",
+            path.display()
+        ));
+    }
+    source.push('\n');
+
+    source.push_str(
+        "pub(crate) fn generated_artifact(\n    key: &super::FrozenBuiltinCacheKey,\n) -> Option<&'static [u8]> {\n",
+    );
+    for (index, (key, _path)) in entries.iter().enumerate() {
+        source.push_str("    if ");
+        source.push_str(&render_generated_artifact_key_predicate(key));
+        source.push_str(&format!(" {{\n        return Some(ARTIFACT_{index});\n    }}\n"));
+    }
+    source.push_str("    None\n}\n\n");
+    source.push_str(&format!(
+        "pub(crate) fn artifact_count() -> usize {{\n    {}\n}}\n",
+        entries.len()
+    ));
+
+    source
+}
+
+#[cfg(any(test, feature = "frozen-builtin-artifacts"))]
 fn render_generated_artifact_key_predicate(key: &FrozenBuiltinCacheKey) -> String {
     let translation_domain = match &key.translation_domain {
         Some(domain) => format!("Some({:?})", domain),

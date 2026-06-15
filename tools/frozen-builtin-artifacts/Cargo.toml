@@ -1,0 +1,20 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+[package]
+name = "slint-frozen-builtin-artifacts"
+description = "Generate prototype frozen Slint builtin artifacts"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "slint-frozen-builtin-artifacts"
+path = "main.rs"
+
+[dependencies]
+i-slint-compiler = { workspace = true, features = ["frozen-builtin-artifacts"] }

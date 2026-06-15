@@ -10746,6 +10746,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "slint-frozen-builtin-artifacts"
+version = "1.17.0"
+dependencies = [
+ "i-slint-compiler",
+]
+
+[[package]]
 name = "slint-generated"
 version = "1.17.0"
 dependencies = [

@@ -24,6 +24,9 @@ pub mod doc_comments;
 pub mod embedded_resources;
 pub mod expression_tree;
 pub mod fileaccess;
+#[cfg(feature = "frozen-builtin-artifacts")]
+pub mod frozen_builtins;
+#[cfg(not(feature = "frozen-builtin-artifacts"))]
 pub(crate) mod frozen_builtins;
 pub mod generator;
 pub mod langtype;

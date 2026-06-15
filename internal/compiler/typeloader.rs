@@ -931,7 +931,68 @@ struct BorrowedTypeLoader<'a> {
     diag: &'a mut BuildDiagnostics,
 }
 
+#[cfg(feature = "frozen-builtin-artifacts")]
+fn sanitize_artifact_file_stem(style: &str) -> String {
+    style
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
+        .collect()
+}
+
 impl TypeLoader {
+    #[cfg(feature = "frozen-builtin-artifacts")]
+    pub fn generate_frozen_builtin_artifact_files(
+        styles: &[String],
+        artifact_dir: &Path,
+    ) -> Result<PathBuf, String> {
+        std::fs::create_dir_all(artifact_dir).map_err(|err| {
+            format!("failed to create artifact directory {}: {err}", artifact_dir.display())
+        })?;
+
+        let mut entries = Vec::new();
+        for style in styles {
+            let mut compiler_config =
+                CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+            compiler_config.style = Some(style.into());
+            let source = r#"import { Button } from "std-widgets.slint";
+export component Test inherits Button {}"#;
+
+            let mut parse_diags = BuildDiagnostics::default();
+            let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+            let (_doc, compile_diags, loader) = spin_on::spin_on(crate::compile_syntax_node(
+                doc_node,
+                parse_diags,
+                compiler_config.clone(),
+            ));
+            if compile_diags.has_errors() {
+                return Err(format!(
+                    "failed to generate frozen builtin artifact for style {style}: {:?}",
+                    compile_diags.to_string_vec()
+                ));
+            }
+
+            let key = Self::builtin_semantic_cache_key_for(&compiler_config, style)
+                .ok_or_else(|| format!("style {style} is not cacheable"))?;
+            let artifact = postcard::to_allocvec(&loader.freeze_builtin_semantic_metadata())
+                .map_err(|err| {
+                    format!("failed to encode frozen artifact for style {style}: {err}")
+                })?;
+            let artifact_path =
+                artifact_dir.join(format!("{}.postcard", sanitize_artifact_file_stem(style)));
+            std::fs::write(&artifact_path, artifact).map_err(|err| {
+                format!("failed to write artifact {}: {err}", artifact_path.display())
+            })?;
+            entries.push((key, artifact_path));
+        }
+
+        let module_source =
+            crate::frozen_builtins::render_generated_artifacts_include_module(&entries);
+        let module_path = artifact_dir.join("frozen_builtin_artifacts.rs");
+        std::fs::write(&module_path, module_source)
+            .map_err(|err| format!("failed to write module {}: {err}", module_path.display()))?;
+        Ok(module_path)
+    }
+
     pub fn new(compiler_config: CompilerConfiguration, diag: &mut BuildDiagnostics) -> Self {
         let mut style = compiler_config.style.clone().unwrap_or_else(|| "fluent".into());
 
@@ -1033,7 +1094,7 @@ impl TypeLoader {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "frozen-builtin-artifacts"))]
     fn rehydrate_generated_builtin_artifact_bytes(
         compiler_config: CompilerConfiguration,
         resolved_style: String,
@@ -1044,7 +1105,7 @@ impl TypeLoader {
         Some(Self::rehydrate_frozen_builtin_artifact(compiler_config, resolved_style, &frozen))
     }
 
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "frozen-builtin-artifacts")))]
     fn rehydrate_generated_builtin_artifact_bytes(
         _compiler_config: CompilerConfiguration,
         _resolved_style: String,
@@ -2874,6 +2935,28 @@ fn test_type_loader_new_uses_generated_builtin_artifact() {
     let button =
         spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
             .expect("Button should import from the generated artifact fallback");
+    assert!(!import_diags.has_errors());
+    assert_eq!(button.id.as_str(), "Button");
+}
+
+#[test]
+fn test_type_loader_new_uses_compiled_generated_builtin_artifact_if_present() {
+    if crate::frozen_builtins::generated_artifact_count() == 0 {
+        return;
+    }
+
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.style = Some("fluent".into());
+    let mut loader_diags = BuildDiagnostics::default();
+    let mut loader = TypeLoader::new(compiler_config, &mut loader_diags);
+    assert!(!loader_diags.has_errors());
+    assert!(loader.get_document(Path::new("builtin:/fluent/std-widgets.slint")).is_some());
+
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import from the compiled generated artifact");
     assert!(!import_diags.has_errors());
     assert_eq!(button.id.as_str(), "Button");
 }
