@@ -25,6 +25,7 @@ use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, Pro
 use crate::typeregister::TypeRegister;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinCacheKey {
     pub(crate) resolved_style: String,
     pub(crate) enable_experimental: bool,
@@ -66,6 +67,7 @@ impl FrozenBuiltinCacheKey {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum FrozenDefaultTranslationContext {
     ComponentName,
     None,
@@ -81,6 +83,7 @@ impl From<&crate::DefaultTranslationContext> for FrozenDefaultTranslationContext
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinLibrary {
     pub(crate) parent_registry: FrozenBuiltinRegistry,
     pub(crate) documents: Vec<FrozenBuiltinDocument>,
@@ -189,6 +192,7 @@ impl FrozenBuiltinLibrary {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinDocument {
     pub(crate) path: String,
     pub(crate) imports: Vec<String>,
@@ -199,24 +203,28 @@ pub(crate) struct FrozenBuiltinDocument {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinExport {
     pub(crate) name: String,
     pub(crate) kind: FrozenBuiltinExportKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum FrozenBuiltinExportKind {
     Component,
     Type,
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinComponent {
     pub(crate) id: String,
     pub(crate) root_element: FrozenBuiltinElement,
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinElement {
     pub(crate) id: String,
     pub(crate) base_type: String,
@@ -227,6 +235,7 @@ pub(crate) struct FrozenBuiltinElement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinPropertyDeclaration {
     pub(crate) name: String,
     pub(crate) ty: String,
@@ -234,6 +243,7 @@ pub(crate) struct FrozenBuiltinPropertyDeclaration {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinRegistry {
     pub(crate) types: Vec<String>,
     pub(crate) elements: Vec<FrozenBuiltinRegistryElement>,
@@ -245,6 +255,7 @@ pub(crate) struct FrozenBuiltinRegistry {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) name: String,
     pub(crate) kind: String,
@@ -266,6 +277,7 @@ pub(crate) struct FrozenBuiltinRegistryElement {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinRegistryProperty {
     pub(crate) name: String,
     pub(crate) ty: String,
@@ -275,6 +287,7 @@ pub(crate) struct FrozenBuiltinRegistryProperty {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinContextRestriction {
     pub(crate) name: String,
     pub(crate) contexts: Vec<String>,

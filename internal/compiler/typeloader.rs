@@ -2226,6 +2226,16 @@ fn bench_snapshot_vs_recompile() {
         );
     });
     let frozen = crate::frozen_builtins::get(&frozen_key).expect("frozen metadata cache miss");
+    let frozen_encode_ms = mean_ms(&|| {
+        std::hint::black_box(serde_json::to_vec(&frozen).expect("frozen artifact encode failed"));
+    });
+    let frozen_encoded = serde_json::to_vec(&frozen).expect("frozen artifact encode failed");
+    let frozen_decode_ms = mean_ms(&|| {
+        std::hint::black_box(
+            serde_json::from_slice::<crate::frozen_builtins::FrozenBuiltinLibrary>(&frozen_encoded)
+                .expect("frozen artifact decode failed"),
+        );
+    });
     let parent_registry = TypeRegister::builtin();
     let skeleton_rehydrate_ms = mean_ms(&|| {
         std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
@@ -2273,6 +2283,16 @@ fn bench_snapshot_vs_recompile() {
             &frozen,
         ));
     });
+    let frozen_decode_loader_rehydrate_ms = mean_ms(&|| {
+        let frozen =
+            serde_json::from_slice::<crate::frozen_builtins::FrozenBuiltinLibrary>(&frozen_encoded)
+                .expect("frozen artifact decode failed");
+        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
+            cached_cc.clone(),
+            "fluent".into(),
+            &frozen,
+        ));
+    });
     let skeleton_rehydrate_with_cached_shell_parent_ms = mean_ms(&|| {
         let parent_registry =
             TypeRegister::rehydrate_builtin_registry_shell(&cached_frozen_parent_registry);
@@ -2295,6 +2315,11 @@ fn bench_snapshot_vs_recompile() {
     eprintln!("  => saving vs new+load         : {:7.2} ms", fresh_import - snapshot_ms);
     eprintln!("  freeze metadata               : {freeze_ms:7.2} ms");
     eprintln!("  frozen cache lookup+clone     : {frozen_lookup_ms:7.2} ms");
+    eprintln!("  frozen artifact encode        : {frozen_encode_ms:7.2} ms");
+    eprintln!(
+        "  frozen artifact decode        : {frozen_decode_ms:7.2} ms  ({} bytes JSON)",
+        frozen_encoded.len()
+    );
     eprintln!("  skeleton rehydrate            : {skeleton_rehydrate_ms:7.2} ms");
     eprintln!("  parent registry fresh         : {parent_registry_fresh_ms:7.2} ms");
     eprintln!("  parent registry snapshot      : {parent_registry_snapshot_ms:7.2} ms");
@@ -2306,6 +2331,7 @@ fn bench_snapshot_vs_recompile() {
     );
     eprintln!("  frozen artifact rehydrate     : {frozen_artifact_rehydrate_ms:7.2} ms");
     eprintln!("  frozen loader rehydrate       : {frozen_loader_rehydrate_ms:7.2} ms");
+    eprintln!("  decode + loader rehydrate     : {frozen_decode_loader_rehydrate_ms:7.2} ms");
     eprintln!(
         "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
     );
@@ -2582,6 +2608,46 @@ fn test_frozen_builtin_artifact_rehydrates_loader_documents() {
             .expect("Button should import from the rehydrated frozen artifact");
     assert!(!import_diags.has_errors());
     assert_eq!(button.id.as_str(), "Button");
+}
+
+#[test]
+fn test_frozen_builtin_artifact_serialization_round_trip_rehydrates_loader() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = loader.freeze_builtin_semantic_metadata();
+    let encoded = serde_json::to_vec(&frozen).expect("frozen artifact should serialize");
+    assert!(!encoded.is_empty());
+    let decoded: crate::frozen_builtins::FrozenBuiltinLibrary =
+        serde_json::from_slice(&encoded).expect("frozen artifact should deserialize");
+
+    let mut loader =
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded);
+
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import from a decoded frozen artifact");
+    assert!(!import_diags.has_errors());
+    assert_eq!(button.id.as_str(), "Button");
+
+    let parent_registry = decoded.rehydrate_parent_registry();
+    assert!(matches!(
+        parent_registry.borrow().lookup_element("Platform"),
+        Ok(langtype::ElementType::Component(component)) if component.is_global()
+    ));
 }
 
 #[test]
