@@ -565,7 +565,7 @@ impl TypeRegister {
                         BuiltinPropertyInfo {
                             ty: rehydrate_registry_property_type(&property.ty),
                             property_visibility: visibility_from_name(&property.visibility),
-                            default_value: BuiltinPropertyDefault::None,
+                            default_value: rehydrate_builtin_property_default(property),
                             docs: None,
                         },
                     )
@@ -1060,6 +1060,34 @@ fn visibility_from_name(name: &str) -> PropertyVisibility {
     }
 }
 
+fn rehydrate_builtin_property_default(
+    property: &crate::frozen_builtins::FrozenBuiltinRegistryProperty,
+) -> BuiltinPropertyDefault {
+    if property.default_kind != "builtin-function" {
+        return BuiltinPropertyDefault::None;
+    }
+    property
+        .builtin_function
+        .as_deref()
+        .and_then(builtin_function_from_name)
+        .map(BuiltinPropertyDefault::BuiltinFunction)
+        .unwrap_or(BuiltinPropertyDefault::None)
+}
+
+fn builtin_function_from_name(name: &str) -> Option<BuiltinFunction> {
+    Some(match name {
+        "SetFocusItem" => BuiltinFunction::SetFocusItem,
+        "ClearFocusItem" => BuiltinFunction::ClearFocusItem,
+        "ShowPopupWindow" => BuiltinFunction::ShowPopupWindow,
+        "ClosePopupWindow" => BuiltinFunction::ClosePopupWindow,
+        "SetSelectionOffsets" => BuiltinFunction::SetSelectionOffsets,
+        "StartTimer" => BuiltinFunction::StartTimer,
+        "StopTimer" => BuiltinFunction::StopTimer,
+        "RestartTimer" => BuiltinFunction::RestartTimer,
+        _ => return None,
+    })
+}
+
 /// Type definitions for each builtin struct
 pub mod builtin_structs {
     use super::*;
@@ -1211,5 +1239,35 @@ mod tests {
         let text_prop = text.lookup_property("text");
         assert_eq!(text_prop.property_type, Type::String);
         assert_eq!(text_prop.property_visibility, PropertyVisibility::Input);
+
+        let popup_window = rehydrated.borrow().lookup_element("PopupWindow").unwrap();
+        assert_eq!(
+            popup_window.lookup_property("show").builtin_function,
+            Some(BuiltinFunction::ShowPopupWindow)
+        );
+        assert_eq!(
+            popup_window.lookup_property("close").builtin_function,
+            Some(BuiltinFunction::ClosePopupWindow)
+        );
+
+        let timer = rehydrated.borrow().lookup_element("Timer").unwrap();
+        assert_eq!(
+            timer.lookup_property("start").builtin_function,
+            Some(BuiltinFunction::StartTimer)
+        );
+        assert_eq!(
+            timer.lookup_property("stop").builtin_function,
+            Some(BuiltinFunction::StopTimer)
+        );
+        assert_eq!(
+            timer.lookup_property("restart").builtin_function,
+            Some(BuiltinFunction::RestartTimer)
+        );
+
+        let text_input = rehydrated.borrow().lookup_element("TextInput").unwrap();
+        assert_eq!(
+            text_input.lookup_property("set-selection-offsets").builtin_function,
+            Some(BuiltinFunction::SetSelectionOffsets)
+        );
     }
 }
