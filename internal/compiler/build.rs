@@ -14,6 +14,8 @@ fn main() -> std::io::Result<()> {
 
     let output_file_path = Path::new(&std::env::var_os("OUT_DIR").unwrap())
         .join(Path::new("included_library").with_extension("rs"));
+    let frozen_artifact_output_file_path =
+        Path::new(&std::env::var_os("OUT_DIR").unwrap()).join("frozen_builtin_artifacts.rs");
 
     let mut file = BufWriter::new(std::fs::File::create(&output_file_path)?);
     write!(
@@ -41,6 +43,24 @@ fn widget_library() -> &'static [(&'static str, &'static BuiltinDirectory<'stati
     file.flush()?;
 
     println!("cargo:rustc-env=SLINT_WIDGETS_LIBRARY={}", output_file_path.display());
+
+    let mut frozen_artifact_file =
+        BufWriter::new(std::fs::File::create(&frozen_artifact_output_file_path)?);
+    write!(
+        frozen_artifact_file,
+        r#"
+pub(crate) fn generated_artifact(
+    _key: &super::FrozenBuiltinCacheKey,
+) -> Option<&'static [u8]> {{
+    None
+}}
+
+pub(crate) fn artifact_count() -> usize {{
+    0
+}}
+"#
+    )?;
+    frozen_artifact_file.flush()?;
 
     Ok(())
 }

@@ -24,6 +24,10 @@ use crate::langtype::{ElementType, Type};
 use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, PropertyVisibility};
 use crate::typeregister::TypeRegister;
 
+mod generated_builtin_artifacts {
+    include!(concat!(env!("OUT_DIR"), "/frozen_builtin_artifacts.rs"));
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FrozenBuiltinCacheKey {
@@ -327,11 +331,19 @@ pub(crate) fn store_generated_artifact(key: FrozenBuiltinCacheKey, artifact: &'s
 }
 
 #[cfg(test)]
-pub(crate) fn generated_artifact(key: &FrozenBuiltinCacheKey) -> Option<&'static [u8]> {
+fn seeded_generated_artifact(key: &FrozenBuiltinCacheKey) -> Option<&'static [u8]> {
     GENERATED_BUILTIN_ARTIFACTS.get()?.lock().unwrap().get(key).copied()
 }
 
 #[cfg(not(test))]
-pub(crate) fn generated_artifact(_key: &FrozenBuiltinCacheKey) -> Option<&'static [u8]> {
+fn seeded_generated_artifact(_key: &FrozenBuiltinCacheKey) -> Option<&'static [u8]> {
     None
+}
+
+pub(crate) fn generated_artifact(key: &FrozenBuiltinCacheKey) -> Option<&'static [u8]> {
+    generated_builtin_artifacts::generated_artifact(key).or_else(|| seeded_generated_artifact(key))
+}
+
+pub(crate) fn generated_artifact_count() -> usize {
+    generated_builtin_artifacts::artifact_count()
 }

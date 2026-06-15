@@ -2879,6 +2879,18 @@ fn test_type_loader_new_uses_generated_builtin_artifact() {
 }
 
 #[test]
+fn test_frozen_builtin_generated_artifact_table_is_compiled_in() {
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.style = Some("fluent".into());
+    let key = TypeLoader::builtin_semantic_cache_key_for(&compiler_config, "fluent")
+        .expect("generated artifact table test key should be cacheable");
+
+    assert_eq!(crate::frozen_builtins::generated_artifact_count(), 0);
+    assert!(crate::frozen_builtins::generated_artifact(&key).is_none());
+}
+
+#[test]
 fn test_frozen_builtin_skeletons_rehydrate_into_registry() {
     let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
     let source = r#"
