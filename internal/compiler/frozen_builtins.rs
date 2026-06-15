@@ -228,6 +228,38 @@ pub(crate) struct FrozenBuiltinPropertyDeclaration {
     pub(crate) visibility: String,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrozenBuiltinRegistry {
+    pub(crate) types: Vec<String>,
+    pub(crate) elements: Vec<FrozenBuiltinRegistryElement>,
+    pub(crate) supported_property_animation_types: Vec<String>,
+    pub(crate) property_animation_type: String,
+    pub(crate) empty_type: String,
+    pub(crate) context_restricted_types: Vec<FrozenBuiltinContextRestriction>,
+    pub(crate) expose_internal_types: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrozenBuiltinRegistryElement {
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) native_class: String,
+    pub(crate) property_count: usize,
+    pub(crate) accepted_child_types: Vec<String>,
+    pub(crate) additional_accept_self: bool,
+    pub(crate) accepts_focus: bool,
+    pub(crate) is_global: bool,
+    pub(crate) is_internal: bool,
+    pub(crate) is_non_item_type: bool,
+    pub(crate) default_size_binding: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrozenBuiltinContextRestriction {
+    pub(crate) name: String,
+    pub(crate) contexts: Vec<String>,
+}
+
 static FROZEN_BUILTIN_CACHE: OnceLock<Mutex<HashMap<FrozenBuiltinCacheKey, FrozenBuiltinLibrary>>> =
     OnceLock::new();
 

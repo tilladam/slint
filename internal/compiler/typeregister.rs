@@ -450,6 +450,72 @@ impl TypeRegister {
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn freeze_builtin_registry_metadata(
+        &self,
+    ) -> crate::frozen_builtins::FrozenBuiltinRegistry {
+        let mut types = self.types.keys().map(ToString::to_string).collect::<Vec<_>>();
+        types.sort();
+
+        let mut elements = self
+            .elements
+            .iter()
+            .map(|(name, element_type)| {
+                let mut element = crate::frozen_builtins::FrozenBuiltinRegistryElement {
+                    name: name.to_string(),
+                    kind: element_type_kind(element_type).into(),
+                    ..Default::default()
+                };
+                if let ElementType::Builtin(builtin) = element_type {
+                    element.native_class = builtin.native_class.class_name.to_string();
+                    element.property_count = builtin.properties.len();
+                    element.accepted_child_types = builtin
+                        .additional_accepted_child_types
+                        .keys()
+                        .map(ToString::to_string)
+                        .collect();
+                    element.accepted_child_types.sort();
+                    element.additional_accept_self = builtin.additional_accept_self;
+                    element.accepts_focus = builtin.accepts_focus;
+                    element.is_global = builtin.is_global;
+                    element.is_internal = builtin.is_internal;
+                    element.is_non_item_type = builtin.is_non_item_type;
+                    element.default_size_binding = format!("{:?}", builtin.default_size_binding);
+                }
+                element
+            })
+            .collect::<Vec<_>>();
+        elements.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+
+        let mut supported_property_animation_types =
+            self.supported_property_animation_types.iter().cloned().collect::<Vec<_>>();
+        supported_property_animation_types.sort();
+
+        let mut context_restricted_types = self
+            .context_restricted_types
+            .iter()
+            .map(|(name, contexts)| {
+                let mut contexts = contexts.iter().map(ToString::to_string).collect::<Vec<_>>();
+                contexts.sort();
+                crate::frozen_builtins::FrozenBuiltinContextRestriction {
+                    name: name.to_string(),
+                    contexts,
+                }
+            })
+            .collect::<Vec<_>>();
+        context_restricted_types.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+
+        crate::frozen_builtins::FrozenBuiltinRegistry {
+            types,
+            elements,
+            supported_property_animation_types,
+            property_animation_type: self.property_animation_type.to_string(),
+            empty_type: self.empty_type.to_string(),
+            context_restricted_types,
+            expose_internal_types: self.expose_internal_types,
+        }
+    }
+
     /// Insert a type into the type register with its builtin type name.
     ///
     /// Returns false if it replaced an existing type.
@@ -811,6 +877,18 @@ impl TypeRegister {
     }
 }
 
+#[allow(dead_code)]
+fn element_type_kind(element_type: &ElementType) -> &'static str {
+    match element_type {
+        ElementType::Builtin(_) => "builtin",
+        ElementType::Component(_) => "component",
+        ElementType::Native(_) => "native",
+        ElementType::Error => "error",
+        ElementType::Global => "global",
+        ElementType::Interface => "interface",
+    }
+}
+
 /// Type definitions for each builtin struct
 pub mod builtin_structs {
     use super::*;
@@ -920,4 +998,31 @@ pub fn layout_item_info_type() -> Type {
 /// The [`Type`] for a runtime FlexboxLayoutItemInfo structure
 pub fn flexbox_layout_item_info_type() -> Type {
     BUILTIN.with(|types| types.flexbox_layout_item_info_type.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frozen_builtin_registry_metadata_is_process_global_safe() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<crate::frozen_builtins::FrozenBuiltinRegistry>();
+
+        let registry = TypeRegister::builtin();
+        let frozen = registry.borrow().freeze_builtin_registry_metadata();
+
+        assert!(frozen.types.iter().any(|ty| ty == "length"));
+        assert!(frozen.supported_property_animation_types.iter().any(|ty| ty == "length"));
+        assert!(frozen.elements.iter().any(|element| {
+            element.name == "Rectangle"
+                && element.kind == "builtin"
+                && !element.native_class.is_empty()
+                && element.property_count > 0
+        }));
+        assert!(frozen
+            .context_restricted_types
+            .iter()
+            .any(|restriction| !restriction.name.is_empty() && !restriction.contexts.is_empty()));
+    }
 }
