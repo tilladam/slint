@@ -2142,6 +2142,25 @@ fn bench_snapshot_vs_recompile() {
     let skeleton_rehydrate_ms = mean_ms(&|| {
         std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
     });
+    let snapshot_parent_registry = || {
+        let parent_loader = TypeLoader {
+            global_type_registry: parent_registry.clone(),
+            compiler_config: cached_cc.clone(),
+            resolved_style: "fluent".into(),
+            all_documents: Default::default(),
+        };
+        snapshot(&parent_loader).expect("parent registry snapshot failed").global_type_registry
+    };
+    let parent_registry_fresh_ms = mean_ms(&|| {
+        std::hint::black_box(TypeRegister::builtin());
+    });
+    let parent_registry_snapshot_ms = mean_ms(&|| {
+        std::hint::black_box(snapshot_parent_registry());
+    });
+    let skeleton_rehydrate_with_snapshot_parent_ms = mean_ms(&|| {
+        let parent_registry = snapshot_parent_registry();
+        std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
+    });
     let skeleton_rehydrate_with_parent_ms = mean_ms(&|| {
         let parent_registry = TypeRegister::builtin();
         std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
@@ -2156,6 +2175,11 @@ fn bench_snapshot_vs_recompile() {
     eprintln!("  freeze metadata               : {freeze_ms:7.2} ms");
     eprintln!("  frozen cache lookup+clone     : {frozen_lookup_ms:7.2} ms");
     eprintln!("  skeleton rehydrate            : {skeleton_rehydrate_ms:7.2} ms");
+    eprintln!("  parent registry fresh         : {parent_registry_fresh_ms:7.2} ms");
+    eprintln!("  parent registry snapshot      : {parent_registry_snapshot_ms:7.2} ms");
+    eprintln!(
+        "  skeleton + snapshot parent    : {skeleton_rehydrate_with_snapshot_parent_ms:7.2} ms"
+    );
     eprintln!("  skeleton rehydrate + builtins : {skeleton_rehydrate_with_parent_ms:7.2} ms");
 }
 
