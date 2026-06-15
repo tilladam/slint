@@ -24,6 +24,7 @@ pub mod doc_comments;
 pub mod embedded_resources;
 pub mod expression_tree;
 pub mod fileaccess;
+pub(crate) mod frozen_builtins;
 pub mod generator;
 pub mod langtype;
 pub mod layout;

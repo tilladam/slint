@@ -1075,6 +1075,52 @@ impl TypeLoader {
         self.all_documents.currently_loading.clear();
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn freeze_builtin_semantic_metadata(
+        &self,
+    ) -> crate::frozen_builtins::FrozenBuiltinLibrary {
+        let mut documents = self
+            .all_documents
+            .docs
+            .iter()
+            .filter_map(|(path, (document, _diagnostics))| {
+                if !path.starts_with("builtin:/") {
+                    return None;
+                }
+                let LoadedDocument::Document(document) = document else {
+                    return None;
+                };
+
+                Some(crate::frozen_builtins::FrozenBuiltinDocument {
+                    path: path.to_string_lossy().into_owned(),
+                    imports: document.imports.iter().map(|import| import.file.clone()).collect(),
+                    exports: document
+                        .exports
+                        .iter()
+                        .map(|(exported_name, component_or_type)| {
+                            let kind = match component_or_type {
+                                itertools::Either::Left(_) => {
+                                    crate::frozen_builtins::FrozenBuiltinExportKind::Component
+                                }
+                                itertools::Either::Right(_) => {
+                                    crate::frozen_builtins::FrozenBuiltinExportKind::Type
+                                }
+                            };
+                            crate::frozen_builtins::FrozenBuiltinExport {
+                                name: exported_name.name.to_string(),
+                                kind,
+                            }
+                        })
+                        .collect(),
+                    inner_component_count: document.inner_components.len(),
+                    inner_type_count: document.inner_types.len(),
+                })
+            })
+            .collect::<Vec<_>>();
+        documents.sort_by(|lhs, rhs| lhs.path.cmp(&rhs.path));
+        crate::frozen_builtins::FrozenBuiltinLibrary { documents }
+    }
+
     /// Drop a document from the TypeLoader and invalidate all of its dependencies.
     /// Returns the list of all (transitive) dependencies.
     ///
@@ -2225,6 +2271,36 @@ fn test_builtin_semantic_cache_rehydrates_style_base_documents() {
 
     assert!(!loader_diags.has_errors());
     assert!(cached_loader.get_document(Path::new("builtin:/fluent/style-base.slint")).is_some());
+}
+
+#[test]
+fn test_frozen_builtin_metadata_is_process_global_safe() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<crate::frozen_builtins::FrozenBuiltinLibrary>();
+
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, loader) =
+        spin_on::spin_on(crate::compile_syntax_node(doc_node, parse_diags, compiler_config));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = loader.freeze_builtin_semantic_metadata();
+    let std_widgets = frozen
+        .documents
+        .iter()
+        .find(|doc| doc.path == "builtin:/fluent/std-widgets.slint")
+        .expect("std-widgets metadata should be frozen");
+
+    assert!(std_widgets.exports.iter().any(|export| {
+        export.name == "Button"
+            && export.kind == crate::frozen_builtins::FrozenBuiltinExportKind::Component
+    }));
 }
 
 #[test]
