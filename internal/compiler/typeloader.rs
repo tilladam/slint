@@ -2137,6 +2137,15 @@ fn bench_snapshot_vs_recompile() {
             crate::frozen_builtins::get(&frozen_key).expect("frozen metadata cache miss"),
         );
     });
+    let frozen = crate::frozen_builtins::get(&frozen_key).expect("frozen metadata cache miss");
+    let parent_registry = TypeRegister::builtin();
+    let skeleton_rehydrate_ms = mean_ms(&|| {
+        std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
+    });
+    let skeleton_rehydrate_with_parent_ms = mean_ms(&|| {
+        let parent_registry = TypeRegister::builtin();
+        std::hint::black_box(frozen.rehydrate_component_skeletons(&parent_registry));
+    });
 
     eprintln!("\nsnapshot vs recompile ({iters} iters each):");
     eprintln!("  new loader + load std-widgets : {fresh_import:7.2} ms  (what snapshot replaces)");
@@ -2146,6 +2155,8 @@ fn bench_snapshot_vs_recompile() {
     eprintln!("  => saving vs new+load         : {:7.2} ms", fresh_import - snapshot_ms);
     eprintln!("  freeze metadata               : {freeze_ms:7.2} ms");
     eprintln!("  frozen cache lookup+clone     : {frozen_lookup_ms:7.2} ms");
+    eprintln!("  skeleton rehydrate            : {skeleton_rehydrate_ms:7.2} ms");
+    eprintln!("  skeleton rehydrate + builtins : {skeleton_rehydrate_with_parent_ms:7.2} ms");
 }
 
 #[test]
@@ -2373,6 +2384,40 @@ fn test_frozen_builtin_metadata_is_stored_in_process_global_cache() {
         export.name == "Button"
             && export.kind == crate::frozen_builtins::FrozenBuiltinExportKind::Component
     }));
+}
+
+#[test]
+fn test_frozen_builtin_skeletons_rehydrate_into_registry() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, loader) =
+        spin_on::spin_on(crate::compile_syntax_node(doc_node, parse_diags, compiler_config));
+    assert!(!compile_diags.has_errors());
+
+    let frozen = loader.freeze_builtin_semantic_metadata();
+    let component = frozen
+        .documents
+        .iter()
+        .flat_map(|doc| &doc.components)
+        .find(|component| !component.root_element.children.is_empty())
+        .expect("expected at least one builtin component skeleton");
+    let component_id = component.id.clone();
+
+    let parent_registry = TypeRegister::builtin();
+    let rehydrated = frozen.rehydrate_component_skeletons(&parent_registry);
+    let rehydrated_component = match rehydrated.lookup_element(&component_id) {
+        Ok(langtype::ElementType::Component(component)) => component,
+        other => panic!("expected rehydrated component {component_id}, got {other:?}"),
+    };
+
+    assert_eq!(rehydrated_component.id.as_str(), component_id);
+    assert!(!rehydrated_component.root_element.borrow().children.is_empty());
 }
 
 #[test]

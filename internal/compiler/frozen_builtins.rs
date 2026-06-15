@@ -12,10 +12,17 @@
 
 #![allow(dead_code)]
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 use std::sync::{Mutex, OnceLock};
 
+use smol_str::SmolStr;
+
 use crate::CompilerConfiguration;
+use crate::langtype::{ElementType, Type};
+use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, PropertyVisibility};
+use crate::typeregister::TypeRegister;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FrozenBuiltinCacheKey {
@@ -76,6 +83,104 @@ impl From<&crate::DefaultTranslationContext> for FrozenDefaultTranslationContext
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FrozenBuiltinLibrary {
     pub(crate) documents: Vec<FrozenBuiltinDocument>,
+}
+
+impl FrozenBuiltinLibrary {
+    pub(crate) fn rehydrate_component_skeletons(
+        &self,
+        parent_registry: &Rc<RefCell<TypeRegister>>,
+    ) -> TypeRegister {
+        let mut registry = TypeRegister::new(parent_registry);
+        let mut components = Vec::new();
+
+        for frozen_component in self.documents.iter().flat_map(|doc| &doc.components) {
+            let component = Rc::new(Component {
+                id: frozen_component.id.as_str().into(),
+                root_element: Element::default().make_rc(),
+                ..Default::default()
+            });
+            registry.add(component.clone());
+            components.push((component, frozen_component));
+        }
+
+        for (component, frozen_component) in components {
+            Self::rehydrate_element_skeleton(
+                &frozen_component.root_element,
+                &component.root_element,
+                Rc::downgrade(&component),
+                &registry,
+            );
+        }
+
+        registry
+    }
+
+    fn rehydrate_element_skeleton(
+        frozen_element: &FrozenBuiltinElement,
+        element: &ElementRc,
+        enclosing_component: Weak<Component>,
+        registry: &TypeRegister,
+    ) {
+        let children = frozen_element
+            .children
+            .iter()
+            .map(|child| {
+                let child_element = Element::default().make_rc();
+                Self::rehydrate_element_skeleton(
+                    child,
+                    &child_element,
+                    enclosing_component.clone(),
+                    registry,
+                );
+                child_element
+            })
+            .collect();
+
+        let mut property_declarations = std::collections::BTreeMap::new();
+        for property in &frozen_element.property_declarations {
+            property_declarations.insert(
+                SmolStr::new(property.name.as_str()),
+                PropertyDeclaration {
+                    property_type: Self::rehydrate_type(&property.ty, registry),
+                    visibility: Self::rehydrate_visibility(&property.visibility),
+                    ..Default::default()
+                },
+            );
+        }
+
+        let mut element = element.borrow_mut();
+        element.id = frozen_element.id.as_str().into();
+        element.base_type =
+            registry.lookup_element(&frozen_element.base_type).unwrap_or(ElementType::Error);
+        element.property_declarations = property_declarations;
+        element.enclosing_component = enclosing_component;
+        element.children = children;
+    }
+
+    fn rehydrate_type(name: &str, registry: &TypeRegister) -> Type {
+        let ty = registry.lookup(name);
+        if ty == Type::Invalid {
+            match name {
+                "void" => Type::Void,
+                _ => Type::Invalid,
+            }
+        } else {
+            ty
+        }
+    }
+
+    fn rehydrate_visibility(visibility: &str) -> PropertyVisibility {
+        match visibility {
+            "input" => PropertyVisibility::Input,
+            "output" => PropertyVisibility::Output,
+            "input output" => PropertyVisibility::InOut,
+            "constexpr" => PropertyVisibility::Constexpr,
+            "public" => PropertyVisibility::Public,
+            "protected" => PropertyVisibility::Protected,
+            "fake" => PropertyVisibility::Fake,
+            _ => PropertyVisibility::Private,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
