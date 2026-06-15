@@ -243,6 +243,10 @@ pub(crate) struct FrozenBuiltinRegistry {
 pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) name: String,
     pub(crate) kind: String,
+    pub(crate) component_root_id: String,
+    pub(crate) component_root_base_kind: String,
+    pub(crate) component_root_base_type: String,
+    pub(crate) component_root_properties: Vec<FrozenBuiltinPropertyDeclaration>,
     pub(crate) native_class: String,
     pub(crate) property_count: usize,
     pub(crate) properties: Vec<FrozenBuiltinRegistryProperty>,

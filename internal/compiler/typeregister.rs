@@ -13,7 +13,7 @@ use crate::langtype::{
     BuiltinElement, BuiltinPropertyDefault, BuiltinPropertyInfo, BuiltinStruct, DefaultSizeBinding,
     ElementType, Enumeration, Function, NativeClass, PropertyLookupResult, Struct, Type,
 };
-use crate::object_tree::{Component, PropertyVisibility};
+use crate::object_tree::{Component, Element, PropertyDeclaration, PropertyVisibility};
 use crate::typeloader;
 
 pub const RESERVED_GEOMETRY_PROPERTIES: &[(&str, Type)] = &[
@@ -460,16 +460,18 @@ impl TypeRegister {
         let mut elements = self
             .elements
             .iter()
-            .map(|(name, element_type)| {
-                if let ElementType::Builtin(builtin) = element_type {
+            .map(|(name, element_type)| match element_type {
+                ElementType::Builtin(builtin) => {
                     freeze_builtin_registry_element(name.as_str(), "builtin", builtin)
-                } else {
-                    crate::frozen_builtins::FrozenBuiltinRegistryElement {
-                        name: name.to_string(),
-                        kind: element_type_kind(element_type).into(),
-                        ..Default::default()
-                    }
                 }
+                ElementType::Component(component) => {
+                    freeze_component_registry_element(name.as_str(), "component", component)
+                }
+                _ => crate::frozen_builtins::FrozenBuiltinRegistryElement {
+                    name: name.to_string(),
+                    kind: element_type_kind(element_type).into(),
+                    ..Default::default()
+                },
             })
             .collect::<Vec<_>>();
         let mut seen_elements =
@@ -545,42 +547,59 @@ impl TypeRegister {
             ..Default::default()
         };
 
-        for ty in &frozen.types {
-            if let Some(ty) = primitive_type_from_name(ty) {
-                registry.insert_type(ty);
+        for ty_name in &frozen.types {
+            if let Some(ty) = builtin_type_from_name(ty_name) {
+                registry.insert_type_with_name(ty, SmolStr::new(ty_name.as_str()));
             }
         }
+        BUILTIN.with(|e| e.enums.fill_register(&mut registry));
 
         for frozen_element in &frozen.elements {
             if frozen_element.kind != "builtin" {
                 continue;
             }
-            let native_class = NativeClass::new(frozen_element.native_class.as_str());
-            let mut builtin = BuiltinElement::new(Rc::new(native_class));
-            builtin.name = frozen_element.name.as_str().into();
-            builtin.properties = frozen_element
-                .properties
-                .iter()
-                .map(|property| {
-                    (
-                        SmolStr::new(property.name.as_str()),
-                        BuiltinPropertyInfo {
-                            ty: rehydrate_registry_property_type(&property.ty),
-                            property_visibility: visibility_from_name(&property.visibility),
-                            default_value: rehydrate_builtin_property_default(property),
-                            docs: None,
-                        },
-                    )
-                })
-                .collect();
-            builtin.additional_accept_self = frozen_element.additional_accept_self;
-            builtin.accepts_focus = frozen_element.accepts_focus;
-            builtin.is_global = frozen_element.is_global;
-            builtin.is_internal = frozen_element.is_internal;
-            builtin.is_non_item_type = frozen_element.is_non_item_type;
-            builtin.default_size_binding =
-                default_size_binding_from_name(frozen_element.default_size_binding.as_str());
-            registry.add_builtin(Rc::new(builtin));
+            registry.add_builtin(Rc::new(rehydrate_builtin_registry_element(
+                frozen_element,
+                &registry,
+            )));
+        }
+
+        for frozen_element in &frozen.elements {
+            match frozen_element.kind.as_str() {
+                "component" => {
+                    let base_type =
+                        rehydrate_registry_component_root_base_type(&registry, frozen_element);
+                    let root_element = Element {
+                        id: SmolStr::new(frozen_element.component_root_id.as_str()),
+                        base_type,
+                        property_declarations: rehydrate_root_property_declarations(
+                            &frozen_element.component_root_properties,
+                            &registry,
+                        ),
+                        ..Default::default()
+                    }
+                    .make_rc();
+                    let component = Rc::new(Component {
+                        id: SmolStr::new(frozen_element.name.as_str()),
+                        root_element,
+                        ..Default::default()
+                    });
+                    component.root_element.borrow_mut().enclosing_component =
+                        Rc::downgrade(&component);
+                    registry.add_with_name(SmolStr::new(frozen_element.name.as_str()), component);
+                }
+                "global" => {
+                    registry
+                        .elements
+                        .insert(SmolStr::new(frozen_element.name.as_str()), ElementType::Global);
+                }
+                "interface" => {
+                    registry
+                        .elements
+                        .insert(SmolStr::new(frozen_element.name.as_str()), ElementType::Interface);
+                }
+                _ => {}
+            }
         }
 
         for frozen_element in &frozen.elements {
@@ -1022,6 +1041,15 @@ fn primitive_type_from_name(name: &str) -> Option<Type> {
 }
 
 #[allow(dead_code)]
+fn builtin_type_from_name(name: &str) -> Option<Type> {
+    primitive_type_from_name(name).or_else(|| match name {
+        "Point" => Some(Type::Struct(logical_point_type())),
+        "Size" => Some(Type::Struct(logical_size_type())),
+        _ => None,
+    })
+}
+
+#[allow(dead_code)]
 fn default_size_binding_from_name(name: &str) -> DefaultSizeBinding {
     match name {
         "ExpandsToParentGeometry" => DefaultSizeBinding::ExpandsToParentGeometry,
@@ -1053,7 +1081,39 @@ fn freeze_builtin_registry_element(
         is_internal: builtin.is_internal,
         is_non_item_type: builtin.is_non_item_type,
         default_size_binding: format!("{:?}", builtin.default_size_binding),
+        ..Default::default()
     }
+}
+
+fn freeze_component_registry_element(
+    name: &str,
+    kind: &str,
+    component: &Component,
+) -> crate::frozen_builtins::FrozenBuiltinRegistryElement {
+    let root_element = component.root_element.borrow();
+    let mut frozen = if let ElementType::Builtin(builtin) = &root_element.base_type {
+        freeze_builtin_registry_element(name, kind, builtin)
+    } else {
+        crate::frozen_builtins::FrozenBuiltinRegistryElement {
+            name: name.to_string(),
+            kind: kind.into(),
+            ..Default::default()
+        }
+    };
+    frozen.component_root_id = root_element.id.to_string();
+    frozen.component_root_base_kind = element_type_kind(&root_element.base_type).into();
+    frozen.component_root_base_type =
+        root_element.base_type.type_name().map(str::to_string).unwrap_or_default();
+    frozen.component_root_properties = root_element
+        .property_declarations
+        .iter()
+        .map(|(name, declaration)| crate::frozen_builtins::FrozenBuiltinPropertyDeclaration {
+            name: name.to_string(),
+            ty: declaration.property_type.to_string(),
+            visibility: declaration.visibility.to_string(),
+        })
+        .collect();
+    frozen
 }
 
 fn freeze_builtin_registry_properties(
@@ -1098,12 +1158,111 @@ fn freeze_builtin_registry_property(
     }
 }
 
-fn rehydrate_registry_property_type(name: &str) -> Type {
-    primitive_type_from_name(name).unwrap_or_else(|| match name {
+fn rehydrate_builtin_registry_element(
+    frozen_element: &crate::frozen_builtins::FrozenBuiltinRegistryElement,
+    registry: &TypeRegister,
+) -> BuiltinElement {
+    let native_class = NativeClass::new(frozen_element.native_class.as_str());
+    let mut builtin = BuiltinElement::new(Rc::new(native_class));
+    builtin.name = frozen_element.name.as_str().into();
+    builtin.properties = frozen_element
+        .properties
+        .iter()
+        .map(|property| {
+            (
+                SmolStr::new(property.name.as_str()),
+                BuiltinPropertyInfo {
+                    ty: rehydrate_registry_property_type(&property.ty, registry),
+                    property_visibility: visibility_from_name(&property.visibility),
+                    default_value: rehydrate_builtin_property_default(property),
+                    docs: None,
+                },
+            )
+        })
+        .collect();
+    builtin.additional_accept_self = frozen_element.additional_accept_self;
+    builtin.accepts_focus = frozen_element.accepts_focus;
+    builtin.is_global = frozen_element.is_global;
+    builtin.is_internal = frozen_element.is_internal;
+    builtin.is_non_item_type = frozen_element.is_non_item_type;
+    builtin.default_size_binding =
+        default_size_binding_from_name(frozen_element.default_size_binding.as_str());
+    builtin
+}
+
+fn rehydrate_registry_component_root_base_type(
+    registry: &TypeRegister,
+    frozen_element: &crate::frozen_builtins::FrozenBuiltinRegistryElement,
+) -> ElementType {
+    match frozen_element.component_root_base_kind.as_str() {
+        "builtin" => ElementType::Builtin(Rc::new(rehydrate_builtin_registry_element(
+            frozen_element,
+            registry,
+        ))),
+        kind => rehydrate_registry_element_base_type(
+            registry,
+            kind,
+            frozen_element.component_root_base_type.as_str(),
+        ),
+    }
+}
+
+fn rehydrate_registry_property_type(name: &str, registry: &TypeRegister) -> Type {
+    let name = normalized_frozen_type_name(name);
+    let ty = registry.lookup(name);
+    if ty != Type::Invalid {
+        return ty;
+    }
+    builtin_type_from_name(name).unwrap_or_else(|| match name {
         "element ref" => Type::ElementReference,
         "void" => Type::Void,
         _ => Type::Invalid,
     })
+}
+
+fn rehydrate_registry_element_base_type(
+    registry: &TypeRegister,
+    kind: &str,
+    name: &str,
+) -> ElementType {
+    match kind {
+        "global" => ElementType::Global,
+        "interface" => ElementType::Interface,
+        "builtin" | "component" => registry.lookup_element(name).unwrap_or(ElementType::Error),
+        _ => ElementType::Error,
+    }
+}
+
+fn rehydrate_root_property_declarations(
+    properties: &[crate::frozen_builtins::FrozenBuiltinPropertyDeclaration],
+    registry: &TypeRegister,
+) -> BTreeMap<SmolStr, PropertyDeclaration> {
+    properties
+        .iter()
+        .map(|property| {
+            (
+                SmolStr::new(property.name.as_str()),
+                PropertyDeclaration {
+                    property_type: rehydrate_registry_declaration_type(&property.ty, registry),
+                    visibility: visibility_from_name(&property.visibility),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect()
+}
+
+fn rehydrate_registry_declaration_type(name: &str, registry: &TypeRegister) -> Type {
+    let name = normalized_frozen_type_name(name);
+    let ty = registry.lookup(name);
+    if ty != Type::Invalid {
+        return ty;
+    }
+    rehydrate_registry_property_type(name, registry)
+}
+
+fn normalized_frozen_type_name(name: &str) -> &str {
+    name.strip_prefix("enum ").or_else(|| name.strip_prefix("struct ")).unwrap_or(name)
 }
 
 fn visibility_from_name(name: &str) -> PropertyVisibility {
@@ -1282,6 +1441,13 @@ mod tests {
             .context_restricted_types
             .iter()
             .any(|restriction| !restriction.name.is_empty() && !restriction.contexts.is_empty()));
+        assert!(frozen.elements.iter().any(|element| {
+            element.name == "Platform"
+                && element.kind == "component"
+                && element.component_root_base_kind == "builtin"
+                && element.is_global
+                && element.properties.iter().any(|property| property.name == "os")
+        }));
 
         let rehydrated = TypeRegister::rehydrate_builtin_registry_shell(&frozen);
         assert_eq!(rehydrated.borrow().lookup("length"), Type::LogicalLength);
@@ -1328,6 +1494,24 @@ mod tests {
             text_input.lookup_property("set-selection-offsets").builtin_function,
             Some(BuiltinFunction::SetSelectionOffsets)
         );
+
+        let platform = rehydrated.borrow().lookup_element("Platform").unwrap();
+        let ElementType::Component(platform) = platform else {
+            panic!("expected Platform to rehydrate as a component");
+        };
+        assert!(platform.is_global());
+        let os = platform.root_element.borrow().lookup_property("os");
+        assert_eq!(os.property_type.to_string(), "enum OperatingSystemType");
+        assert_eq!(os.property_visibility, PropertyVisibility::Output);
+
+        let native_palette = rehydrated.borrow().lookup_element("NativePalette").unwrap();
+        let ElementType::Component(native_palette) = native_palette else {
+            panic!("expected NativePalette to rehydrate as a component");
+        };
+        assert!(native_palette.is_global());
+        let background = native_palette.root_element.borrow().lookup_property("background");
+        assert_eq!(background.property_type, Type::Brush);
+        assert_eq!(background.property_visibility, PropertyVisibility::Output);
 
         let rehydrated_registry = rehydrated.borrow();
         let (frozen_parent, rehydrated_parent) = frozen
