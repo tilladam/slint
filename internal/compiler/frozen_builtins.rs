@@ -347,3 +347,59 @@ pub(crate) fn generated_artifact(key: &FrozenBuiltinCacheKey) -> Option<&'static
 pub(crate) fn generated_artifact_count() -> usize {
     generated_builtin_artifacts::artifact_count()
 }
+
+#[cfg(test)]
+pub(crate) fn render_generated_artifacts_module(
+    entries: &[(FrozenBuiltinCacheKey, Vec<u8>)],
+) -> String {
+    let mut source = String::new();
+
+    for (index, (_key, bytes)) in entries.iter().enumerate() {
+        source.push_str(&format!("static ARTIFACT_{index}: &[u8] = &[\n"));
+        for chunk in bytes.chunks(16) {
+            source.push_str("    ");
+            for byte in chunk {
+                source.push_str(&format!("{byte},"));
+            }
+            source.push('\n');
+        }
+        source.push_str("];\n\n");
+    }
+
+    source.push_str(
+        "pub(crate) fn generated_artifact(\n    key: &super::FrozenBuiltinCacheKey,\n) -> Option<&'static [u8]> {\n",
+    );
+    for (index, (key, _bytes)) in entries.iter().enumerate() {
+        source.push_str("    if ");
+        source.push_str(&render_generated_artifact_key_predicate(key));
+        source.push_str(&format!(" {{\n        return Some(ARTIFACT_{index});\n    }}\n"));
+    }
+    source.push_str("    None\n}\n\n");
+    source.push_str(&format!(
+        "pub(crate) fn artifact_count() -> usize {{\n    {}\n}}\n",
+        entries.len()
+    ));
+
+    source
+}
+
+#[cfg(test)]
+fn render_generated_artifact_key_predicate(key: &FrozenBuiltinCacheKey) -> String {
+    let translation_domain = match &key.translation_domain {
+        Some(domain) => format!("Some({:?})", domain),
+        None => "None".into(),
+    };
+    let default_translation_context = match key.default_translation_context {
+        FrozenDefaultTranslationContext::ComponentName => "ComponentName",
+        FrozenDefaultTranslationContext::None => "None",
+    };
+
+    format!(
+        "key.resolved_style == {:?} && key.enable_experimental == {} && key.debug_hooks == {} && key.translation_domain.as_deref() == {} && matches!(key.default_translation_context, super::FrozenDefaultTranslationContext::{})",
+        key.resolved_style,
+        key.enable_experimental,
+        key.debug_hooks,
+        translation_domain,
+        default_translation_context
+    )
+}

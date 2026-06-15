@@ -2891,6 +2891,47 @@ fn test_frozen_builtin_generated_artifact_table_is_compiled_in() {
 }
 
 #[test]
+fn test_frozen_builtin_artifact_emits_generated_rust_module() {
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.style = Some("fluent".into());
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+    assert!(!compile_diags.has_errors());
+
+    let key = TypeLoader::builtin_semantic_cache_key_for(&compiler_config, "fluent")
+        .expect("generated artifact emitter test key should be cacheable");
+    let encoded =
+        postcard::to_allocvec(&loader.freeze_builtin_semantic_metadata()).expect("encode failed");
+    let source =
+        crate::frozen_builtins::render_generated_artifacts_module(&[(key, encoded.clone())]);
+
+    assert!(source.contains("static ARTIFACT_0"));
+    assert!(source.contains("pub(crate) fn generated_artifact"));
+    assert!(source.contains("key.resolved_style == \"fluent\""));
+    assert!(source.contains("super::FrozenDefaultTranslationContext::ComponentName"));
+    assert!(source.contains("pub(crate) fn artifact_count() -> usize {\n    1\n}"));
+    assert!(source.len() > encoded.len());
+
+    let path = std::env::temp_dir()
+        .join(format!("slint-frozen-builtin-artifact-module-{}.rs", std::process::id()));
+    std::fs::write(&path, &source).expect("generated artifact module should be written");
+    let written = std::fs::read_to_string(&path).expect("generated artifact module should be read");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(written, source);
+}
+
+#[test]
 fn test_frozen_builtin_skeletons_rehydrate_into_registry() {
     let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
     let source = r#"
