@@ -83,6 +83,7 @@ pub(crate) struct FrozenBuiltinDocument {
     pub(crate) path: String,
     pub(crate) imports: Vec<String>,
     pub(crate) exports: Vec<FrozenBuiltinExport>,
+    pub(crate) components: Vec<FrozenBuiltinComponent>,
     pub(crate) inner_component_count: usize,
     pub(crate) inner_type_count: usize,
 }
@@ -97,6 +98,29 @@ pub(crate) struct FrozenBuiltinExport {
 pub(crate) enum FrozenBuiltinExportKind {
     Component,
     Type,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrozenBuiltinComponent {
+    pub(crate) id: String,
+    pub(crate) root_element: FrozenBuiltinElement,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrozenBuiltinElement {
+    pub(crate) id: String,
+    pub(crate) base_type: String,
+    pub(crate) property_declarations: Vec<FrozenBuiltinPropertyDeclaration>,
+    pub(crate) bindings: Vec<String>,
+    pub(crate) change_callbacks: Vec<String>,
+    pub(crate) children: Vec<FrozenBuiltinElement>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FrozenBuiltinPropertyDeclaration {
+    pub(crate) name: String,
+    pub(crate) ty: String,
+    pub(crate) visibility: String,
 }
 
 static FROZEN_BUILTIN_CACHE: OnceLock<Mutex<HashMap<FrozenBuiltinCacheKey, FrozenBuiltinLibrary>>> =

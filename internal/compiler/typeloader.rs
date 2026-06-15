@@ -1081,6 +1081,11 @@ impl TypeLoader {
                             }
                         })
                         .collect(),
+                    components: document
+                        .inner_components
+                        .iter()
+                        .map(Self::freeze_builtin_component_skeleton)
+                        .collect(),
                     inner_component_count: document.inner_components.len(),
                     inner_type_count: document.inner_types.len(),
                 })
@@ -1088,6 +1093,52 @@ impl TypeLoader {
             .collect::<Vec<_>>();
         documents.sort_by(|lhs, rhs| lhs.path.cmp(&rhs.path));
         crate::frozen_builtins::FrozenBuiltinLibrary { documents }
+    }
+
+    fn freeze_builtin_component_skeleton(
+        component: &Rc<object_tree::Component>,
+    ) -> crate::frozen_builtins::FrozenBuiltinComponent {
+        crate::frozen_builtins::FrozenBuiltinComponent {
+            id: component.id.to_string(),
+            root_element: Self::freeze_builtin_element_skeleton(&component.root_element),
+        }
+    }
+
+    fn freeze_builtin_element_skeleton(
+        element: &object_tree::ElementRc,
+    ) -> crate::frozen_builtins::FrozenBuiltinElement {
+        let element = element.borrow();
+        let base_type = element
+            .base_type
+            .type_name()
+            .map(str::to_string)
+            .unwrap_or_else(|| element.base_type.to_string());
+        let mut property_declarations = element
+            .property_declarations
+            .iter()
+            .map(|(name, declaration)| crate::frozen_builtins::FrozenBuiltinPropertyDeclaration {
+                name: name.to_string(),
+                ty: declaration.property_type.to_string(),
+                visibility: declaration.visibility.to_string(),
+            })
+            .collect::<Vec<_>>();
+        property_declarations.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+
+        let mut bindings = element.bindings.keys().map(ToString::to_string).collect::<Vec<_>>();
+        bindings.sort();
+
+        let mut change_callbacks =
+            element.change_callbacks.keys().map(ToString::to_string).collect::<Vec<_>>();
+        change_callbacks.sort();
+
+        crate::frozen_builtins::FrozenBuiltinElement {
+            id: element.id.to_string(),
+            base_type,
+            property_declarations,
+            bindings,
+            change_callbacks,
+            children: element.children.iter().map(Self::freeze_builtin_element_skeleton).collect(),
+        }
     }
 
     /// Drop a document from the TypeLoader and invalidate all of its dependencies.
@@ -2285,6 +2336,11 @@ fn test_frozen_builtin_metadata_is_process_global_safe() {
     assert!(std_widgets.exports.iter().any(|export| {
         export.name == "Button"
             && export.kind == crate::frozen_builtins::FrozenBuiltinExportKind::Component
+    }));
+    assert!(frozen.documents.iter().flat_map(|doc| &doc.components).any(|component| {
+        !component.id.is_empty()
+            && !component.root_element.base_type.is_empty()
+            && !component.root_element.children.is_empty()
     }));
 }
 
