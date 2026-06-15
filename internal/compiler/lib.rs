@@ -332,6 +332,7 @@ pub async fn compile_syntax_node(
         Rc::new(RefCell::new(typeregister::TypeRegister::new(&loader.global_type_registry)));
     let (foreign_imports, reexports) =
         loader.load_dependencies_recursively(&doc_node, &mut diagnostics, &type_registry).await;
+    loader.store_builtin_semantic_cache();
 
     let mut doc = crate::object_tree::Document::from_node(
         doc_node,

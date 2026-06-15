@@ -19,6 +19,35 @@ use crate::{fileaccess, langtype, layout, parser};
 use core::future::Future;
 use itertools::Itertools;
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct BuiltinSemanticCacheKey {
+    resolved_style: String,
+    enable_experimental: bool,
+    debug_hooks: bool,
+    translation_domain: Option<String>,
+    default_translation_context: BuiltinDefaultTranslationContext,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum BuiltinDefaultTranslationContext {
+    ComponentName,
+    None,
+}
+
+impl From<&crate::DefaultTranslationContext> for BuiltinDefaultTranslationContext {
+    fn from(value: &crate::DefaultTranslationContext) -> Self {
+        match value {
+            crate::DefaultTranslationContext::ComponentName => Self::ComponentName,
+            crate::DefaultTranslationContext::None => Self::None,
+        }
+    }
+}
+
+thread_local! {
+    static BUILTIN_SEMANTIC_CACHE: RefCell<HashMap<BuiltinSemanticCacheKey, TypeLoader>> =
+        Default::default();
+}
+
 #[allow(clippy::large_enum_variant)]
 enum LoadedDocument {
     Document(Document),
@@ -934,6 +963,10 @@ impl TypeLoader {
             style = get_native_style(&mut diag.all_loaded_files);
         }
 
+        if let Some(cached) = Self::restore_builtin_semantic_cache_for(&compiler_config, &style) {
+            return cached;
+        }
+
         let myself = Self {
             global_type_registry: if compiler_config.enable_experimental {
                 crate::typeregister::TypeRegister::builtin_experimental()
@@ -964,6 +997,82 @@ impl TypeLoader {
         }
 
         myself
+    }
+
+    fn builtin_semantic_cache_key(&self) -> Option<BuiltinSemanticCacheKey> {
+        Self::builtin_semantic_cache_key_for(&self.compiler_config, &self.resolved_style)
+    }
+
+    fn builtin_semantic_cache_key_for(
+        compiler_config: &CompilerConfiguration,
+        resolved_style: &str,
+    ) -> Option<BuiltinSemanticCacheKey> {
+        // Prototype constraint: include paths are allowed to override `std-widgets.slint` and
+        // style files, so only cache the pure embedded-builtin configuration for now.
+        if !compiler_config.include_paths.is_empty() {
+            return None;
+        }
+        if compiler_config.open_import_callback.is_some()
+            || compiler_config.resource_url_mapper.is_some()
+        {
+            return None;
+        }
+
+        let known_builtin_style =
+            fileaccess::styles().into_iter().any(|style| style == resolved_style);
+        if !known_builtin_style {
+            return None;
+        }
+
+        Some(BuiltinSemanticCacheKey {
+            resolved_style: resolved_style.into(),
+            enable_experimental: compiler_config.enable_experimental,
+            debug_hooks: compiler_config.debug_hooks.is_some(),
+            translation_domain: compiler_config.translation_domain.clone(),
+            default_translation_context: (&compiler_config.default_translation_context).into(),
+        })
+    }
+
+    fn restore_builtin_semantic_cache_for(
+        compiler_config: &CompilerConfiguration,
+        resolved_style: &str,
+    ) -> Option<Self> {
+        let key = Self::builtin_semantic_cache_key_for(compiler_config, resolved_style)?;
+        BUILTIN_SEMANTIC_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            let cached = cache.get(&key)?;
+            let mut restored = snapshot(cached)?;
+            restored.compiler_config = compiler_config.clone();
+            restored.resolved_style = resolved_style.into();
+            Some(restored)
+        })
+    }
+
+    pub(crate) fn store_builtin_semantic_cache(&self) {
+        let Some(key) = self.builtin_semantic_cache_key() else { return };
+
+        let Some(mut cached) = snapshot(self) else { return };
+        cached.retain_only_builtin_documents();
+
+        if cached.all_documents.docs.is_empty() {
+            return;
+        }
+
+        BUILTIN_SEMANTIC_CACHE.with(|cache| {
+            cache.borrow_mut().entry(key).or_insert(cached);
+        });
+    }
+
+    fn retain_only_builtin_documents(&mut self) {
+        self.all_documents.docs.retain(|path, _| path.starts_with("builtin:/"));
+        self.all_documents.dependencies.retain(|path, dependents| {
+            if !path.starts_with("builtin:/") {
+                return false;
+            }
+            dependents.retain(|path| path.starts_with("builtin:/"));
+            true
+        });
+        self.all_documents.currently_loading.clear();
     }
 
     /// Drop a document from the TypeLoader and invalidate all of its dependencies.
@@ -1886,6 +1995,77 @@ fn maybe_base_directory(referencing_file: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Measures whether reusing a pre-compiled std-widgets `TypeLoader` via `snapshot()` (a deep
+/// clone + re-link) is cheaper than recompiling std-widgets from scratch on every expansion.
+///
+/// This gates the "cache the compiled builtin documents" lever: if `snapshot()` is much
+/// cheaper than the std-widgets compile portion, keeping a template loader alive and snapshotting
+/// it per expansion is worth pursuing; if not, only a deeper immutable-definitions refactor
+/// would help.
+///
+/// Run:
+/// `RUN_SLOW_BENCHES=1 cargo test --release -p i-slint-compiler typeloader::bench_snapshot_vs_recompile -- --nocapture --exact`
+#[test]
+fn bench_snapshot_vs_recompile() {
+    if std::env::var("RUN_SLOW_BENCHES").is_err() {
+        return;
+    }
+    let iters: u32 =
+        std::env::var("SLINT_BENCH_ITERS").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
+
+    let import = "import { Button, Slider, ComboBox, CheckBox, LineEdit, ProgressIndicator, \
+         VerticalBox, HorizontalBox, GroupBox, TabWidget } from \"std-widgets.slint\";";
+    let src_import = format!(
+        "{import}\nexport component Bench {{ VerticalBox {{ Button {{ text: \"x\"; }} }} }}"
+    );
+    let src_trivial = "export component Bench { Rectangle { width: 10px; } }".to_string();
+
+    let fresh_setup = |src: &str| {
+        let mut diag = BuildDiagnostics::default();
+        let node: syntax_nodes::Document =
+            crate::parser::parse(src.to_string(), Some(Path::new("bench.slint")), &mut diag).into();
+        let mut cc = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+        cc.style = Some("fluent".into());
+        // Disable the prototype semantic cache for the recompile leg while still resolving the
+        // embedded builtin files after this nonexistent include path misses.
+        cc.include_paths = vec![PathBuf::from("/__slint_bench_no_such_include_path__")];
+        let mut loader = TypeLoader::new(cc, &mut diag);
+        let reg = Rc::new(RefCell::new(TypeRegister::new(&loader.global_type_registry)));
+        spin_on::spin_on(loader.load_dependencies_recursively(&node, &mut diag, &reg));
+        assert!(!diag.has_errors(), "bench source failed to load");
+        loader
+    };
+
+    let template = fresh_setup(&src_import);
+    assert!(snapshot(&template).is_some(), "snapshot must succeed on a raw loader");
+
+    let mean_ms = |f: &dyn Fn()| {
+        f();
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            f();
+        }
+        t.elapsed().as_secs_f64() * 1000.0 / iters as f64
+    };
+
+    let fresh_import = mean_ms(&|| {
+        std::hint::black_box(fresh_setup(&src_import));
+    });
+    let fresh_trivial = mean_ms(&|| {
+        std::hint::black_box(fresh_setup(&src_trivial));
+    });
+    let snapshot_ms = mean_ms(&|| {
+        std::hint::black_box(snapshot(&template).expect("snapshot failed"));
+    });
+
+    eprintln!("\nsnapshot vs recompile ({iters} iters each):");
+    eprintln!("  new loader + load std-widgets : {fresh_import:7.2} ms  (what snapshot replaces)");
+    eprintln!("  new loader, no import         : {fresh_trivial:7.2} ms  (global register build)");
+    eprintln!("  => std-widgets load portion   : {:7.2} ms", fresh_import - fresh_trivial);
+    eprintln!("  snapshot(template)            : {snapshot_ms:7.2} ms");
+    eprintln!("  => saving vs new+load         : {:7.2} ms", fresh_import - snapshot_ms);
+}
+
 #[test]
 fn test_dependency_loading() {
     let test_source_path: PathBuf =
@@ -1996,6 +2176,55 @@ fn test_dependency_loading_from_rust() {
     assert!(build_diagnostics.is_empty()); // also no warnings
     assert_eq!(foreign_imports.len(), 3);
     assert!(foreign_imports.iter().all(|x| matches!(x.import_kind, ImportKind::ImportList(..))));
+}
+
+#[test]
+fn test_builtin_semantic_cache_rehydrates_documents() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, first_loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+
+    assert!(!compile_diags.has_errors());
+    assert!(first_loader.get_document(Path::new("builtin:/fluent/std-widgets.slint")).is_some());
+
+    let mut loader_diags = BuildDiagnostics::default();
+    let cached_loader = TypeLoader::new(compiler_config, &mut loader_diags);
+
+    assert!(!loader_diags.has_errors());
+    assert!(cached_loader.get_document(Path::new("builtin:/fluent/std-widgets.slint")).is_some());
+}
+
+#[test]
+fn test_builtin_semantic_cache_rehydrates_style_base_documents() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"export component Test { Rectangle {} }"#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, first_loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+
+    assert!(!compile_diags.has_errors());
+    assert!(first_loader.get_document(Path::new("builtin:/fluent/style-base.slint")).is_some());
+
+    let mut loader_diags = BuildDiagnostics::default();
+    let cached_loader = TypeLoader::new(compiler_config, &mut loader_diags);
+
+    assert!(!loader_diags.has_errors());
+    assert!(cached_loader.get_document(Path::new("builtin:/fluent/style-base.slint")).is_some());
 }
 
 #[test]

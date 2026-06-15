@@ -102,6 +102,8 @@ pub async fn run_passes(
             .unwrap_or_else(|| panic!("can't load palette"))
     };
 
+    type_loader.store_builtin_semantic_cache();
+
     let global_type_registry = type_loader.global_type_registry.clone();
 
     run_import_passes(doc, type_loader, diag);
