@@ -245,6 +245,8 @@ pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) kind: String,
     pub(crate) native_class: String,
     pub(crate) property_count: usize,
+    pub(crate) properties: Vec<FrozenBuiltinRegistryProperty>,
+    pub(crate) native_properties: Vec<FrozenBuiltinRegistryProperty>,
     pub(crate) accepted_child_types: Vec<String>,
     pub(crate) additional_accept_self: bool,
     pub(crate) accepts_focus: bool,
@@ -252,6 +254,15 @@ pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) is_internal: bool,
     pub(crate) is_non_item_type: bool,
     pub(crate) default_size_binding: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FrozenBuiltinRegistryProperty {
+    pub(crate) name: String,
+    pub(crate) ty: String,
+    pub(crate) visibility: String,
+    pub(crate) default_kind: String,
+    pub(crate) builtin_function: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]

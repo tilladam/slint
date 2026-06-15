@@ -469,6 +469,9 @@ impl TypeRegister {
                 if let ElementType::Builtin(builtin) = element_type {
                     element.native_class = builtin.native_class.class_name.to_string();
                     element.property_count = builtin.properties.len();
+                    element.properties = freeze_builtin_registry_properties(&builtin.properties);
+                    element.native_properties =
+                        freeze_native_registry_properties(&builtin.native_class.properties);
                     element.accepted_child_types = builtin
                         .additional_accepted_child_types
                         .keys()
@@ -553,6 +556,21 @@ impl TypeRegister {
             let native_class = NativeClass::new(frozen_element.native_class.as_str());
             let mut builtin = BuiltinElement::new(Rc::new(native_class));
             builtin.name = frozen_element.name.as_str().into();
+            builtin.properties = frozen_element
+                .properties
+                .iter()
+                .map(|property| {
+                    (
+                        SmolStr::new(property.name.as_str()),
+                        BuiltinPropertyInfo {
+                            ty: rehydrate_registry_property_type(&property.ty),
+                            property_visibility: visibility_from_name(&property.visibility),
+                            default_value: BuiltinPropertyDefault::None,
+                            docs: None,
+                        },
+                    )
+                })
+                .collect();
             builtin.additional_accept_self = frozen_element.additional_accept_self;
             builtin.accepts_focus = frozen_element.accepts_focus;
             builtin.is_global = frozen_element.is_global;
@@ -979,6 +997,69 @@ fn default_size_binding_from_name(name: &str) -> DefaultSizeBinding {
     }
 }
 
+fn freeze_builtin_registry_properties(
+    properties: &BTreeMap<SmolStr, BuiltinPropertyInfo>,
+) -> Vec<crate::frozen_builtins::FrozenBuiltinRegistryProperty> {
+    properties
+        .iter()
+        .map(|(name, property)| freeze_builtin_registry_property(name, property))
+        .collect()
+}
+
+fn freeze_native_registry_properties(
+    properties: &HashMap<SmolStr, BuiltinPropertyInfo>,
+) -> Vec<crate::frozen_builtins::FrozenBuiltinRegistryProperty> {
+    let mut properties = properties
+        .iter()
+        .map(|(name, property)| freeze_builtin_registry_property(name, property))
+        .collect::<Vec<_>>();
+    properties.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+    properties
+}
+
+fn freeze_builtin_registry_property(
+    name: &SmolStr,
+    property: &BuiltinPropertyInfo,
+) -> crate::frozen_builtins::FrozenBuiltinRegistryProperty {
+    let (default_kind, builtin_function) = match &property.default_value {
+        BuiltinPropertyDefault::None => ("none".into(), None),
+        BuiltinPropertyDefault::Expr(_) => ("expr".into(), None),
+        BuiltinPropertyDefault::WithElement(_) => ("with-element".into(), None),
+        BuiltinPropertyDefault::BuiltinFunction(function) => {
+            ("builtin-function".into(), Some(format!("{function:?}")))
+        }
+    };
+
+    crate::frozen_builtins::FrozenBuiltinRegistryProperty {
+        name: name.to_string(),
+        ty: property.ty.to_string(),
+        visibility: property.property_visibility.to_string(),
+        default_kind,
+        builtin_function,
+    }
+}
+
+fn rehydrate_registry_property_type(name: &str) -> Type {
+    primitive_type_from_name(name).unwrap_or_else(|| match name {
+        "element ref" => Type::ElementReference,
+        "void" => Type::Void,
+        _ => Type::Invalid,
+    })
+}
+
+fn visibility_from_name(name: &str) -> PropertyVisibility {
+    match name {
+        "input" => PropertyVisibility::Input,
+        "output" => PropertyVisibility::Output,
+        "input output" => PropertyVisibility::InOut,
+        "constexpr" => PropertyVisibility::Constexpr,
+        "public" => PropertyVisibility::Public,
+        "protected" => PropertyVisibility::Protected,
+        "fake" => PropertyVisibility::Fake,
+        _ => PropertyVisibility::Private,
+    }
+}
+
 /// Type definitions for each builtin struct
 pub mod builtin_structs {
     use super::*;
@@ -1121,5 +1202,14 @@ mod tests {
             rehydrated.borrow().lookup_element("Rectangle"),
             Ok(ElementType::Builtin(_))
         ));
+        let rectangle = rehydrated.borrow().lookup_element("Rectangle").unwrap();
+        let background = rectangle.lookup_property("background");
+        assert_eq!(background.property_type, Type::Brush);
+        assert_eq!(background.property_visibility, PropertyVisibility::Input);
+
+        let text = rehydrated.borrow().lookup_element("Text").unwrap();
+        let text_prop = text.lookup_property("text");
+        assert_eq!(text_prop.property_type, Type::String);
+        assert_eq!(text_prop.property_visibility, PropertyVisibility::Input);
     }
 }
