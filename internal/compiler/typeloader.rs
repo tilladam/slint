@@ -983,9 +983,13 @@ impl TypeLoader {
             format!("failed to create artifact directory {}: {err}", artifact_dir.display())
         })?;
 
+        let mut styles = styles.to_vec();
+        styles.sort();
+        styles.dedup();
+
         let mut entries = Vec::new();
         let mut manifest_entries = Vec::new();
-        for style in styles {
+        for style in &styles {
             let mut compiler_config =
                 CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
             compiler_config.style = Some(style.into());
@@ -3156,6 +3160,35 @@ fn test_frozen_builtin_artifact_emits_out_dir_include_module() {
     assert!(!source.contains("/tmp/slint-frozen-builtin-artifacts/fluent.postcard"));
     assert!(source.contains("key.resolved_style == \"fluent\""));
     assert!(source.contains("pub(crate) fn artifact_count() -> usize {\n    1\n}"));
+}
+
+#[test]
+#[cfg(feature = "frozen-builtin-artifacts")]
+fn test_frozen_builtin_artifact_file_generation_sorts_and_deduplicates_styles() {
+    let artifact_dir = std::env::temp_dir()
+        .join(format!("slint-frozen-builtin-artifact-deterministic-{}", std::process::id()));
+    std::fs::remove_dir_all(&artifact_dir).ok();
+
+    let module_path = TypeLoader::generate_frozen_builtin_artifact_files(
+        &["material".into(), "fluent".into(), "fluent".into()],
+        &artifact_dir,
+    )
+    .expect("generated artifact files should be written");
+    assert_eq!(module_path, artifact_dir.join("frozen_builtin_artifacts.rs"));
+
+    let manifest = std::fs::read_to_string(artifact_dir.join("frozen_builtin_artifacts.manifest"))
+        .expect("generated artifact manifest should be readable");
+    assert!(manifest.contains("artifact_count=2"));
+    let fluent_index = manifest.find("style=fluent").expect("fluent artifact should be listed");
+    let material_index =
+        manifest.find("style=material").expect("material artifact should be listed");
+    assert!(fluent_index < material_index);
+
+    let module = std::fs::read_to_string(module_path).expect("generated module should be readable");
+    assert!(module.contains("/fluent.postcard"));
+    assert!(module.contains("/material.postcard"));
+
+    std::fs::remove_dir_all(&artifact_dir).ok();
 }
 
 #[test]
