@@ -931,7 +931,7 @@ struct BorrowedTypeLoader<'a> {
     diag: &'a mut BuildDiagnostics,
 }
 
-#[cfg(feature = "frozen-builtin-artifacts")]
+#[cfg(feature = "frozen-builtin-artifact-generation")]
 fn sanitize_artifact_file_stem(style: &str) -> String {
     style
         .chars()
@@ -939,7 +939,7 @@ fn sanitize_artifact_file_stem(style: &str) -> String {
         .collect()
 }
 
-#[cfg(feature = "frozen-builtin-artifacts")]
+#[cfg(feature = "frozen-builtin-artifact-generation")]
 fn render_frozen_builtin_artifact_manifest(
     module_path: &Path,
     entries: &[(String, crate::frozen_builtins::FrozenBuiltinCacheKey, PathBuf, u64)],
@@ -955,7 +955,10 @@ fn render_frozen_builtin_artifact_manifest(
     for (index, (style, key, path, size)) in entries.iter().enumerate() {
         manifest.push_str(&format!("\n[artifact.{index}]\n"));
         manifest.push_str(&format!("style={style}\n"));
-        manifest.push_str(&format!("path={}\n", path.display()));
+        manifest.push_str(&format!(
+            "path={}\n",
+            path.file_name().unwrap_or(path.as_os_str()).to_string_lossy()
+        ));
         manifest.push_str(&format!("bytes={size}\n"));
         manifest.push_str(&format!("key.resolved_style={}\n", key.resolved_style));
         manifest.push_str(&format!("key.enable_experimental={}\n", key.enable_experimental));
@@ -974,7 +977,7 @@ fn render_frozen_builtin_artifact_manifest(
 }
 
 impl TypeLoader {
-    #[cfg(feature = "frozen-builtin-artifacts")]
+    #[cfg(feature = "frozen-builtin-artifact-generation")]
     pub fn generate_frozen_builtin_artifact_files(
         styles: &[String],
         artifact_dir: &Path,
@@ -3162,7 +3165,7 @@ fn test_frozen_builtin_artifact_emits_out_dir_include_module() {
 }
 
 #[test]
-#[cfg(feature = "frozen-builtin-artifacts")]
+#[cfg(feature = "frozen-builtin-artifact-generation")]
 fn test_frozen_builtin_artifact_file_generation_sorts_and_deduplicates_styles() {
     let artifact_dir = std::env::temp_dir()
         .join(format!("slint-frozen-builtin-artifact-deterministic-{}", std::process::id()));

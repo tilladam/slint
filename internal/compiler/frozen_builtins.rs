@@ -32,7 +32,7 @@ mod generated_builtin_artifacts {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinCacheKey {
@@ -77,7 +77,7 @@ impl FrozenBuiltinCacheKey {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) enum FrozenDefaultTranslationContext {
@@ -96,7 +96,7 @@ impl From<&crate::DefaultTranslationContext> for FrozenDefaultTranslationContext
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinLibrary {
@@ -213,7 +213,7 @@ impl FrozenBuiltinLibrary {
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinDocument {
@@ -227,7 +227,7 @@ pub(crate) struct FrozenBuiltinDocument {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinExport {
@@ -237,7 +237,7 @@ pub(crate) struct FrozenBuiltinExport {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) enum FrozenBuiltinExportKind {
@@ -247,7 +247,7 @@ pub(crate) enum FrozenBuiltinExportKind {
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinComponent {
@@ -257,7 +257,7 @@ pub(crate) struct FrozenBuiltinComponent {
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinElement {
@@ -271,7 +271,7 @@ pub(crate) struct FrozenBuiltinElement {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinPropertyDeclaration {
@@ -282,7 +282,7 @@ pub(crate) struct FrozenBuiltinPropertyDeclaration {
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinRegistry {
@@ -297,7 +297,7 @@ pub(crate) struct FrozenBuiltinRegistry {
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinRegistryElement {
@@ -322,7 +322,7 @@ pub(crate) struct FrozenBuiltinRegistryElement {
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinRegistryProperty {
@@ -335,7 +335,7 @@ pub(crate) struct FrozenBuiltinRegistryProperty {
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
-    any(test, feature = "frozen-builtin-artifacts"),
+    any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinContextRestriction {
@@ -394,7 +394,7 @@ pub(crate) fn generated_artifact_count() -> usize {
     generated_builtin_artifacts::artifact_count()
 }
 
-#[cfg(any(test, feature = "frozen-builtin-artifacts"))]
+#[cfg(any(test, feature = "frozen-builtin-artifact-generation"))]
 pub(crate) fn render_generated_artifacts_module(
     entries: &[(FrozenBuiltinCacheKey, Vec<u8>)],
 ) -> String {
@@ -429,7 +429,7 @@ pub(crate) fn render_generated_artifacts_module(
     source
 }
 
-#[cfg(any(test, feature = "frozen-builtin-artifacts"))]
+#[cfg(any(test, feature = "frozen-builtin-artifact-generation"))]
 pub(crate) fn render_generated_artifacts_include_module(
     entries: &[(FrozenBuiltinCacheKey, std::path::PathBuf)],
 ) -> String {
@@ -464,7 +464,7 @@ pub(crate) fn render_generated_artifacts_include_module(
     source
 }
 
-#[cfg(any(test, feature = "frozen-builtin-artifacts"))]
+#[cfg(any(test, feature = "frozen-builtin-artifact-generation"))]
 fn render_generated_artifact_key_predicate(key: &FrozenBuiltinCacheKey) -> String {
     let translation_domain = match &key.translation_domain {
         Some(domain) => format!("Some({:?})", domain),

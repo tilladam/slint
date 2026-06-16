@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 const FROZEN_ARTIFACT_MODULE_FILE: &str = "frozen_builtin_artifacts.rs";
 const FROZEN_ARTIFACT_MANIFEST_FILE: &str = "frozen_builtin_artifacts.manifest";
+const FROZEN_ARTIFACT_DIR: &str = "frozen-builtin-artifacts";
 const FROZEN_ARTIFACT_MANIFEST_SCHEMA: &str = "frozen-builtin-artifacts-v0";
 const FROZEN_ARTIFACT_SCHEMA_VERSION: &str = "1";
 
@@ -13,6 +14,7 @@ fn main() -> std::io::Result<()> {
     println!("cargo:rustc-check-cfg=cfg(slint_debug_property)");
     println!("cargo:rerun-if-env-changed=SLINT_FROZEN_BUILTIN_ARTIFACTS_DIR");
     println!("cargo:rerun-if-env-changed=SLINT_FROZEN_BUILTIN_ARTIFACTS_MODULE");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FROZEN_BUILTIN_ARTIFACTS");
 
     let cargo_manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let library_dir = PathBuf::from("widgets");
@@ -65,12 +67,31 @@ fn widget_library() -> &'static [(&'static str, &'static BuiltinDirectory<'stati
             &out_dir,
             &frozen_artifact_output_file_path,
         )?;
+    } else if std::env::var_os("CARGO_FEATURE_FROZEN_BUILTIN_ARTIFACTS").is_some() {
+        let generated_artifact_dir = cargo_manifest_dir.join(FROZEN_ARTIFACT_DIR);
+        println!("cargo:rerun-if-changed={}", generated_artifact_dir.display());
+        let generated_artifact_module = generated_artifact_dir.join(FROZEN_ARTIFACT_MODULE_FILE);
+        if generated_artifact_module.exists() {
+            copy_generated_frozen_builtin_artifacts(
+                &generated_artifact_module,
+                &out_dir,
+                &frozen_artifact_output_file_path,
+            )?;
+        } else {
+            write_empty_frozen_builtin_artifacts_module(&frozen_artifact_output_file_path)?;
+        }
     } else {
-        let mut frozen_artifact_file =
-            BufWriter::new(std::fs::File::create(&frozen_artifact_output_file_path)?);
-        write!(
-            frozen_artifact_file,
-            r#"
+        write_empty_frozen_builtin_artifacts_module(&frozen_artifact_output_file_path)?;
+    }
+
+    Ok(())
+}
+
+fn write_empty_frozen_builtin_artifacts_module(path: &Path) -> std::io::Result<()> {
+    let mut frozen_artifact_file = BufWriter::new(std::fs::File::create(path)?);
+    write!(
+        frozen_artifact_file,
+        r#"
 pub(crate) fn generated_artifact(
     _key: &super::FrozenBuiltinCacheKey,
 ) -> Option<&'static [u8]> {{
@@ -81,11 +102,8 @@ pub(crate) fn artifact_count() -> usize {{
     0
 }}
 "#
-        )?;
-        frozen_artifact_file.flush()?;
-    }
-
-    Ok(())
+    )?;
+    frozen_artifact_file.flush()
 }
 
 fn copy_generated_frozen_builtin_artifacts(

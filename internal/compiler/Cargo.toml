@@ -44,7 +44,8 @@ bundle-translations = ["dep:rspolib", "i-slint-common/locale-decimal-separator"]
 # Enable experimental library module support
 experimental-library-module = []
 
-frozen-builtin-artifacts = ["dep:postcard", "dep:serde", "dep:spin_on"]
+frozen-builtin-artifact-generation = ["dep:postcard", "dep:serde", "dep:spin_on"]
+frozen-builtin-artifacts = ["frozen-builtin-artifact-generation"]
 
 default = []
 

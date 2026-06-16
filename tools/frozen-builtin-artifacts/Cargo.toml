@@ -17,4 +17,4 @@ name = "slint-frozen-builtin-artifacts"
 path = "main.rs"
 
 [dependencies]
-i-slint-compiler = { workspace = true, features = ["frozen-builtin-artifacts"] }
+i-slint-compiler = { workspace = true, features = ["frozen-builtin-artifact-generation"] }
