@@ -24,7 +24,7 @@ use crate::langtype::{ElementType, Function, Type};
 use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, PropertyVisibility};
 use crate::typeregister::TypeRegister;
 
-pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 3;
+pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 6;
 
 mod generated_builtin_artifacts {
     include!(concat!(env!("OUT_DIR"), "/frozen_builtin_artifacts.rs"));
@@ -140,9 +140,40 @@ impl FrozenBuiltinLibrary {
                 &registry,
                 &context,
             );
+            if let Some(child_insertion_point) = &frozen_component.child_insertion_point {
+                let parent = Self::element_at_path(
+                    &component.root_element,
+                    &child_insertion_point.parent_path,
+                );
+                *component.child_insertion_point.borrow_mut() =
+                    Some(crate::object_tree::ChildrenInsertionPoint {
+                        parent,
+                        insertion_index: child_insertion_point.insertion_index,
+                        node: Self::dummy_children_placeholder(),
+                    });
+            }
         }
 
         registry
+    }
+
+    fn element_at_path(root: &ElementRc, path: &[usize]) -> ElementRc {
+        let mut element = root.clone();
+        for child_index in path {
+            let child = element.borrow().children[*child_index].clone();
+            element = child;
+        }
+        element
+    }
+
+    fn dummy_children_placeholder() -> crate::parser::syntax_nodes::ChildrenPlaceholder {
+        let mut diag = crate::diagnostics::BuildDiagnostics::default();
+        let node: crate::parser::syntax_nodes::Document =
+            crate::parser::parse("component Dummy { @children }".into(), None, &mut diag).into();
+        debug_assert!(!diag.has_errors());
+        node.descendants()
+            .find_map(crate::parser::syntax_nodes::ChildrenPlaceholder::new)
+            .expect("dummy @children placeholder should parse")
     }
 
     fn rehydrate_element_skeleton(
@@ -219,6 +250,9 @@ impl FrozenBuiltinLibrary {
         }
         if let Some(function) = Self::rehydrate_function_type(name, "function", registry) {
             return Type::Function(Rc::new(function));
+        }
+        if let Some(inner) = name.strip_prefix('[').and_then(|name| name.strip_suffix(']')) {
+            return Type::Array(Rc::new(Self::rehydrate_type(inner, registry)));
         }
 
         let ty = registry.lookup(name);
@@ -348,6 +382,17 @@ pub(crate) enum FrozenBuiltinExportKind {
 pub(crate) struct FrozenBuiltinComponent {
     pub(crate) id: String,
     pub(crate) root_element: FrozenBuiltinElement,
+    pub(crate) child_insertion_point: Option<FrozenBuiltinChildrenInsertionPoint>,
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifact-generation"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub(crate) struct FrozenBuiltinChildrenInsertionPoint {
+    pub(crate) parent_path: Vec<usize>,
+    pub(crate) insertion_index: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -383,6 +428,7 @@ pub(crate) struct FrozenBuiltinPropertyDeclaration {
 )]
 pub(crate) struct FrozenBuiltinRegistry {
     pub(crate) types: Vec<String>,
+    pub(crate) structs: Vec<FrozenBuiltinStruct>,
     pub(crate) elements: Vec<FrozenBuiltinRegistryElement>,
     pub(crate) supported_property_animation_types: Vec<String>,
     pub(crate) property_animation_type: String,
@@ -398,6 +444,26 @@ pub(crate) struct FrozenBuiltinRegistry {
     any(test, feature = "frozen-builtin-artifact-generation"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+pub(crate) struct FrozenBuiltinStruct {
+    pub(crate) name: String,
+    pub(crate) fields: Vec<FrozenBuiltinStructField>,
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifact-generation"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub(crate) struct FrozenBuiltinStructField {
+    pub(crate) name: String,
+    pub(crate) ty: String,
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifact-generation"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) name: String,
     pub(crate) kind: String,
@@ -406,6 +472,7 @@ pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) component_root_base_type: String,
     pub(crate) component_root_properties: Vec<FrozenBuiltinPropertyDeclaration>,
     pub(crate) native_class: String,
+    pub(crate) native_class_hierarchy: Vec<FrozenBuiltinNativeClass>,
     pub(crate) property_count: usize,
     pub(crate) properties: Vec<FrozenBuiltinRegistryProperty>,
     pub(crate) native_properties: Vec<FrozenBuiltinRegistryProperty>,
@@ -416,6 +483,16 @@ pub(crate) struct FrozenBuiltinRegistryElement {
     pub(crate) is_internal: bool,
     pub(crate) is_non_item_type: bool,
     pub(crate) default_size_binding: String,
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifact-generation"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub(crate) struct FrozenBuiltinNativeClass {
+    pub(crate) name: String,
+    pub(crate) properties: Vec<FrozenBuiltinRegistryProperty>,
 }
 
 #[derive(Clone, Debug, Default)]

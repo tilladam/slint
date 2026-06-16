@@ -11,7 +11,8 @@ use std::rc::Rc;
 use crate::expression_tree::BuiltinFunction;
 use crate::langtype::{
     BuiltinElement, BuiltinPropertyDefault, BuiltinPropertyInfo, BuiltinStruct, DefaultSizeBinding,
-    ElementType, Enumeration, Function, NativeClass, PropertyLookupResult, Struct, Type,
+    ElementType, Enumeration, Function, NativeClass, PropertyLookupResult, Struct, StructName,
+    Type,
 };
 use crate::object_tree::{Component, Element, PropertyDeclaration, PropertyVisibility};
 use crate::typeloader;
@@ -456,6 +457,27 @@ impl TypeRegister {
     ) -> crate::frozen_builtins::FrozenBuiltinRegistry {
         let mut types = self.types.keys().map(ToString::to_string).collect::<Vec<_>>();
         types.sort();
+        let mut structs = self
+            .types
+            .iter()
+            .filter_map(|(name, ty)| {
+                let Type::Struct(struct_ty) = ty else {
+                    return None;
+                };
+                Some(crate::frozen_builtins::FrozenBuiltinStruct {
+                    name: name.to_string(),
+                    fields: struct_ty
+                        .fields
+                        .iter()
+                        .map(|(name, ty)| crate::frozen_builtins::FrozenBuiltinStructField {
+                            name: name.to_string(),
+                            ty: ty.to_string(),
+                        })
+                        .collect(),
+                })
+            })
+            .collect::<Vec<_>>();
+        structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
         let mut elements = self
             .elements
@@ -514,6 +536,7 @@ impl TypeRegister {
 
         crate::frozen_builtins::FrozenBuiltinRegistry {
             types,
+            structs,
             elements,
             supported_property_animation_types,
             property_animation_type: self.property_animation_type.to_string(),
@@ -565,6 +588,27 @@ impl TypeRegister {
             }
         }
         BUILTIN.with(|e| e.enums.fill_register(&mut registry));
+        for frozen_struct in &frozen.structs {
+            let fields = frozen_struct
+                .fields
+                .iter()
+                .map(|field| {
+                    (
+                        SmolStr::new(field.name.as_str()),
+                        rehydrate_registry_property_type(&field.ty, &registry),
+                    )
+                })
+                .collect();
+            let name = frozen_struct
+                .name
+                .parse::<BuiltinStruct>()
+                .map(StructName::Builtin)
+                .unwrap_or(StructName::None);
+            registry.insert_type_with_name(
+                Type::Struct(Rc::new(Struct { fields, name })),
+                SmolStr::new(frozen_struct.name.as_str()),
+            );
+        }
 
         for frozen_element in &frozen.elements {
             if frozen_element.kind != "builtin" {
@@ -614,6 +658,12 @@ impl TypeRegister {
             }
         }
 
+        let frozen_elements_by_name = frozen
+            .elements
+            .iter()
+            .map(|element| (element.name.as_str(), element))
+            .collect::<HashMap<_, _>>();
+
         for frozen_element in &frozen.elements {
             if frozen_element.kind != "builtin" || frozen_element.accepted_child_types.is_empty() {
                 continue;
@@ -623,17 +673,14 @@ impl TypeRegister {
                 .accepted_child_types
                 .iter()
                 .filter_map(|child_name| {
-                    let child = match registry.elements.get(child_name.as_str()) {
-                        Some(ElementType::Builtin(child)) => Some(child.clone()),
-                        _ => registry.elements.values().find_map(|element_type| {
-                            let ElementType::Builtin(child) = element_type else {
-                                return None;
-                            };
-                            (child.native_class.class_name == child_name.as_str())
-                                .then(|| child.clone())
-                        }),
-                    }?;
-                    Some((SmolStr::new(child_name.as_str()), child))
+                    Some((
+                        SmolStr::new(child_name.as_str()),
+                        rehydrate_accepted_child_builtin(
+                            child_name,
+                            &frozen_elements_by_name,
+                            &registry,
+                        )?,
+                    ))
                 })
                 .collect::<HashMap<_, _>>();
 
@@ -1077,6 +1124,49 @@ fn builtin_type_from_name(name: &str) -> Option<Type> {
     })
 }
 
+fn rehydrate_accepted_child_builtin(
+    name: &str,
+    frozen_elements_by_name: &HashMap<&str, &crate::frozen_builtins::FrozenBuiltinRegistryElement>,
+    registry: &TypeRegister,
+) -> Option<Rc<BuiltinElement>> {
+    let mut child = match registry.elements.get(name) {
+        Some(ElementType::Builtin(child)) => (**child).clone(),
+        _ => registry
+            .elements
+            .values()
+            .find_map(|element_type| {
+                let ElementType::Builtin(child) = element_type else {
+                    return None;
+                };
+                (child.native_class.class_name == name).then(|| (**child).clone())
+            })
+            .or_else(|| {
+                let frozen_child = frozen_elements_by_name.get(name)?;
+                (frozen_child.kind == "builtin")
+                    .then(|| rehydrate_builtin_registry_element(frozen_child, registry))
+            })?,
+    };
+
+    if let Some(frozen_child) = frozen_elements_by_name.get(name) {
+        child.additional_accepted_child_types = frozen_child
+            .accepted_child_types
+            .iter()
+            .filter_map(|child_name| {
+                Some((
+                    SmolStr::new(child_name.as_str()),
+                    rehydrate_accepted_child_builtin(
+                        child_name,
+                        frozen_elements_by_name,
+                        registry,
+                    )?,
+                ))
+            })
+            .collect();
+    }
+
+    Some(Rc::new(child))
+}
+
 #[allow(dead_code)]
 fn default_size_binding_from_name(name: &str) -> DefaultSizeBinding {
     match name {
@@ -1099,6 +1189,7 @@ fn freeze_builtin_registry_element(
         name: name.to_string(),
         kind: kind.into(),
         native_class: builtin.native_class.class_name.to_string(),
+        native_class_hierarchy: freeze_native_class_hierarchy(&builtin.native_class),
         property_count: builtin.properties.len(),
         properties: freeze_builtin_registry_properties(&builtin.properties),
         native_properties: freeze_native_registry_properties(&builtin.native_class.properties),
@@ -1164,6 +1255,18 @@ fn freeze_native_registry_properties(
     properties
 }
 
+fn freeze_native_class_hierarchy(
+    native_class: &Rc<NativeClass>,
+) -> Vec<crate::frozen_builtins::FrozenBuiltinNativeClass> {
+    let mut hierarchy =
+        native_class.parent.as_ref().map(freeze_native_class_hierarchy).unwrap_or_default();
+    hierarchy.push(crate::frozen_builtins::FrozenBuiltinNativeClass {
+        name: native_class.class_name.to_string(),
+        properties: freeze_native_registry_properties(&native_class.properties),
+    });
+    hierarchy
+}
+
 fn freeze_builtin_registry_property(
     name: &SmolStr,
     property: &BuiltinPropertyInfo,
@@ -1190,7 +1293,7 @@ fn rehydrate_builtin_registry_element(
     frozen_element: &crate::frozen_builtins::FrozenBuiltinRegistryElement,
     registry: &TypeRegister,
 ) -> BuiltinElement {
-    let native_class = NativeClass::new(frozen_element.native_class.as_str());
+    let native_class = rehydrate_native_class(frozen_element, registry);
     let mut builtin = BuiltinElement::new(Rc::new(native_class));
     builtin.name = frozen_element.name.as_str().into();
     builtin.properties = frozen_element
@@ -1216,6 +1319,35 @@ fn rehydrate_builtin_registry_element(
     builtin.default_size_binding =
         default_size_binding_from_name(frozen_element.default_size_binding.as_str());
     builtin
+}
+
+fn rehydrate_native_class(
+    frozen_element: &crate::frozen_builtins::FrozenBuiltinRegistryElement,
+    registry: &TypeRegister,
+) -> NativeClass {
+    let mut parent = None;
+    for frozen_class in &frozen_element.native_class_hierarchy {
+        let mut native_class = NativeClass::new_with_properties(
+            frozen_class.name.as_str(),
+            frozen_class.properties.iter().map(|property| {
+                (
+                    SmolStr::new(property.name.as_str()),
+                    BuiltinPropertyInfo {
+                        ty: rehydrate_registry_property_type(&property.ty, registry),
+                        property_visibility: visibility_from_name(&property.visibility),
+                        default_value: rehydrate_builtin_property_default(property),
+                        docs: None,
+                    },
+                )
+            }),
+        );
+        native_class.parent = parent;
+        parent = Some(Rc::new(native_class));
+    }
+
+    parent
+        .map(|native_class| (*native_class).clone())
+        .unwrap_or_else(|| NativeClass::new(frozen_element.native_class.as_str()))
 }
 
 fn rehydrate_registry_component_root_base_type(
@@ -1519,6 +1651,7 @@ mod tests {
         let text_prop = text.lookup_property("text");
         assert_eq!(text_prop.property_type, Type::String);
         assert_eq!(text_prop.property_visibility, PropertyVisibility::Input);
+        assert!(matches!(rehydrated.borrow().lookup("MenuEntry"), Type::Struct(_)));
 
         let popup_window = rehydrated.borrow().lookup_element("PopupWindow").unwrap();
         assert_eq!(
@@ -1586,6 +1719,18 @@ mod tests {
                 .additional_accepted_child_types
                 .keys()
                 .any(|child| frozen_parent.accepted_child_types.contains(&child.to_string()))
+        );
+
+        let context_menu_area =
+            rehydrated_registry.lookup_builtin_element("ContextMenuArea").unwrap();
+        let menu = context_menu_area
+            .as_builtin()
+            .additional_accepted_child_types
+            .get("Menu")
+            .expect("ContextMenuArea should accept Menu");
+        assert!(
+            menu.additional_accepted_child_types.contains_key("MenuItem"),
+            "Menu should accept MenuItem after frozen registry rehydration"
         );
     }
 }

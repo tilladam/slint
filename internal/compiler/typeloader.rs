@@ -1401,10 +1401,38 @@ export component Test inherits Button {}"#;
     fn freeze_builtin_component_skeleton(
         component: &Rc<object_tree::Component>,
     ) -> crate::frozen_builtins::FrozenBuiltinComponent {
+        let child_insertion_point =
+            component.child_insertion_point.borrow().as_ref().map(|insertion_point| {
+                crate::frozen_builtins::FrozenBuiltinChildrenInsertionPoint {
+                    parent_path: Self::element_path(
+                        &component.root_element,
+                        &insertion_point.parent,
+                    )
+                    .expect("child insertion point should belong to component root element"),
+                    insertion_index: insertion_point.insertion_index,
+                }
+            });
         crate::frozen_builtins::FrozenBuiltinComponent {
             id: component.id.to_string(),
             root_element: Self::freeze_builtin_element_skeleton(&component.root_element),
+            child_insertion_point,
         }
+    }
+
+    fn element_path(
+        root: &object_tree::ElementRc,
+        needle: &object_tree::ElementRc,
+    ) -> Option<Vec<usize>> {
+        if Rc::ptr_eq(root, needle) {
+            return Some(Vec::new());
+        }
+        for (index, child) in root.borrow().children.iter().enumerate() {
+            if let Some(mut path) = Self::element_path(child, needle) {
+                path.insert(0, index);
+                return Some(path);
+            }
+        }
+        None
     }
 
     fn freeze_builtin_element_skeleton(
@@ -2640,6 +2668,131 @@ fn bench_snapshot_vs_recompile() {
     std::fs::remove_file(&frozen_binary_artifact_path).ok();
 }
 
+/// Measures the selected consumer path end-to-end by invoking fresh `slint-compiler` processes.
+///
+/// This builds two release compiler binaries with identical feature sets except for
+/// `frozen-builtin-artifacts`, then compiles the same std-widgets-heavy input repeatedly. The
+/// separate binaries and fresh processes avoid Cargo feature unification and process-global cache
+/// reuse hiding the cost difference.
+///
+/// Run:
+/// `RUN_SLOW_BENCHES=1 cargo test --release -p i-slint-compiler typeloader::bench_slint_compiler_frozen_artifacts_end_to_end -- --nocapture --exact`
+#[test]
+fn bench_slint_compiler_frozen_artifacts_end_to_end() {
+    if std::env::var("RUN_SLOW_BENCHES").is_err() {
+        return;
+    }
+
+    let iters: u32 =
+        std::env::var("SLINT_BENCH_ITERS").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+    let workspace_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let bench_dir = std::env::temp_dir().join("slint-compiler-frozen-artifacts-bench");
+    std::fs::create_dir_all(&bench_dir).expect("failed to create benchmark directory");
+    let input = bench_dir.join("bench.slint");
+    std::fs::write(
+        &input,
+        r#"
+import {
+    Button, CheckBox, HorizontalBox, ProgressIndicator, Slider, SpinBox, VerticalBox
+} from "std-widgets.slint";
+
+export component Bench inherits Window {
+    width: 640px;
+    height: 480px;
+    VerticalBox {
+        HorizontalBox {
+            Button { text: "Apply"; }
+            CheckBox { text: "Enabled"; checked: true; }
+        }
+        Slider { value: 42%; }
+        SpinBox { value: 7; }
+        ProgressIndicator { progress: 60%; }
+        HorizontalBox {
+            Button { text: "OK"; }
+            Button { text: "Cancel"; }
+        }
+    }
+}
+"#,
+    )
+    .expect("failed to write benchmark input");
+
+    let output = bench_dir.join("bench.rs");
+    let without_artifacts_target = bench_dir.join("target-without-artifacts");
+    let with_artifacts_target = bench_dir.join("target-with-artifacts");
+    let common_features = "software-renderer,bundle-translations,cpp,rust";
+    let with_artifacts_features =
+        "software-renderer,bundle-translations,cpp,rust,frozen-builtin-artifacts";
+
+    let build_compiler = |target_dir: &Path, features: &str| {
+        let status = std::process::Command::new("cargo")
+            .current_dir(&workspace_dir)
+            .env("CARGO_TARGET_DIR", target_dir)
+            .args([
+                "build",
+                "--release",
+                "-p",
+                "slint-compiler",
+                "--no-default-features",
+                "--features",
+                features,
+            ])
+            .status()
+            .expect("failed to run cargo build for slint-compiler");
+        assert!(status.success(), "slint-compiler build failed for features {features}");
+    };
+
+    build_compiler(&without_artifacts_target, common_features);
+    build_compiler(&with_artifacts_target, with_artifacts_features);
+
+    let compiler_binary = |target_dir: &Path| {
+        target_dir.join("release").join(format!("slint-compiler{}", std::env::consts::EXE_SUFFIX))
+    };
+    let without_artifacts = compiler_binary(&without_artifacts_target);
+    let with_artifacts = compiler_binary(&with_artifacts_target);
+    assert!(without_artifacts.exists(), "{} missing", without_artifacts.display());
+    assert!(with_artifacts.exists(), "{} missing", with_artifacts.display());
+
+    let mean_ms = |compiler: &Path| {
+        let run_once = || {
+            let status = std::process::Command::new(compiler)
+                .args([
+                    "--style",
+                    "fluent",
+                    "--format",
+                    "rust",
+                    "-o",
+                    output.to_str().expect("non-utf8 benchmark output path"),
+                    input.to_str().expect("non-utf8 benchmark input path"),
+                ])
+                .status()
+                .expect("failed to run slint-compiler benchmark command");
+            assert!(status.success(), "{} failed", compiler.display());
+        };
+        run_once();
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            run_once();
+        }
+        t.elapsed().as_secs_f64() * 1000.0 / iters as f64
+    };
+
+    let without_artifacts_ms = mean_ms(&without_artifacts);
+    let with_artifacts_ms = mean_ms(&with_artifacts);
+
+    eprintln!("\nslint-compiler end-to-end ({iters} fresh processes each):");
+    eprintln!("  without frozen artifacts : {without_artifacts_ms:7.2} ms");
+    eprintln!("  with frozen artifacts    : {with_artifacts_ms:7.2} ms");
+    eprintln!(
+        "  => saving                : {:7.2} ms ({:5.1}%)",
+        without_artifacts_ms - with_artifacts_ms,
+        (without_artifacts_ms - with_artifacts_ms) * 100.0 / without_artifacts_ms
+    );
+
+    std::fs::remove_file(&input).ok();
+    std::fs::remove_file(&output).ok();
+}
+
 #[test]
 fn test_dependency_loading() {
     let test_source_path: PathBuf =
@@ -3168,6 +3321,14 @@ fn test_compiled_generated_builtin_artifact_matches_source_loaded_builtin_surfac
             source_loaded.slider_surface, generated_artifact.slider_surface,
             "Slider builtin surface differs for style {style}"
         );
+        assert_eq!(
+            source_loaded.groupbox_api, generated_artifact.groupbox_api,
+            "GroupBox builtin API differs for style {style}"
+        );
+        assert_eq!(
+            source_loaded.combobox_api, generated_artifact.combobox_api,
+            "ComboBox builtin API differs for style {style}"
+        );
     }
 }
 
@@ -3176,6 +3337,8 @@ struct BuiltinArtifactParityFixture {
     diagnostics: Vec<String>,
     button_surface: String,
     slider_surface: String,
+    groupbox_api: String,
+    combobox_api: String,
 }
 
 #[cfg(test)]
@@ -3191,7 +3354,7 @@ fn compile_builtin_artifact_parity_fixture(
     }
 
     let source = r#"
-        import { Button, Slider } from "std-widgets.slint";
+        import { Button, ComboBox, GroupBox, Slider } from "std-widgets.slint";
         export component Test inherits Rectangle {
             width: 120px;
             height: 80px;
@@ -3205,6 +3368,16 @@ fn compile_builtin_artifact_parity_fixture(
                 }
                 Slider {
                     value: root.value;
+                }
+                GroupBox {
+                    title: "Options";
+                    Button {
+                        text: "Nested";
+                    }
+                }
+                ComboBox {
+                    model: ["One", "Two"];
+                    current-index: 1;
                 }
             }
         }
@@ -3222,6 +3395,18 @@ fn compile_builtin_artifact_parity_fixture(
     let slider =
         spin_on::spin_on(loader.import_component("std-widgets.slint", "Slider", &mut import_diags))
             .expect("Slider should import for parity fixture");
+    let groupbox = spin_on::spin_on(loader.import_component(
+        "std-widgets.slint",
+        "GroupBox",
+        &mut import_diags,
+    ))
+    .expect("GroupBox should import for parity fixture");
+    let combobox = spin_on::spin_on(loader.import_component(
+        "std-widgets.slint",
+        "ComboBox",
+        &mut import_diags,
+    ))
+    .expect("ComboBox should import for parity fixture");
 
     let mut diagnostics = compile_diags.to_string_vec();
     diagnostics.extend(import_diags.to_string_vec());
@@ -3229,7 +3414,31 @@ fn compile_builtin_artifact_parity_fixture(
         diagnostics,
         button_surface: summarize_component_surface(&button),
         slider_surface: summarize_component_surface(&slider),
+        groupbox_api: summarize_component_api(&groupbox, &["content-padding", "enabled", "title"]),
+        combobox_api: summarize_component_api(
+            &combobox,
+            &["current-index", "current-value", "enabled", "has-focus", "model", "selected"],
+        ),
     }
+}
+
+#[cfg(test)]
+fn summarize_component_api(component: &Rc<object_tree::Component>, properties: &[&str]) -> String {
+    let mut root_properties = component
+        .root_element
+        .borrow()
+        .property_declarations
+        .iter()
+        .filter(|(name, _)| properties.contains(&name.as_str()))
+        .map(|(name, declaration)| format!("{name}:{}", declaration.property_type))
+        .collect::<Vec<_>>();
+    root_properties.sort();
+    format!(
+        "component:{}\nchildren:{}\nproperties:{}",
+        component.id,
+        component.child_insertion_point.borrow().is_some(),
+        root_properties.join(",")
+    )
 }
 
 #[cfg(test)]
