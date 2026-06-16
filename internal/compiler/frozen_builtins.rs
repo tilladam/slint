@@ -53,6 +53,11 @@ impl FrozenBuiltinCacheKey {
         if !compiler_config.include_paths.is_empty() {
             return None;
         }
+        // The current artifact stores enough semantic metadata for interpreter-style inlined
+        // builtin use, but not full binding bodies for Rust/C++ code generation.
+        if !compiler_config.inline_all_elements {
+            return None;
+        }
         if compiler_config.open_import_callback.is_some()
             || compiler_config.resource_url_mapper.is_some()
         {
