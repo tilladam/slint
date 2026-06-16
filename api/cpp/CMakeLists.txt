@@ -178,7 +178,7 @@ if(SLINT_FEATURE_COMPILER AND NOT SLINT_COMPILER)
         PROPERTY CORROSION_NO_DEFAULT_FEATURES
         ON
     )
-    list(APPEND slint_compiler_features "software-renderer" "bundle-translations" "cpp")
+    list(APPEND slint_compiler_features "software-renderer" "bundle-translations" "cpp" "frozen-builtin-artifacts")
 
     # Switch to dlopening fontconfig in the slint-compiler to avoid the issue that
     # for example in Yocto environments, PKG_CONFIG_PATH will be set to the target only
