@@ -939,6 +939,36 @@ fn sanitize_artifact_file_stem(style: &str) -> String {
         .collect()
 }
 
+#[cfg(feature = "frozen-builtin-artifacts")]
+fn render_frozen_builtin_artifact_manifest(
+    module_path: &Path,
+    entries: &[(String, crate::frozen_builtins::FrozenBuiltinCacheKey, PathBuf, u64)],
+) -> String {
+    let mut manifest = String::from("schema=frozen-builtin-artifacts-v0\n");
+    manifest.push_str(&format!("module={}\n", module_path.display()));
+    manifest.push_str(&format!("artifact_count={}\n", entries.len()));
+
+    for (index, (style, key, path, size)) in entries.iter().enumerate() {
+        manifest.push_str(&format!("\n[artifact.{index}]\n"));
+        manifest.push_str(&format!("style={style}\n"));
+        manifest.push_str(&format!("path={}\n", path.display()));
+        manifest.push_str(&format!("bytes={size}\n"));
+        manifest.push_str(&format!("key.resolved_style={}\n", key.resolved_style));
+        manifest.push_str(&format!("key.enable_experimental={}\n", key.enable_experimental));
+        manifest.push_str(&format!("key.debug_hooks={}\n", key.debug_hooks));
+        manifest.push_str(&format!(
+            "key.translation_domain={}\n",
+            key.translation_domain.as_deref().unwrap_or("")
+        ));
+        manifest.push_str(&format!(
+            "key.default_translation_context={:?}\n",
+            key.default_translation_context
+        ));
+    }
+
+    manifest
+}
+
 impl TypeLoader {
     #[cfg(feature = "frozen-builtin-artifacts")]
     pub fn generate_frozen_builtin_artifact_files(
@@ -950,6 +980,7 @@ impl TypeLoader {
         })?;
 
         let mut entries = Vec::new();
+        let mut manifest_entries = Vec::new();
         for style in styles {
             let mut compiler_config =
                 CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
@@ -982,6 +1013,17 @@ export component Test inherits Button {}"#;
             std::fs::write(&artifact_path, artifact).map_err(|err| {
                 format!("failed to write artifact {}: {err}", artifact_path.display())
             })?;
+            let artifact_size = std::fs::metadata(&artifact_path)
+                .map_err(|err| {
+                    format!("failed to stat artifact {}: {err}", artifact_path.display())
+                })?
+                .len();
+            manifest_entries.push((
+                style.clone(),
+                key.clone(),
+                artifact_path.clone(),
+                artifact_size,
+            ));
             entries.push((key, artifact_path));
         }
 
@@ -990,6 +1032,12 @@ export component Test inherits Button {}"#;
         let module_path = artifact_dir.join("frozen_builtin_artifacts.rs");
         std::fs::write(&module_path, module_source)
             .map_err(|err| format!("failed to write module {}: {err}", module_path.display()))?;
+        let manifest_path = artifact_dir.join("frozen_builtin_artifacts.manifest");
+        std::fs::write(
+            &manifest_path,
+            render_frozen_builtin_artifact_manifest(&module_path, &manifest_entries),
+        )
+        .map_err(|err| format!("failed to write manifest {}: {err}", manifest_path.display()))?;
         Ok(module_path)
     }
 

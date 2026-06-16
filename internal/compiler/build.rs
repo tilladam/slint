@@ -49,6 +49,12 @@ fn widget_library() -> &'static [(&'static str, &'static BuiltinDirectory<'stati
     {
         let generated_artifact_module = PathBuf::from(generated_artifact_module);
         println!("cargo:rerun-if-changed={}", generated_artifact_module.display());
+        if let Some(manifest_dir) = generated_artifact_module.parent() {
+            let manifest_path = manifest_dir.join("frozen_builtin_artifacts.manifest");
+            if manifest_path.exists() {
+                println!("cargo:rerun-if-changed={}", manifest_path.display());
+            }
+        }
         std::fs::copy(&generated_artifact_module, &frozen_artifact_output_file_path)?;
     } else {
         let mut frozen_artifact_file =
