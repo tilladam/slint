@@ -945,6 +945,10 @@ fn render_frozen_builtin_artifact_manifest(
     entries: &[(String, crate::frozen_builtins::FrozenBuiltinCacheKey, PathBuf, u64)],
 ) -> String {
     let mut manifest = String::from("schema=frozen-builtin-artifacts-v0\n");
+    manifest.push_str(&format!(
+        "artifact_schema_version={}\n",
+        crate::frozen_builtins::FROZEN_BUILTIN_SCHEMA_VERSION
+    ));
     manifest.push_str(&format!("module={}\n", module_path.display()));
     manifest.push_str(&format!("artifact_count={}\n", entries.len()));
 
@@ -1122,11 +1126,11 @@ export component Test inherits Button {}"#;
         resolved_style: &str,
     ) -> Option<Self> {
         let frozen = Self::cached_frozen_builtin_metadata(compiler_config, resolved_style)?;
-        Some(Self::rehydrate_frozen_builtin_artifact(
+        Self::rehydrate_frozen_builtin_artifact(
             compiler_config.clone(),
             resolved_style.into(),
             &frozen,
-        ))
+        )
     }
 
     fn restore_generated_builtin_artifact_for(
@@ -1150,7 +1154,7 @@ export component Test inherits Button {}"#;
     ) -> Option<Self> {
         let frozen =
             postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(artifact).ok()?;
-        Some(Self::rehydrate_frozen_builtin_artifact(compiler_config, resolved_style, &frozen))
+        Self::rehydrate_frozen_builtin_artifact(compiler_config, resolved_style, &frozen)
     }
 
     #[cfg(not(any(test, feature = "frozen-builtin-artifacts")))]
@@ -1166,7 +1170,11 @@ export component Test inherits Button {}"#;
         compiler_config: CompilerConfiguration,
         resolved_style: String,
         frozen: &crate::frozen_builtins::FrozenBuiltinLibrary,
-    ) -> Self {
+    ) -> Option<Self> {
+        if !frozen.is_supported_schema_version() {
+            return None;
+        }
+
         let global_type_registry = frozen.rehydrate_parent_registry();
         let builtin_registry = frozen.rehydrate_component_skeletons(&global_type_registry);
         let mut all_documents = LoadedDocuments::default();
@@ -1229,7 +1237,7 @@ export component Test inherits Button {}"#;
             all_documents.docs.insert(path, (LoadedDocument::Document(document), Vec::new()));
         }
 
-        Self { global_type_registry, compiler_config, resolved_style, all_documents }
+        Some(Self { global_type_registry, compiler_config, resolved_style, all_documents })
     }
 
     pub(crate) fn store_builtin_semantic_cache(&self) {
@@ -1324,6 +1332,7 @@ export component Test inherits Button {}"#;
             .collect::<Vec<_>>();
         documents.sort_by(|lhs, rhs| lhs.path.cmp(&rhs.path));
         crate::frozen_builtins::FrozenBuiltinLibrary {
+            schema_version: crate::frozen_builtins::FROZEN_BUILTIN_SCHEMA_VERSION,
             parent_registry: self.global_type_registry.borrow().freeze_builtin_registry_metadata(),
             documents,
         }
@@ -2456,43 +2465,55 @@ fn bench_snapshot_vs_recompile() {
     });
     let frozen_loader_rehydrate_ms = mean_ms(&|| {
         let frozen = crate::frozen_builtins::get(&frozen_key).expect("frozen metadata cache miss");
-        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
-            cached_cc.clone(),
-            "fluent".into(),
-            &frozen,
-        ));
+        std::hint::black_box(
+            TypeLoader::rehydrate_frozen_builtin_artifact(
+                cached_cc.clone(),
+                "fluent".into(),
+                &frozen,
+            )
+            .expect("frozen artifact restore failed"),
+        );
     });
     let frozen_decode_loader_rehydrate_ms = mean_ms(&|| {
         let frozen =
             serde_json::from_slice::<crate::frozen_builtins::FrozenBuiltinLibrary>(&frozen_encoded)
                 .expect("frozen artifact decode failed");
-        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
-            cached_cc.clone(),
-            "fluent".into(),
-            &frozen,
-        ));
+        std::hint::black_box(
+            TypeLoader::rehydrate_frozen_builtin_artifact(
+                cached_cc.clone(),
+                "fluent".into(),
+                &frozen,
+            )
+            .expect("decoded frozen artifact restore failed"),
+        );
     });
     let frozen_binary_decode_loader_rehydrate_ms = mean_ms(&|| {
         let frozen = postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(
             &frozen_binary_encoded,
         )
         .expect("binary artifact decode failed");
-        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
-            cached_cc.clone(),
-            "fluent".into(),
-            &frozen,
-        ));
+        std::hint::black_box(
+            TypeLoader::rehydrate_frozen_builtin_artifact(
+                cached_cc.clone(),
+                "fluent".into(),
+                &frozen,
+            )
+            .expect("binary frozen artifact restore failed"),
+        );
     });
     let frozen_binary_file_loader_rehydrate_ms = mean_ms(&|| {
         let encoded =
             std::fs::read(&frozen_binary_artifact_path).expect("binary artifact read failed");
         let frozen = postcard::from_bytes::<crate::frozen_builtins::FrozenBuiltinLibrary>(&encoded)
             .expect("binary artifact decode failed");
-        std::hint::black_box(TypeLoader::rehydrate_frozen_builtin_artifact(
-            cached_cc.clone(),
-            "fluent".into(),
-            &frozen,
-        ));
+        std::hint::black_box(
+            TypeLoader::rehydrate_frozen_builtin_artifact(
+                cached_cc.clone(),
+                "fluent".into(),
+                &frozen,
+            )
+            .expect("file-backed binary frozen artifact restore failed"),
+        );
     });
     let generated_loader_rehydrate_ms = mean_ms(&|| {
         std::hint::black_box(
@@ -2737,6 +2758,7 @@ fn test_frozen_builtin_metadata_is_process_global_safe() {
     assert!(!compile_diags.has_errors());
 
     let frozen = loader.freeze_builtin_semantic_metadata();
+    assert_eq!(frozen.schema_version, crate::frozen_builtins::FROZEN_BUILTIN_SCHEMA_VERSION);
     let std_widgets = frozen
         .documents
         .iter()
@@ -2817,7 +2839,8 @@ fn test_frozen_builtin_artifact_rehydrates_loader_documents() {
     let frozen = TypeLoader::cached_frozen_builtin_metadata(&compiler_config, "fluent")
         .expect("frozen builtin metadata should be cached");
     let mut loader =
-        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &frozen);
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &frozen)
+            .expect("frozen artifact should rehydrate");
 
     assert!(loader.get_document(Path::new("builtin:/fluent/std-widgets.slint")).is_some());
     assert!(loader.get_document(Path::new("builtin:/fluent/style-base.slint")).is_some());
@@ -2854,7 +2877,8 @@ fn test_frozen_builtin_artifact_serialization_round_trip_rehydrates_loader() {
         serde_json::from_slice(&encoded).expect("frozen artifact should deserialize");
 
     let mut loader =
-        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded);
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded)
+            .expect("decoded frozen artifact should rehydrate");
 
     let mut import_diags = BuildDiagnostics::default();
     let button =
@@ -2868,6 +2892,32 @@ fn test_frozen_builtin_artifact_serialization_round_trip_rehydrates_loader() {
         parent_registry.borrow().lookup_element("Platform"),
         Ok(langtype::ElementType::Component(component)) if component.is_global()
     ));
+}
+
+#[test]
+fn test_frozen_builtin_artifact_rejects_unsupported_schema_version() {
+    let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    let source = r#"
+        import { Button } from "std-widgets.slint";
+        export component Test inherits Button {}
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, loader) = spin_on::spin_on(crate::compile_syntax_node(
+        doc_node,
+        parse_diags,
+        compiler_config.clone(),
+    ));
+    assert!(!compile_diags.has_errors());
+
+    let mut frozen = loader.freeze_builtin_semantic_metadata();
+    frozen.schema_version = crate::frozen_builtins::FROZEN_BUILTIN_SCHEMA_VERSION + 1;
+
+    assert!(
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &frozen,)
+            .is_none()
+    );
 }
 
 #[test]
@@ -2897,7 +2947,8 @@ fn test_frozen_builtin_binary_artifact_static_slice_rehydrates_loader() {
         postcard::from_bytes(static_artifact).expect("frozen artifact should deserialize");
 
     let mut loader =
-        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded);
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded)
+            .expect("binary frozen artifact should rehydrate");
     let mut import_diags = BuildDiagnostics::default();
     let button =
         spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
@@ -2935,7 +2986,8 @@ fn test_frozen_builtin_binary_artifact_file_rehydrates_loader() {
         postcard::from_bytes(&encoded).expect("frozen artifact should deserialize from file");
 
     let mut loader =
-        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded);
+        TypeLoader::rehydrate_frozen_builtin_artifact(compiler_config, "fluent".into(), &decoded)
+            .expect("file-backed binary frozen artifact should rehydrate");
     let mut import_diags = BuildDiagnostics::default();
     let button =
         spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))

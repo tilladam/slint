@@ -24,6 +24,8 @@ use crate::langtype::{ElementType, Type};
 use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, PropertyVisibility};
 use crate::typeregister::TypeRegister;
 
+pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 1;
+
 mod generated_builtin_artifacts {
     include!(concat!(env!("OUT_DIR"), "/frozen_builtin_artifacts.rs"));
 }
@@ -98,11 +100,16 @@ impl From<&crate::DefaultTranslationContext> for FrozenDefaultTranslationContext
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct FrozenBuiltinLibrary {
+    pub(crate) schema_version: u32,
     pub(crate) parent_registry: FrozenBuiltinRegistry,
     pub(crate) documents: Vec<FrozenBuiltinDocument>,
 }
 
 impl FrozenBuiltinLibrary {
+    pub(crate) fn is_supported_schema_version(&self) -> bool {
+        self.schema_version == FROZEN_BUILTIN_SCHEMA_VERSION
+    }
+
     pub(crate) fn rehydrate_parent_registry(&self) -> Rc<RefCell<TypeRegister>> {
         TypeRegister::rehydrate_builtin_registry_shell(&self.parent_registry)
     }
