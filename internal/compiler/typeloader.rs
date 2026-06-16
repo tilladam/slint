@@ -3062,6 +3062,30 @@ fn test_type_loader_new_uses_compiled_generated_builtin_artifact_if_present() {
 }
 
 #[test]
+fn test_type_loader_new_uses_compiled_generated_builtin_alias_artifact_if_present() {
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.style = Some("fluent-dark".into());
+    let key = TypeLoader::builtin_semantic_cache_key_for(&compiler_config, "fluent-dark")
+        .expect("generated artifact alias test key should be cacheable");
+    if crate::frozen_builtins::generated_artifact(&key).is_none() {
+        return;
+    }
+
+    let mut loader_diags = BuildDiagnostics::default();
+    let mut loader = TypeLoader::new(compiler_config, &mut loader_diags);
+    assert!(!loader_diags.has_errors());
+    assert!(loader.get_document(Path::new("builtin:/fluent/style-base.slint")).is_some());
+
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import from the compiled generated alias artifact");
+    assert!(!import_diags.has_errors());
+    assert_eq!(button.id.as_str(), "Button");
+}
+
+#[test]
 fn test_frozen_builtin_generated_artifact_table_is_compiled_in() {
     let mut compiler_config =
         CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
