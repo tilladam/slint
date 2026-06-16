@@ -932,6 +932,41 @@ struct BorrowedTypeLoader<'a> {
 }
 
 #[cfg(feature = "frozen-builtin-artifact-generation")]
+#[derive(Clone, Copy)]
+enum FrozenBuiltinArtifactGenerationMode {
+    Write,
+    Check,
+}
+
+#[cfg(feature = "frozen-builtin-artifact-generation")]
+impl FrozenBuiltinArtifactGenerationMode {
+    fn apply(self, path: &Path, content: &[u8], label: &str) -> Result<(), String> {
+        match self {
+            Self::Write => crate::fileaccess::write_file_if_changed(path, content)
+                .map_err(|err| format!("failed to write {label} {}: {err}", path.display())),
+            Self::Check => {
+                let existing = std::fs::read(path).map_err(|err| {
+                    format!(
+                        "frozen builtin {label} {} is missing or unreadable: {err}",
+                        path.display()
+                    )
+                })?;
+                if existing == content {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "frozen builtin {label} {} is stale; regenerate with \
+                         `cargo run -p slint-frozen-builtin-artifacts -- --out-dir {}`",
+                        path.display(),
+                        path.parent().unwrap_or_else(|| Path::new(".")).display()
+                    ))
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "frozen-builtin-artifact-generation")]
 fn sanitize_artifact_file_stem(style: &str) -> String {
     style
         .chars()
@@ -982,6 +1017,31 @@ impl TypeLoader {
         styles: &[String],
         artifact_dir: &Path,
     ) -> Result<PathBuf, String> {
+        Self::generate_frozen_builtin_artifact_files_with_mode(
+            styles,
+            artifact_dir,
+            FrozenBuiltinArtifactGenerationMode::Write,
+        )
+    }
+
+    #[cfg(feature = "frozen-builtin-artifact-generation")]
+    pub fn check_frozen_builtin_artifact_files(
+        styles: &[String],
+        artifact_dir: &Path,
+    ) -> Result<PathBuf, String> {
+        Self::generate_frozen_builtin_artifact_files_with_mode(
+            styles,
+            artifact_dir,
+            FrozenBuiltinArtifactGenerationMode::Check,
+        )
+    }
+
+    #[cfg(feature = "frozen-builtin-artifact-generation")]
+    fn generate_frozen_builtin_artifact_files_with_mode(
+        styles: &[String],
+        artifact_dir: &Path,
+        mode: FrozenBuiltinArtifactGenerationMode,
+    ) -> Result<PathBuf, String> {
         std::fs::create_dir_all(artifact_dir).map_err(|err| {
             format!("failed to create artifact directory {}: {err}", artifact_dir.display())
         })?;
@@ -993,9 +1053,12 @@ impl TypeLoader {
         let mut entries = Vec::new();
         let mut manifest_entries = Vec::new();
         for style in &styles {
-            let mut compiler_config =
+            let mut cache_key_config =
                 CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
-            compiler_config.style = Some(style.into());
+            cache_key_config.style = Some(style.into());
+            let mut compiler_config = cache_key_config.clone();
+            compiler_config.include_paths =
+                vec![PathBuf::from("/__slint_frozen_builtin_artifact_generation__")];
             let source = r#"import { Button } from "std-widgets.slint";
 export component Test inherits Button {}"#;
 
@@ -1013,7 +1076,7 @@ export component Test inherits Button {}"#;
                 ));
             }
 
-            let key = Self::builtin_semantic_cache_key_for(&compiler_config, style)
+            let key = Self::builtin_semantic_cache_key_for(&cache_key_config, style)
                 .ok_or_else(|| format!("style {style} is not cacheable"))?;
             let artifact = postcard::to_allocvec(&loader.freeze_builtin_semantic_metadata())
                 .map_err(|err| {
@@ -1021,14 +1084,8 @@ export component Test inherits Button {}"#;
                 })?;
             let artifact_path =
                 artifact_dir.join(format!("{}.postcard", sanitize_artifact_file_stem(style)));
-            crate::fileaccess::write_file_if_changed(&artifact_path, &artifact).map_err(|err| {
-                format!("failed to write artifact {}: {err}", artifact_path.display())
-            })?;
-            let artifact_size = std::fs::metadata(&artifact_path)
-                .map_err(|err| {
-                    format!("failed to stat artifact {}: {err}", artifact_path.display())
-                })?
-                .len();
+            mode.apply(&artifact_path, &artifact, "artifact")?;
+            let artifact_size = artifact.len() as u64;
             manifest_entries.push((
                 style.clone(),
                 key.clone(),
@@ -1041,13 +1098,10 @@ export component Test inherits Button {}"#;
         let module_source =
             crate::frozen_builtins::render_generated_artifacts_include_module(&entries);
         let module_path = artifact_dir.join("frozen_builtin_artifacts.rs");
-        crate::fileaccess::write_file_if_changed(&module_path, module_source.as_bytes())
-            .map_err(|err| format!("failed to write module {}: {err}", module_path.display()))?;
+        mode.apply(&module_path, module_source.as_bytes(), "module")?;
         let manifest_path = artifact_dir.join("frozen_builtin_artifacts.manifest");
         let manifest = render_frozen_builtin_artifact_manifest(&module_path, &manifest_entries);
-        crate::fileaccess::write_file_if_changed(&manifest_path, manifest.as_bytes()).map_err(
-            |err| format!("failed to write manifest {}: {err}", manifest_path.display()),
-        )?;
+        mode.apply(&manifest_path, manifest.as_bytes(), "manifest")?;
         Ok(module_path)
     }
 
@@ -3301,6 +3355,29 @@ fn test_frozen_builtin_artifact_file_generation_sorts_and_deduplicates_styles() 
     let module = std::fs::read_to_string(module_path).expect("generated module should be readable");
     assert!(module.contains("/fluent.postcard"));
     assert!(module.contains("/material.postcard"));
+
+    std::fs::remove_dir_all(&artifact_dir).ok();
+}
+
+#[test]
+#[cfg(feature = "frozen-builtin-artifact-generation")]
+fn test_frozen_builtin_artifact_file_check_detects_drift() {
+    let artifact_dir = std::env::temp_dir()
+        .join(format!("slint-frozen-builtin-artifact-check-{}", std::process::id()));
+    std::fs::remove_dir_all(&artifact_dir).ok();
+    let styles = ["fluent".into()];
+
+    TypeLoader::generate_frozen_builtin_artifact_files(&styles, &artifact_dir)
+        .expect("generated artifact files should be written");
+    TypeLoader::check_frozen_builtin_artifact_files(&styles, &artifact_dir)
+        .expect("fresh generated artifact files should pass check mode");
+
+    std::fs::write(artifact_dir.join("fluent.postcard"), b"stale")
+        .expect("artifact payload should be made stale");
+    let err = TypeLoader::check_frozen_builtin_artifact_files(&styles, &artifact_dir)
+        .expect_err("stale generated artifact files should fail check mode");
+    assert!(err.contains("fluent.postcard"));
+    assert!(err.contains("regenerate"));
 
     std::fs::remove_dir_all(&artifact_dir).ok();
 }

@@ -12,6 +12,7 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let mut out_dir = None;
+    let mut check = false;
     let mut styles = Vec::new();
     let mut args = std::env::args().skip(1);
 
@@ -24,6 +25,9 @@ fn run() -> Result<(), String> {
             }
             "--style" => {
                 styles.push(args.next().ok_or_else(|| "--style requires a style".to_string())?);
+            }
+            "--check" => {
+                check = true;
             }
             "--help" | "-h" => {
                 print_help();
@@ -38,10 +42,15 @@ fn run() -> Result<(), String> {
         styles.extend(i_slint_compiler::fileaccess::styles().into_iter().map(Into::into));
     }
 
-    let module_path =
+    let module_path = if check {
+        i_slint_compiler::typeloader::TypeLoader::check_frozen_builtin_artifact_files(
+            &styles, &out_dir,
+        )?
+    } else {
         i_slint_compiler::typeloader::TypeLoader::generate_frozen_builtin_artifact_files(
             &styles, &out_dir,
-        )?;
+        )?
+    };
     println!("{}", module_path.display());
     Ok(())
 }
@@ -50,6 +59,7 @@ fn print_help() {
     println!(
         "Usage: slint-frozen-builtin-artifacts --out-dir <dir> [--style <style> ...]\n\
          Generates postcard builtin cache files and frozen_builtin_artifacts.rs.\n\
+         Pass --check to verify that the files are current without rewriting them.\n\
          If no --style is specified, artifacts are generated for all embedded builtin styles."
     );
 }
