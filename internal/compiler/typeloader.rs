@@ -1018,7 +1018,7 @@ export component Test inherits Button {}"#;
                 })?;
             let artifact_path =
                 artifact_dir.join(format!("{}.postcard", sanitize_artifact_file_stem(style)));
-            std::fs::write(&artifact_path, artifact).map_err(|err| {
+            crate::fileaccess::write_file_if_changed(&artifact_path, &artifact).map_err(|err| {
                 format!("failed to write artifact {}: {err}", artifact_path.display())
             })?;
             let artifact_size = std::fs::metadata(&artifact_path)
@@ -1038,14 +1038,13 @@ export component Test inherits Button {}"#;
         let module_source =
             crate::frozen_builtins::render_generated_artifacts_include_module(&entries);
         let module_path = artifact_dir.join("frozen_builtin_artifacts.rs");
-        std::fs::write(&module_path, module_source)
+        crate::fileaccess::write_file_if_changed(&module_path, module_source.as_bytes())
             .map_err(|err| format!("failed to write module {}: {err}", module_path.display()))?;
         let manifest_path = artifact_dir.join("frozen_builtin_artifacts.manifest");
-        std::fs::write(
-            &manifest_path,
-            render_frozen_builtin_artifact_manifest(&module_path, &manifest_entries),
-        )
-        .map_err(|err| format!("failed to write manifest {}: {err}", manifest_path.display()))?;
+        let manifest = render_frozen_builtin_artifact_manifest(&module_path, &manifest_entries);
+        crate::fileaccess::write_file_if_changed(&manifest_path, manifest.as_bytes()).map_err(
+            |err| format!("failed to write manifest {}: {err}", manifest_path.display()),
+        )?;
         Ok(module_path)
     }
 
