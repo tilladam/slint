@@ -436,9 +436,13 @@ pub(crate) fn render_generated_artifacts_include_module(
     let mut source = String::new();
 
     for (index, (_key, path)) in entries.iter().enumerate() {
+        let file_name = path
+            .file_name()
+            .expect("generated artifact path should have a file name")
+            .to_string_lossy();
         source.push_str(&format!(
-            "static ARTIFACT_{index}: &[u8] = include_bytes!(r#\"{}\"#);\n",
-            path.display()
+            "static ARTIFACT_{index}: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{}\"));\n",
+            file_name
         ));
     }
     source.push('\n');

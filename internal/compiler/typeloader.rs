@@ -3115,6 +3115,26 @@ fn test_frozen_builtin_artifact_emits_generated_rust_module() {
 }
 
 #[test]
+fn test_frozen_builtin_artifact_emits_out_dir_include_module() {
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.style = Some("fluent".into());
+    let key = TypeLoader::builtin_semantic_cache_key_for(&compiler_config, "fluent")
+        .expect("generated artifact include module test key should be cacheable");
+    let source = crate::frozen_builtins::render_generated_artifacts_include_module(&[(
+        key,
+        PathBuf::from("/tmp/slint-frozen-builtin-artifacts/fluent.postcard"),
+    )]);
+
+    assert!(source.contains(
+        "static ARTIFACT_0: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/fluent.postcard\"));"
+    ));
+    assert!(!source.contains("/tmp/slint-frozen-builtin-artifacts/fluent.postcard"));
+    assert!(source.contains("key.resolved_style == \"fluent\""));
+    assert!(source.contains("pub(crate) fn artifact_count() -> usize {\n    1\n}"));
+}
+
+#[test]
 fn test_frozen_builtin_skeletons_rehydrate_into_registry() {
     let compiler_config = CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
     let source = r#"

@@ -12,10 +12,9 @@ fn main() -> std::io::Result<()> {
 
     println!("cargo:rerun-if-changed={}", library_dir.display());
 
-    let output_file_path = Path::new(&std::env::var_os("OUT_DIR").unwrap())
-        .join(Path::new("included_library").with_extension("rs"));
-    let frozen_artifact_output_file_path =
-        Path::new(&std::env::var_os("OUT_DIR").unwrap()).join("frozen_builtin_artifacts.rs");
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let output_file_path = out_dir.join(Path::new("included_library").with_extension("rs"));
+    let frozen_artifact_output_file_path = out_dir.join("frozen_builtin_artifacts.rs");
 
     let mut file = BufWriter::new(std::fs::File::create(&output_file_path)?);
     write!(
@@ -53,6 +52,17 @@ fn widget_library() -> &'static [(&'static str, &'static BuiltinDirectory<'stati
             let manifest_path = manifest_dir.join("frozen_builtin_artifacts.manifest");
             if manifest_path.exists() {
                 println!("cargo:rerun-if-changed={}", manifest_path.display());
+            }
+            for entry in manifest_dir.read_dir()? {
+                let entry = entry?;
+                let path = entry.path();
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension == std::ffi::OsStr::new("postcard"))
+                {
+                    println!("cargo:rerun-if-changed={}", path.display());
+                    std::fs::copy(&path, out_dir.join(path.file_name().unwrap()))?;
+                }
             }
         }
         std::fs::copy(&generated_artifact_module, &frozen_artifact_output_file_path)?;
