@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 const FROZEN_ARTIFACT_MODULE_FILE: &str = "frozen_builtin_artifacts.rs";
 const FROZEN_ARTIFACT_MANIFEST_FILE: &str = "frozen_builtin_artifacts.manifest";
+const FROZEN_ARTIFACT_MANIFEST_SCHEMA: &str = "frozen-builtin-artifacts-v0";
+const FROZEN_ARTIFACT_SCHEMA_VERSION: &str = "1";
 
 fn main() -> std::io::Result<()> {
     println!("cargo:rustc-check-cfg=cfg(slint_debug_property)");
@@ -99,18 +101,74 @@ fn copy_generated_frozen_builtin_artifacts(
         )
     })?;
     let manifest_path = manifest_dir.join(FROZEN_ARTIFACT_MANIFEST_FILE);
-    if manifest_path.exists() {
-        println!("cargo:rerun-if-changed={}", manifest_path.display());
-    }
-    for entry in manifest_dir.read_dir()? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().is_some_and(|extension| extension == std::ffi::OsStr::new("postcard")) {
-            println!("cargo:rerun-if-changed={}", path.display());
-            std::fs::copy(&path, out_dir.join(path.file_name().unwrap()))?;
+    copy_generated_frozen_builtin_artifact_payloads(&manifest_path, out_dir)?;
+    std::fs::copy(generated_artifact_module, frozen_artifact_output_file_path)?;
+    Ok(())
+}
+
+fn copy_generated_frozen_builtin_artifact_payloads(
+    manifest_path: &Path,
+    out_dir: &Path,
+) -> std::io::Result<()> {
+    println!("cargo:rerun-if-changed={}", manifest_path.display());
+    let manifest = std::fs::read_to_string(manifest_path)?;
+    let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut artifact_count = None;
+    let mut artifact_paths = Vec::new();
+    let mut has_manifest_schema = false;
+    let mut has_artifact_schema_version = false;
+
+    for line in manifest.lines() {
+        if line == format!("schema={FROZEN_ARTIFACT_MANIFEST_SCHEMA}") {
+            has_manifest_schema = true;
+        } else if line == format!("artifact_schema_version={FROZEN_ARTIFACT_SCHEMA_VERSION}") {
+            has_artifact_schema_version = true;
+        } else if let Some(count) = line.strip_prefix("artifact_count=") {
+            artifact_count = Some(count.parse::<usize>().map_err(|err| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid artifact_count in {}: {err}", manifest_path.display()),
+                )
+            })?);
+        } else if let Some(path) = line.strip_prefix("path=") {
+            let path = PathBuf::from(path);
+            let path = if path.is_absolute() { path } else { manifest_dir.join(path) };
+            artifact_paths.push(path);
         }
     }
-    std::fs::copy(generated_artifact_module, frozen_artifact_output_file_path)?;
+
+    if !has_manifest_schema {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} has unsupported manifest schema", manifest_path.display()),
+        ));
+    }
+    if !has_artifact_schema_version {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} has unsupported artifact schema version", manifest_path.display()),
+        ));
+    }
+    if artifact_count != Some(artifact_paths.len()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{} artifact_count does not match listed artifact paths",
+                manifest_path.display()
+            ),
+        ));
+    }
+
+    for path in artifact_paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+        let file_name = path.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("artifact path {} has no file name", path.display()),
+            )
+        })?;
+        std::fs::copy(&path, out_dir.join(file_name))?;
+    }
     Ok(())
 }
 
