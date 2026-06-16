@@ -1382,6 +1382,7 @@ export component Test inherits Button {}"#;
 
         crate::frozen_builtins::FrozenBuiltinElement {
             id: element.id.to_string(),
+            base_kind: crate::typeregister::element_type_kind(&element.base_type).into(),
             base_type,
             property_declarations,
             bindings,
@@ -3089,6 +3090,117 @@ fn test_type_loader_new_uses_compiled_generated_builtin_alias_artifact_if_presen
             .expect("Button should import from the compiled generated alias artifact");
     assert!(!import_diags.has_errors());
     assert_eq!(button.id.as_str(), "Button");
+}
+
+#[test]
+fn test_compiled_generated_builtin_artifact_matches_source_loaded_builtin_surface_if_present() {
+    if crate::frozen_builtins::generated_artifact_count() == 0 {
+        return;
+    }
+
+    for style in ["fluent", "fluent-dark"] {
+        let source_loaded = compile_builtin_artifact_parity_fixture(style, true);
+        let generated_artifact = compile_builtin_artifact_parity_fixture(style, false);
+
+        assert_eq!(
+            source_loaded.diagnostics, generated_artifact.diagnostics,
+            "diagnostics differ for style {style}"
+        );
+        assert_eq!(
+            source_loaded.button_surface, generated_artifact.button_surface,
+            "Button builtin surface differs for style {style}"
+        );
+        assert_eq!(
+            source_loaded.slider_surface, generated_artifact.slider_surface,
+            "Slider builtin surface differs for style {style}"
+        );
+    }
+}
+
+#[cfg(test)]
+struct BuiltinArtifactParityFixture {
+    diagnostics: Vec<String>,
+    button_surface: String,
+    slider_surface: String,
+}
+
+#[cfg(test)]
+fn compile_builtin_artifact_parity_fixture(
+    style: &str,
+    force_source_loaded_builtins: bool,
+) -> BuiltinArtifactParityFixture {
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.style = Some(style.into());
+    if force_source_loaded_builtins {
+        compiler_config.include_paths = vec![PathBuf::from("/__slint_source_loaded_builtin__")];
+    }
+
+    let source = r#"
+        import { Button, Slider } from "std-widgets.slint";
+        export component Test inherits Rectangle {
+            width: 120px;
+            height: 80px;
+            callback accepted();
+            in-out property <float> value;
+
+            VerticalLayout {
+                Button {
+                    text: "Accept";
+                    clicked => { root.accepted(); }
+                }
+                Slider {
+                    value: root.value;
+                }
+            }
+        }
+    "#;
+
+    let mut parse_diags = BuildDiagnostics::default();
+    let doc_node = crate::parser::parse(source.into(), None, &mut parse_diags);
+    let (_doc, compile_diags, mut loader) =
+        spin_on::spin_on(crate::compile_syntax_node(doc_node, parse_diags, compiler_config));
+
+    let mut import_diags = BuildDiagnostics::default();
+    let button =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Button", &mut import_diags))
+            .expect("Button should import for parity fixture");
+    let slider =
+        spin_on::spin_on(loader.import_component("std-widgets.slint", "Slider", &mut import_diags))
+            .expect("Slider should import for parity fixture");
+
+    let mut diagnostics = compile_diags.to_string_vec();
+    diagnostics.extend(import_diags.to_string_vec());
+    BuiltinArtifactParityFixture {
+        diagnostics,
+        button_surface: summarize_component_surface(&button),
+        slider_surface: summarize_component_surface(&slider),
+    }
+}
+
+#[cfg(test)]
+fn summarize_component_surface(component: &Rc<object_tree::Component>) -> String {
+    let mut summary = vec![format!("component:{}", component.id)];
+    summarize_element_surface(&component.root_element, 0, &mut summary);
+    summary.join("\n")
+}
+
+#[cfg(test)]
+fn summarize_element_surface(
+    element: &object_tree::ElementRc,
+    depth: usize,
+    summary: &mut Vec<String>,
+) {
+    let element = element.borrow();
+    summary.push(format!(
+        "{depth}:id={}:base={}:children={}",
+        element.id,
+        element.base_type,
+        element.children.len()
+    ));
+    for child in &element.children {
+        summarize_element_surface(child, depth + 1, summary);
+    }
 }
 
 #[test]

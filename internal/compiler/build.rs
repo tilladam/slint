@@ -8,7 +8,7 @@ const FROZEN_ARTIFACT_MODULE_FILE: &str = "frozen_builtin_artifacts.rs";
 const FROZEN_ARTIFACT_MANIFEST_FILE: &str = "frozen_builtin_artifacts.manifest";
 const FROZEN_ARTIFACT_DIR: &str = "frozen-builtin-artifacts";
 const FROZEN_ARTIFACT_MANIFEST_SCHEMA: &str = "frozen-builtin-artifacts-v0";
-const FROZEN_ARTIFACT_SCHEMA_VERSION: &str = "1";
+const FROZEN_ARTIFACT_SCHEMA_VERSION: &str = "3";
 
 fn main() -> std::io::Result<()> {
     println!("cargo:rustc-check-cfg=cfg(slint_debug_property)");

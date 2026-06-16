@@ -517,7 +517,19 @@ impl TypeRegister {
             elements,
             supported_property_animation_types,
             property_animation_type: self.property_animation_type.to_string(),
+            property_animation_element: match &self.property_animation_type {
+                ElementType::Builtin(builtin) => {
+                    Some(freeze_builtin_registry_element(builtin.name.as_str(), "builtin", builtin))
+                }
+                _ => None,
+            },
             empty_type: self.empty_type.to_string(),
+            empty_element: match &self.empty_type {
+                ElementType::Builtin(builtin) => {
+                    Some(freeze_builtin_registry_element(builtin.name.as_str(), "builtin", builtin))
+                }
+                _ => None,
+            },
             context_restricted_types,
             expose_internal_types: self.expose_internal_types,
         }
@@ -633,10 +645,26 @@ impl TypeRegister {
             Rc::make_mut(parent).additional_accepted_child_types = child_types;
         }
 
-        registry.property_animation_type =
-            registry.lookup_element(&frozen.property_animation_type).unwrap_or(ElementType::Error);
-        registry.empty_type =
-            registry.lookup_element(&frozen.empty_type).unwrap_or(ElementType::Error);
+        registry.property_animation_type = frozen
+            .property_animation_element
+            .as_ref()
+            .map(|element| {
+                ElementType::Builtin(Rc::new(rehydrate_builtin_registry_element(
+                    element, &registry,
+                )))
+            })
+            .unwrap_or_else(|| {
+                rehydrate_registry_element_reference(&registry, &frozen.property_animation_type)
+            });
+        registry.empty_type = frozen
+            .empty_element
+            .as_ref()
+            .map(|element| {
+                ElementType::Builtin(Rc::new(rehydrate_builtin_registry_element(
+                    element, &registry,
+                )))
+            })
+            .unwrap_or_else(|| rehydrate_registry_element_reference(&registry, &frozen.empty_type));
 
         Rc::new(RefCell::new(registry))
     }
@@ -1003,7 +1031,7 @@ impl TypeRegister {
 }
 
 #[allow(dead_code)]
-fn element_type_kind(element_type: &ElementType) -> &'static str {
+pub(crate) fn element_type_kind(element_type: &ElementType) -> &'static str {
     match element_type {
         ElementType::Builtin(_) => "builtin",
         ElementType::Component(_) => "component",
@@ -1231,6 +1259,33 @@ fn rehydrate_registry_element_base_type(
         "builtin" | "component" => registry.lookup_element(name).unwrap_or(ElementType::Error),
         _ => ElementType::Error,
     }
+}
+
+fn rehydrate_registry_element_reference(registry: &TypeRegister, name: &str) -> ElementType {
+    registry
+        .elements
+        .values()
+        .find_map(|element_type| {
+            let builtin = match element_type {
+                ElementType::Builtin(builtin) => Some(builtin.clone()),
+                ElementType::Component(component) => {
+                    let ElementType::Builtin(builtin) = &component.root_element.borrow().base_type
+                    else {
+                        return None;
+                    };
+                    Some(builtin.clone())
+                }
+                _ => None,
+            }?;
+            (builtin.name == name || builtin.native_class.class_name == name)
+                .then(|| ElementType::Builtin(builtin))
+        })
+        .or_else(|| registry.lookup_element(name).ok())
+        .unwrap_or_else(|| {
+            let mut builtin = BuiltinElement::new(Rc::new(NativeClass::new(name)));
+            builtin.name = SmolStr::new(name);
+            ElementType::Builtin(Rc::new(builtin))
+        })
 }
 
 fn rehydrate_root_property_declarations(

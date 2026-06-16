@@ -20,11 +20,11 @@ use std::sync::{Mutex, OnceLock};
 use smol_str::SmolStr;
 
 use crate::CompilerConfiguration;
-use crate::langtype::{ElementType, Type};
+use crate::langtype::{ElementType, Function, Type};
 use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, PropertyVisibility};
 use crate::typeregister::TypeRegister;
 
-pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 1;
+pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 3;
 
 mod generated_builtin_artifacts {
     include!(concat!(env!("OUT_DIR"), "/frozen_builtin_artifacts.rs"));
@@ -131,12 +131,14 @@ impl FrozenBuiltinLibrary {
             components.push((component, frozen_component));
         }
 
+        let context = FrozenBuiltinRehydrationContext::new(&registry);
         for (component, frozen_component) in components {
             Self::rehydrate_element_skeleton(
                 &frozen_component.root_element,
                 &component.root_element,
                 Rc::downgrade(&component),
                 &registry,
+                &context,
             );
         }
 
@@ -148,6 +150,7 @@ impl FrozenBuiltinLibrary {
         element: &ElementRc,
         enclosing_component: Weak<Component>,
         registry: &TypeRegister,
+        context: &FrozenBuiltinRehydrationContext,
     ) {
         let children = frozen_element
             .children
@@ -159,6 +162,7 @@ impl FrozenBuiltinLibrary {
                     &child_element,
                     enclosing_component.clone(),
                     registry,
+                    context,
                 );
                 child_element
             })
@@ -178,14 +182,45 @@ impl FrozenBuiltinLibrary {
 
         let mut element = element.borrow_mut();
         element.id = frozen_element.id.as_str().into();
-        element.base_type =
-            registry.lookup_element(&frozen_element.base_type).unwrap_or(ElementType::Error);
+        element.base_type = Self::rehydrate_element_base_type(
+            &frozen_element.base_kind,
+            &frozen_element.base_type,
+            registry,
+            context,
+        );
         element.property_declarations = property_declarations;
         element.enclosing_component = enclosing_component;
         element.children = children;
     }
 
+    fn rehydrate_element_base_type(
+        kind: &str,
+        name: &str,
+        registry: &TypeRegister,
+        context: &FrozenBuiltinRehydrationContext,
+    ) -> ElementType {
+        let base_type = match kind {
+            "builtin" | "native" => context.lookup_builtin_or_native(name),
+            "component" => registry
+                .lookup_element(name)
+                .unwrap_or_else(|_| context.lookup_builtin_or_native(name)),
+            "global" => ElementType::Global,
+            "interface" => ElementType::Interface,
+            _ => registry
+                .lookup_element(name)
+                .unwrap_or_else(|_| context.lookup_builtin_or_native(name)),
+        };
+        base_type
+    }
+
     fn rehydrate_type(name: &str, registry: &TypeRegister) -> Type {
+        if let Some(function) = Self::rehydrate_function_type(name, "callback", registry) {
+            return Type::Callback(Rc::new(function));
+        }
+        if let Some(function) = Self::rehydrate_function_type(name, "function", registry) {
+            return Type::Function(Rc::new(function));
+        }
+
         let ty = registry.lookup(name);
         if ty == Type::Invalid {
             match name {
@@ -195,6 +230,29 @@ impl FrozenBuiltinLibrary {
         } else {
             ty
         }
+    }
+
+    fn rehydrate_function_type(
+        name: &str,
+        kind: &str,
+        registry: &TypeRegister,
+    ) -> Option<Function> {
+        let signature = name.strip_prefix(kind)?.trim_start();
+        let (args, return_type) = signature.split_once("->")?;
+        let args = args.trim();
+        let args =
+            args.strip_prefix('(').and_then(|args| args.strip_suffix(')')).unwrap_or(args).trim();
+        let args = if args.is_empty() {
+            Vec::new()
+        } else {
+            args.split(',').map(|arg| Self::rehydrate_type(arg.trim(), registry)).collect()
+        };
+        let arg_names = std::iter::repeat_n(SmolStr::default(), args.len()).collect();
+        Some(Function {
+            return_type: Self::rehydrate_type(return_type.trim(), registry),
+            args,
+            arg_names,
+        })
     }
 
     fn rehydrate_visibility(visibility: &str) -> PropertyVisibility {
@@ -208,6 +266,43 @@ impl FrozenBuiltinLibrary {
             "fake" => PropertyVisibility::Fake,
             _ => PropertyVisibility::Private,
         }
+    }
+}
+
+struct FrozenBuiltinRehydrationContext {
+    builtin_or_native_by_name: HashMap<String, ElementType>,
+}
+
+impl FrozenBuiltinRehydrationContext {
+    fn new(registry: &TypeRegister) -> Self {
+        let mut builtin_or_native_by_name = HashMap::new();
+        for element_type in registry.all_elements().values() {
+            let ElementType::Builtin(builtin) = element_type else {
+                continue;
+            };
+            builtin_or_native_by_name.insert(builtin.name.to_string(), element_type.clone());
+            builtin_or_native_by_name
+                .insert(builtin.native_class.class_name.to_string(), element_type.clone());
+        }
+
+        let empty_type = registry.empty_type();
+        if let ElementType::Builtin(builtin) = &empty_type {
+            builtin_or_native_by_name.insert(builtin.name.to_string(), empty_type.clone());
+            builtin_or_native_by_name
+                .insert(builtin.native_class.class_name.to_string(), empty_type);
+        }
+
+        Self { builtin_or_native_by_name }
+    }
+
+    fn lookup_builtin_or_native(&self, name: &str) -> ElementType {
+        self.builtin_or_native_by_name.get(name).cloned().unwrap_or_else(|| {
+            let mut builtin = crate::langtype::BuiltinElement::new(Rc::new(
+                crate::langtype::NativeClass::new(name),
+            ));
+            builtin.name = SmolStr::new(name);
+            ElementType::Builtin(Rc::new(builtin))
+        })
     }
 }
 
@@ -262,6 +357,7 @@ pub(crate) struct FrozenBuiltinComponent {
 )]
 pub(crate) struct FrozenBuiltinElement {
     pub(crate) id: String,
+    pub(crate) base_kind: String,
     pub(crate) base_type: String,
     pub(crate) property_declarations: Vec<FrozenBuiltinPropertyDeclaration>,
     pub(crate) bindings: Vec<String>,
@@ -290,7 +386,9 @@ pub(crate) struct FrozenBuiltinRegistry {
     pub(crate) elements: Vec<FrozenBuiltinRegistryElement>,
     pub(crate) supported_property_animation_types: Vec<String>,
     pub(crate) property_animation_type: String,
+    pub(crate) property_animation_element: Option<FrozenBuiltinRegistryElement>,
     pub(crate) empty_type: String,
+    pub(crate) empty_element: Option<FrozenBuiltinRegistryElement>,
     pub(crate) context_restricted_types: Vec<FrozenBuiltinContextRestriction>,
     pub(crate) expose_internal_types: bool,
 }
