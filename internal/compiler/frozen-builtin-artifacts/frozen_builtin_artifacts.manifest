@@ -1,12 +1,12 @@
 schema=frozen-builtin-artifacts-v0
-artifact_schema_version=6
+artifact_schema_version=10
 module=internal/compiler/frozen-builtin-artifacts/frozen_builtin_artifacts.rs
 artifact_count=13
 
 [artifact.0]
 style=cosmic
 path=cosmic.postcard
-bytes=120910
+bytes=204107
 key.resolved_style=cosmic
 key.enable_experimental=false
 key.debug_hooks=false
@@ -16,7 +16,7 @@ key.default_translation_context=ComponentName
 [artifact.1]
 style=cosmic-dark
 path=cosmic-dark.postcard
-bytes=120910
+bytes=204055
 key.resolved_style=cosmic-dark
 key.enable_experimental=false
 key.debug_hooks=false
@@ -26,7 +26,7 @@ key.default_translation_context=ComponentName
 [artifact.2]
 style=cosmic-light
 path=cosmic-light.postcard
-bytes=120910
+bytes=204055
 key.resolved_style=cosmic-light
 key.enable_experimental=false
 key.debug_hooks=false
@@ -36,7 +36,7 @@ key.default_translation_context=ComponentName
 [artifact.3]
 style=cupertino
 path=cupertino.postcard
-bytes=122108
+bytes=206444
 key.resolved_style=cupertino
 key.enable_experimental=false
 key.debug_hooks=false
@@ -46,7 +46,7 @@ key.default_translation_context=ComponentName
 [artifact.4]
 style=cupertino-dark
 path=cupertino-dark.postcard
-bytes=122108
+bytes=204575
 key.resolved_style=cupertino-dark
 key.enable_experimental=false
 key.debug_hooks=false
@@ -56,7 +56,7 @@ key.default_translation_context=ComponentName
 [artifact.5]
 style=cupertino-light
 path=cupertino-light.postcard
-bytes=122108
+bytes=204512
 key.resolved_style=cupertino-light
 key.enable_experimental=false
 key.debug_hooks=false
@@ -66,7 +66,7 @@ key.default_translation_context=ComponentName
 [artifact.6]
 style=fluent
 path=fluent.postcard
-bytes=120469
+bytes=203924
 key.resolved_style=fluent
 key.enable_experimental=false
 key.debug_hooks=false
@@ -76,7 +76,7 @@ key.default_translation_context=ComponentName
 [artifact.7]
 style=fluent-dark
 path=fluent-dark.postcard
-bytes=120469
+bytes=203872
 key.resolved_style=fluent-dark
 key.enable_experimental=false
 key.debug_hooks=false
@@ -86,7 +86,7 @@ key.default_translation_context=ComponentName
 [artifact.8]
 style=fluent-light
 path=fluent-light.postcard
-bytes=120469
+bytes=203872
 key.resolved_style=fluent-light
 key.enable_experimental=false
 key.debug_hooks=false
@@ -96,7 +96,7 @@ key.default_translation_context=ComponentName
 [artifact.9]
 style=material
 path=material.postcard
-bytes=126631
+bytes=222431
 key.resolved_style=material
 key.enable_experimental=false
 key.debug_hooks=false
@@ -106,7 +106,7 @@ key.default_translation_context=ComponentName
 [artifact.10]
 style=material-dark
 path=material-dark.postcard
-bytes=126631
+bytes=222379
 key.resolved_style=material-dark
 key.enable_experimental=false
 key.debug_hooks=false
@@ -116,7 +116,7 @@ key.default_translation_context=ComponentName
 [artifact.11]
 style=material-light
 path=material-light.postcard
-bytes=126631
+bytes=222379
 key.resolved_style=material-light
 key.enable_experimental=false
 key.debug_hooks=false
@@ -126,7 +126,7 @@ key.default_translation_context=ComponentName
 [artifact.12]
 style=qt
 path=qt.postcard
-bytes=104785
+bytes=162649
 key.resolved_style=qt
 key.enable_experimental=false
 key.debug_hooks=false

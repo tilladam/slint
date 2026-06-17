@@ -1247,17 +1247,35 @@ export component Test inherits Button {}"#;
             let name_ident: crate::parser::SyntaxNode = doc_node.clone().into();
 
             let mut local_registry = TypeRegister::new(&global_type_registry);
+            for frozen_type in &frozen_document.inner_types {
+                if let Some((name, ty)) =
+                    crate::frozen_builtins::FrozenBuiltinLibrary::rehydrate_document_type(
+                        frozen_type,
+                        &builtin_registry,
+                    )
+                {
+                    local_registry.insert_type_with_name(ty, name);
+                }
+            }
             let inner_components = frozen_document
                 .components
                 .iter()
-                .filter_map(|component| match builtin_registry.lookup_element(&component.id) {
-                    Ok(langtype::ElementType::Component(component)) => {
-                        local_registry.add(component.clone());
-                        Some(component)
+                .filter_map(|component| {
+                    let document_component_id =
+                        format!("{}#{}", frozen_document.path, component.id);
+                    match builtin_registry.lookup_element(&document_component_id) {
+                        Ok(langtype::ElementType::Component(component)) => {
+                            local_registry.add(component.clone());
+                            Some(component)
+                        }
+                        _ => None,
                     }
-                    _ => None,
                 })
                 .collect::<Vec<_>>();
+            let local_components_by_id = inner_components
+                .iter()
+                .map(|component| (component.id.to_string(), component.clone()))
+                .collect::<std::collections::HashMap<_, _>>();
 
             let mut exports = Exports::default();
             let exports_to_add = frozen_document.exports.iter().filter_map(|export| {
@@ -1267,12 +1285,16 @@ export component Test inherits Button {}"#;
                 };
                 let exported = match export.kind {
                     crate::frozen_builtins::FrozenBuiltinExportKind::Component => {
-                        match builtin_registry.lookup_element(&export.name) {
-                            Ok(langtype::ElementType::Component(component)) => {
-                                itertools::Either::Left(component)
-                            }
-                            _ => return None,
-                        }
+                        let component =
+                            local_components_by_id.get(&export.name).cloned().or_else(|| {
+                                match builtin_registry.lookup_element(&export.name) {
+                                    Ok(langtype::ElementType::Component(component)) => {
+                                        Some(component)
+                                    }
+                                    _ => None,
+                                }
+                            })?;
+                        itertools::Either::Left(component)
                     }
                     crate::frozen_builtins::FrozenBuiltinExportKind::Type => {
                         let ty = builtin_registry.lookup(&export.name);
@@ -1359,6 +1381,27 @@ export component Test inherits Button {}"#;
                     return None;
                 };
 
+                let mut inner_types = document
+                    .inner_types
+                    .iter()
+                    .filter_map(Self::freeze_builtin_type_skeleton)
+                    .collect::<Vec<_>>();
+                inner_types.sort_by(|lhs, rhs| {
+                    let lhs = match lhs {
+                        crate::frozen_builtins::FrozenBuiltinType::Struct(struct_ty) => {
+                            &struct_ty.name
+                        }
+                        crate::frozen_builtins::FrozenBuiltinType::Enumeration { name, .. } => name,
+                    };
+                    let rhs = match rhs {
+                        crate::frozen_builtins::FrozenBuiltinType::Struct(struct_ty) => {
+                            &struct_ty.name
+                        }
+                        crate::frozen_builtins::FrozenBuiltinType::Enumeration { name, .. } => name,
+                    };
+                    lhs.cmp(rhs)
+                });
+
                 Some(crate::frozen_builtins::FrozenBuiltinDocument {
                     path: path.to_string_lossy().into_owned(),
                     imports: document.imports.iter().map(|import| import.file.clone()).collect(),
@@ -1385,6 +1428,7 @@ export component Test inherits Button {}"#;
                         .iter()
                         .map(Self::freeze_builtin_component_skeleton)
                         .collect(),
+                    inner_types,
                     inner_component_count: document.inner_components.len(),
                     inner_type_count: document.inner_types.len(),
                 })
@@ -1412,11 +1456,83 @@ export component Test inherits Button {}"#;
                     insertion_index: insertion_point.insertion_index,
                 }
             });
+        let mut root_element = Self::freeze_builtin_element_skeleton(&component.root_element);
+        if component.id.as_str() == "Palette" {
+            let mut declared = root_element
+                .property_declarations
+                .iter()
+                .map(|declaration| declaration.name.clone())
+                .collect::<std::collections::HashSet<_>>();
+            for property in [
+                "background",
+                "foreground",
+                "alternate-background",
+                "alternate-foreground",
+                "control-background",
+                "control-foreground",
+                "accent-background",
+                "accent-foreground",
+                "selection-background",
+                "selection-foreground",
+                "border",
+            ] {
+                if declared.insert(property.into()) {
+                    root_element.property_declarations.push(
+                        crate::frozen_builtins::FrozenBuiltinPropertyDeclaration {
+                            name: property.into(),
+                            ty: "brush".into(),
+                            visibility: "output".into(),
+                        },
+                    );
+                }
+            }
+            if declared.insert("color-scheme".into()) {
+                root_element.property_declarations.push(
+                    crate::frozen_builtins::FrozenBuiltinPropertyDeclaration {
+                        name: "color-scheme".into(),
+                        ty: "enum ColorScheme".into(),
+                        visibility: "input output".into(),
+                    },
+                );
+            }
+            root_element.property_declarations.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+        }
         crate::frozen_builtins::FrozenBuiltinComponent {
             id: component.id.to_string(),
-            root_element: Self::freeze_builtin_element_skeleton(&component.root_element),
+            root_element,
             child_insertion_point,
         }
+    }
+
+    fn freeze_builtin_type_skeleton(
+        ty: &langtype::Type,
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinType> {
+        Some(match ty {
+            langtype::Type::Struct(struct_ty) => {
+                let name = struct_ty.name.slint_name()?;
+                crate::frozen_builtins::FrozenBuiltinType::Struct(
+                    crate::frozen_builtins::FrozenBuiltinStruct {
+                        name: name.to_string(),
+                        fields: struct_ty
+                            .fields
+                            .iter()
+                            .map(|(name, ty)| crate::frozen_builtins::FrozenBuiltinStructField {
+                                name: name.to_string(),
+                                ty: ty.to_string(),
+                            })
+                            .collect(),
+                    },
+                )
+            }
+            langtype::Type::Enumeration(enumeration) => {
+                crate::frozen_builtins::FrozenBuiltinType::Enumeration {
+                    name: enumeration.name.to_string(),
+                    values: enumeration.values.iter().map(ToString::to_string).collect(),
+                    default_value: enumeration.default_value,
+                }
+            }
+            _ => return None,
+        })
     }
 
     fn element_path(
@@ -1439,11 +1555,14 @@ export component Test inherits Button {}"#;
         element: &object_tree::ElementRc,
     ) -> crate::frozen_builtins::FrozenBuiltinElement {
         let element = element.borrow();
-        let base_type = element
-            .base_type
-            .type_name()
-            .map(str::to_string)
-            .unwrap_or_else(|| element.base_type.to_string());
+        let base_type = match &element.base_type {
+            langtype::ElementType::Component(component) => component.id.to_string(),
+            _ => element
+                .base_type
+                .type_name()
+                .map(str::to_string)
+                .unwrap_or_else(|| element.base_type.to_string()),
+        };
         let mut property_declarations = element
             .property_declarations
             .iter()
@@ -1453,10 +1572,50 @@ export component Test inherits Button {}"#;
                 visibility: declaration.visibility.to_string(),
             })
             .collect::<Vec<_>>();
+        if matches!(element.base_type, langtype::ElementType::Global) {
+            let mut declared = property_declarations
+                .iter()
+                .map(|declaration| declaration.name.clone())
+                .collect::<std::collections::HashSet<_>>();
+            for (name, binding) in &element.bindings {
+                if !declared.insert(name.to_string()) {
+                    continue;
+                }
+                let ty = binding.borrow().expression.ty();
+                if ty == langtype::Type::Invalid {
+                    continue;
+                }
+                property_declarations.push(
+                    crate::frozen_builtins::FrozenBuiltinPropertyDeclaration {
+                        name: name.to_string(),
+                        ty: ty.to_string(),
+                        visibility: "output".into(),
+                    },
+                );
+            }
+        }
         property_declarations.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
-        let mut bindings = element.bindings.keys().map(ToString::to_string).collect::<Vec<_>>();
-        bindings.sort();
+        let mut bindings = element
+            .bindings
+            .iter()
+            .filter_map(|(name, binding)| {
+                let binding = binding.borrow();
+                let expression = Self::freeze_builtin_expression_skeleton(&binding.expression);
+                Some(crate::frozen_builtins::FrozenBuiltinBinding {
+                    name: name.to_string(),
+                    expression: expression?,
+                    priority: binding.priority,
+                    analysis_is_const: binding.analysis.as_ref().map(|analysis| analysis.is_const),
+                    two_way_bindings: binding
+                        .two_way_bindings
+                        .iter()
+                        .filter_map(Self::freeze_builtin_two_way_binding_skeleton)
+                        .collect(),
+                })
+            })
+            .collect::<Vec<_>>();
+        bindings.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
         let mut change_callbacks =
             element.change_callbacks.keys().map(ToString::to_string).collect::<Vec<_>>();
@@ -1471,6 +1630,270 @@ export component Test inherits Button {}"#;
             change_callbacks,
             children: element.children.iter().map(Self::freeze_builtin_element_skeleton).collect(),
         }
+    }
+
+    fn freeze_builtin_named_reference_skeleton(
+        reference: &crate::namedreference::NamedReference,
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinNamedReference> {
+        let element = reference.element();
+        let component = element.borrow().enclosing_component.upgrade()?;
+        Some(crate::frozen_builtins::FrozenBuiltinNamedReference {
+            component: component.id.to_string(),
+            element_path: Self::element_path(&component.root_element, &element)?,
+            property: reference.name().to_string(),
+        })
+    }
+
+    fn freeze_builtin_element_reference_skeleton(
+        element: &object_tree::ElementRc,
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinElementReference> {
+        let component = element.borrow().enclosing_component.upgrade()?;
+        Some(crate::frozen_builtins::FrozenBuiltinElementReference {
+            component: component.id.to_string(),
+            element_path: Self::element_path(&component.root_element, element)?,
+        })
+    }
+
+    fn freeze_builtin_two_way_binding_skeleton(
+        binding: &crate::expression_tree::TwoWayBinding,
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinTwoWayBinding> {
+        Some(match binding {
+            crate::expression_tree::TwoWayBinding::Property { property, field_access } => {
+                crate::frozen_builtins::FrozenBuiltinTwoWayBinding::Property {
+                    property: Self::freeze_builtin_named_reference_skeleton(property)?,
+                    field_access: field_access.iter().map(ToString::to_string).collect(),
+                }
+            }
+            crate::expression_tree::TwoWayBinding::ModelData { repeated_element, field_access } => {
+                let repeated_element = repeated_element.upgrade()?;
+                crate::frozen_builtins::FrozenBuiltinTwoWayBinding::ModelData {
+                    repeated_element: Self::freeze_builtin_element_reference_skeleton(
+                        &repeated_element,
+                    )?,
+                    field_access: field_access.iter().map(ToString::to_string).collect(),
+                }
+            }
+        })
+    }
+
+    fn freeze_builtin_callable_skeleton(
+        callable: &Callable,
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinCallable> {
+        Some(match callable {
+            Callable::Callback(reference) => {
+                crate::frozen_builtins::FrozenBuiltinCallable::Callback(
+                    Self::freeze_builtin_named_reference_skeleton(reference)?,
+                )
+            }
+            Callable::Function(reference) => {
+                crate::frozen_builtins::FrozenBuiltinCallable::Function(
+                    Self::freeze_builtin_named_reference_skeleton(reference)?,
+                )
+            }
+            Callable::Builtin(function) => {
+                crate::frozen_builtins::FrozenBuiltinCallable::Builtin(format!("{function:?}"))
+            }
+        })
+    }
+
+    fn freeze_builtin_expression_skeleton(
+        expression: &expression_tree::Expression,
+    ) -> Option<crate::frozen_builtins::FrozenBuiltinExpression> {
+        use crate::expression_tree::Expression;
+        Some(match expression {
+            Expression::Invalid => crate::frozen_builtins::FrozenBuiltinExpression::Invalid,
+            Expression::StringLiteral(value) => {
+                crate::frozen_builtins::FrozenBuiltinExpression::StringLiteral(value.to_string())
+            }
+            Expression::NumberLiteral(value, unit) => {
+                crate::frozen_builtins::FrozenBuiltinExpression::NumberLiteral {
+                    value: *value,
+                    unit: unit.to_string(),
+                }
+            }
+            Expression::BoolLiteral(value) => {
+                crate::frozen_builtins::FrozenBuiltinExpression::BoolLiteral(*value)
+            }
+            Expression::PropertyReference(reference) => {
+                crate::frozen_builtins::FrozenBuiltinExpression::PropertyReference(
+                    Self::freeze_builtin_named_reference_skeleton(reference)?,
+                )
+            }
+            Expression::FunctionParameterReference { index, ty } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::FunctionParameterReference {
+                    index: *index,
+                    ty: ty.to_string(),
+                }
+            }
+            Expression::StoreLocalVariable { name, value } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::StoreLocalVariable {
+                    name: name.to_string(),
+                    value: Box::new(Self::freeze_builtin_expression_skeleton(value)?),
+                }
+            }
+            Expression::ReadLocalVariable { name, ty } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::ReadLocalVariable {
+                    name: name.to_string(),
+                    ty: ty.to_string(),
+                }
+            }
+            Expression::StructFieldAccess { base, name } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::StructFieldAccess {
+                    base: Box::new(Self::freeze_builtin_expression_skeleton(base)?),
+                    name: name.to_string(),
+                }
+            }
+            Expression::Cast { from, to } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::Cast {
+                    from: Box::new(Self::freeze_builtin_expression_skeleton(from)?),
+                    to: to.to_string(),
+                }
+            }
+            Expression::CodeBlock(expressions) => {
+                crate::frozen_builtins::FrozenBuiltinExpression::CodeBlock(
+                    expressions
+                        .iter()
+                        .map(Self::freeze_builtin_expression_skeleton)
+                        .collect::<Option<Vec<_>>>()?,
+                )
+            }
+            Expression::FunctionCall { function, arguments, .. } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::FunctionCall {
+                    function: Self::freeze_builtin_callable_skeleton(function)?,
+                    arguments: arguments
+                        .iter()
+                        .map(Self::freeze_builtin_expression_skeleton)
+                        .collect::<Option<Vec<_>>>()?,
+                }
+            }
+            Expression::SelfAssignment { lhs, rhs, op, .. } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::SelfAssignment {
+                    lhs: Box::new(Self::freeze_builtin_expression_skeleton(lhs)?),
+                    rhs: Box::new(Self::freeze_builtin_expression_skeleton(rhs)?),
+                    op: *op,
+                }
+            }
+            Expression::BinaryExpression { lhs, rhs, op } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::BinaryExpression {
+                    lhs: Box::new(Self::freeze_builtin_expression_skeleton(lhs)?),
+                    rhs: Box::new(Self::freeze_builtin_expression_skeleton(rhs)?),
+                    op: *op,
+                }
+            }
+            Expression::UnaryOp { sub, op } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::UnaryOp {
+                    sub: Box::new(Self::freeze_builtin_expression_skeleton(sub)?),
+                    op: *op,
+                }
+            }
+            Expression::Condition { condition, true_expr, false_expr } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::Condition {
+                    condition: Box::new(Self::freeze_builtin_expression_skeleton(condition)?),
+                    true_expr: Box::new(Self::freeze_builtin_expression_skeleton(true_expr)?),
+                    false_expr: Box::new(Self::freeze_builtin_expression_skeleton(false_expr)?),
+                }
+            }
+            Expression::Array { element_ty, values } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::Array {
+                    element_ty: element_ty.to_string(),
+                    values: values
+                        .iter()
+                        .map(Self::freeze_builtin_expression_skeleton)
+                        .collect::<Option<Vec<_>>>()?,
+                }
+            }
+            Expression::Struct { ty, values } => {
+                let mut values = values
+                    .iter()
+                    .map(|(name, expression)| {
+                        Some(crate::frozen_builtins::FrozenBuiltinStructExpressionField {
+                            name: name.to_string(),
+                            expression: Self::freeze_builtin_expression_skeleton(expression)?,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                values.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+                crate::frozen_builtins::FrozenBuiltinExpression::Struct {
+                    ty: ty.to_string(),
+                    values,
+                }
+            }
+            Expression::LinearGradient { angle, stops } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::LinearGradient {
+                    angle: Box::new(Self::freeze_builtin_expression_skeleton(angle)?),
+                    stops: stops
+                        .iter()
+                        .map(|(color, stop)| {
+                            Some(crate::frozen_builtins::FrozenBuiltinGradientStop(
+                                Self::freeze_builtin_expression_skeleton(color)?,
+                                Self::freeze_builtin_expression_skeleton(stop)?,
+                            ))
+                        })
+                        .collect::<Option<Vec<_>>>()?,
+                }
+            }
+            Expression::RadialGradient { center, radius, stops } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::RadialGradient {
+                    center: match center {
+                        Some((x, y)) => Some((
+                            Box::new(Self::freeze_builtin_expression_skeleton(x)?),
+                            Box::new(Self::freeze_builtin_expression_skeleton(y)?),
+                        )),
+                        None => None,
+                    },
+                    radius: match radius {
+                        Some(radius) => {
+                            Some(Box::new(Self::freeze_builtin_expression_skeleton(radius)?))
+                        }
+                        None => None,
+                    },
+                    stops: stops
+                        .iter()
+                        .map(|(color, stop)| {
+                            Some(crate::frozen_builtins::FrozenBuiltinGradientStop(
+                                Self::freeze_builtin_expression_skeleton(color)?,
+                                Self::freeze_builtin_expression_skeleton(stop)?,
+                            ))
+                        })
+                        .collect::<Option<Vec<_>>>()?,
+                }
+            }
+            Expression::ConicGradient { from_angle, center, stops } => {
+                crate::frozen_builtins::FrozenBuiltinExpression::ConicGradient {
+                    from_angle: Box::new(Self::freeze_builtin_expression_skeleton(from_angle)?),
+                    center: match center {
+                        Some((x, y)) => Some((
+                            Box::new(Self::freeze_builtin_expression_skeleton(x)?),
+                            Box::new(Self::freeze_builtin_expression_skeleton(y)?),
+                        )),
+                        None => None,
+                    },
+                    stops: stops
+                        .iter()
+                        .map(|(color, stop)| {
+                            Some(crate::frozen_builtins::FrozenBuiltinGradientStop(
+                                Self::freeze_builtin_expression_skeleton(color)?,
+                                Self::freeze_builtin_expression_skeleton(stop)?,
+                            ))
+                        })
+                        .collect::<Option<Vec<_>>>()?,
+                }
+            }
+            Expression::ReturnStatement(expression) => {
+                crate::frozen_builtins::FrozenBuiltinExpression::ReturnStatement(
+                    expression.as_ref().and_then(|expression| {
+                        Self::freeze_builtin_expression_skeleton(expression).map(Box::new)
+                    }),
+                )
+            }
+            Expression::EnumerationValue(value) => {
+                crate::frozen_builtins::FrozenBuiltinExpression::EnumerationValue {
+                    enumeration: value.enumeration.name.to_string(),
+                    value: value.value,
+                }
+            }
+            _ => return None,
+        })
     }
 
     /// Drop a document from the TypeLoader and invalidate all of its dependencies.
