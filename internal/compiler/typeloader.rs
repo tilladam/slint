@@ -1369,6 +1369,31 @@ export component Test inherits Button {}"#;
     pub(crate) fn freeze_builtin_semantic_metadata(
         &self,
     ) -> crate::frozen_builtins::FrozenBuiltinLibrary {
+        let component_keys = self
+            .all_documents
+            .docs
+            .iter()
+            .filter_map(|(path, (document, _diagnostics))| {
+                if !path.starts_with("builtin:/") {
+                    return None;
+                }
+                let LoadedDocument::Document(document) = document else {
+                    return None;
+                };
+                Some((path, document))
+            })
+            .flat_map(|(path, document)| {
+                document.inner_components.iter().enumerate().map(move |(index, component)| {
+                    let key = if component.id.is_empty() {
+                        format!("{}#anonymous-component-{index}", path.to_string_lossy())
+                    } else {
+                        component.id.to_string()
+                    };
+                    (by_address::ByAddress(component.clone()), key)
+                })
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+
         let mut documents = self
             .all_documents
             .docs
@@ -1426,7 +1451,9 @@ export component Test inherits Button {}"#;
                     components: document
                         .inner_components
                         .iter()
-                        .map(Self::freeze_builtin_component_skeleton)
+                        .map(|component| {
+                            Self::freeze_builtin_component_skeleton(component, &component_keys)
+                        })
                         .collect(),
                     inner_types,
                     inner_component_count: document.inner_components.len(),
@@ -1444,6 +1471,10 @@ export component Test inherits Button {}"#;
 
     fn freeze_builtin_component_skeleton(
         component: &Rc<object_tree::Component>,
+        component_keys: &std::collections::HashMap<
+            by_address::ByAddress<Rc<object_tree::Component>>,
+            String,
+        >,
     ) -> crate::frozen_builtins::FrozenBuiltinComponent {
         let child_insertion_point =
             component.child_insertion_point.borrow().as_ref().map(|insertion_point| {
@@ -1456,7 +1487,8 @@ export component Test inherits Button {}"#;
                     insertion_index: insertion_point.insertion_index,
                 }
             });
-        let mut root_element = Self::freeze_builtin_element_skeleton(&component.root_element);
+        let mut root_element =
+            Self::freeze_builtin_element_skeleton(&component.root_element, component_keys);
         if component.id.as_str() == "Palette" {
             let mut declared = root_element
                 .property_declarations
@@ -1498,7 +1530,10 @@ export component Test inherits Button {}"#;
             root_element.property_declarations.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
         }
         crate::frozen_builtins::FrozenBuiltinComponent {
-            id: component.id.to_string(),
+            id: component_keys
+                .get(&by_address::ByAddress(component.clone()))
+                .cloned()
+                .unwrap_or_else(|| component.id.to_string()),
             root_element,
             child_insertion_point,
         }
@@ -1553,10 +1588,17 @@ export component Test inherits Button {}"#;
 
     fn freeze_builtin_element_skeleton(
         element: &object_tree::ElementRc,
+        component_keys: &std::collections::HashMap<
+            by_address::ByAddress<Rc<object_tree::Component>>,
+            String,
+        >,
     ) -> crate::frozen_builtins::FrozenBuiltinElement {
         let element = element.borrow();
         let base_type = match &element.base_type {
-            langtype::ElementType::Component(component) => component.id.to_string(),
+            langtype::ElementType::Component(component) => component_keys
+                .get(&by_address::ByAddress(component.clone()))
+                .cloned()
+                .unwrap_or_else(|| component.id.to_string()),
             _ => element
                 .base_type
                 .type_name()
@@ -1628,7 +1670,11 @@ export component Test inherits Button {}"#;
             property_declarations,
             bindings,
             change_callbacks,
-            children: element.children.iter().map(Self::freeze_builtin_element_skeleton).collect(),
+            children: element
+                .children
+                .iter()
+                .map(|child| Self::freeze_builtin_element_skeleton(child, component_keys))
+                .collect(),
         }
     }
 
@@ -1674,6 +1720,20 @@ export component Test inherits Button {}"#;
                 }
             }
         })
+    }
+
+    fn freeze_builtin_type_name(ty: &langtype::Type) -> String {
+        match ty {
+            langtype::Type::Struct(struct_ty)
+                if matches!(
+                    struct_ty.name,
+                    langtype::StructName::Builtin(langtype::BuiltinStruct::Color)
+                ) =>
+            {
+                "builtin-struct:Color".into()
+            }
+            _ => ty.to_string(),
+        }
     }
 
     fn freeze_builtin_callable_skeleton(
@@ -1722,7 +1782,7 @@ export component Test inherits Button {}"#;
             Expression::FunctionParameterReference { index, ty } => {
                 crate::frozen_builtins::FrozenBuiltinExpression::FunctionParameterReference {
                     index: *index,
-                    ty: ty.to_string(),
+                    ty: Self::freeze_builtin_type_name(ty),
                 }
             }
             Expression::StoreLocalVariable { name, value } => {
@@ -1734,7 +1794,7 @@ export component Test inherits Button {}"#;
             Expression::ReadLocalVariable { name, ty } => {
                 crate::frozen_builtins::FrozenBuiltinExpression::ReadLocalVariable {
                     name: name.to_string(),
-                    ty: ty.to_string(),
+                    ty: Self::freeze_builtin_type_name(ty),
                 }
             }
             Expression::StructFieldAccess { base, name } => {
@@ -1795,7 +1855,7 @@ export component Test inherits Button {}"#;
             }
             Expression::Array { element_ty, values } => {
                 crate::frozen_builtins::FrozenBuiltinExpression::Array {
-                    element_ty: element_ty.to_string(),
+                    element_ty: Self::freeze_builtin_type_name(element_ty),
                     values: values
                         .iter()
                         .map(Self::freeze_builtin_expression_skeleton)
@@ -3878,10 +3938,16 @@ fn summarize_element_surface(
     summary: &mut Vec<String>,
 ) {
     let element = element.borrow();
+    let base_type = if matches!(&element.base_type, langtype::ElementType::Component(component) if component.id.is_empty())
+    {
+        "Empty".into()
+    } else {
+        element.base_type.to_string()
+    };
     summary.push(format!(
         "{depth}:id={}:base={}:children={}",
         element.id,
-        element.base_type,
+        base_type,
         element.children.len()
     ));
     for child in &element.children {

@@ -21,12 +21,14 @@ use smol_str::SmolStr;
 
 use crate::CompilerConfiguration;
 use crate::expression_tree::{Callable, Expression, TwoWayBinding};
-use crate::langtype::{ElementType, Enumeration, Function, Struct, StructName, Type};
+use crate::langtype::{
+    BuiltinStruct, ElementType, Enumeration, Function, Struct, StructName, Type,
+};
 use crate::namedreference::NamedReference;
 use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, PropertyVisibility};
 use crate::typeregister::TypeRegister;
 
-pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 10;
+pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 11;
 
 mod generated_builtin_artifacts {
     include!(concat!(env!("OUT_DIR"), "/frozen_builtin_artifacts.rs"));
@@ -644,6 +646,7 @@ impl FrozenBuiltinLibrary {
         context: &FrozenBuiltinRehydrationContext,
     ) -> ElementType {
         let base_type = match kind {
+            "component" if name.is_empty() => registry.empty_type(),
             "builtin" | "native" => context.lookup_builtin_or_native(name),
             "component" => registry
                 .lookup_element(name)
@@ -658,6 +661,25 @@ impl FrozenBuiltinLibrary {
     }
 
     fn rehydrate_type(name: &str, registry: &TypeRegister) -> Type {
+        if let Some(name) = name.strip_prefix("builtin-struct:")
+            && name == "Color"
+        {
+            return Type::Struct(Rc::new(Struct {
+                fields: IntoIterator::into_iter([
+                    (SmolStr::new_static("red"), Type::Int32),
+                    (SmolStr::new_static("green"), Type::Int32),
+                    (SmolStr::new_static("blue"), Type::Int32),
+                    (SmolStr::new_static("alpha"), Type::Float32),
+                    (SmolStr::new_static("hue"), Type::Float32),
+                    (SmolStr::new_static("saturation"), Type::Float32),
+                    (SmolStr::new_static("value"), Type::Float32),
+                    (SmolStr::new_static("lightness"), Type::Float32),
+                    (SmolStr::new_static("chroma"), Type::Float32),
+                ])
+                .collect(),
+                name: BuiltinStruct::Color.into(),
+            }));
+        }
         if let Some(function) = Self::rehydrate_function_type(name, "callback", registry) {
             return Type::Callback(Rc::new(function));
         }

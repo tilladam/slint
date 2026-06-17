@@ -1369,6 +1369,12 @@ fn rehydrate_registry_component_root_base_type(
 
 fn rehydrate_registry_property_type(name: &str, registry: &TypeRegister) -> Type {
     let name = normalized_frozen_type_name(name);
+    if let Some(function) = rehydrate_registry_function_type(name, "callback", registry) {
+        return Type::Callback(Rc::new(function));
+    }
+    if let Some(function) = rehydrate_registry_function_type(name, "function", registry) {
+        return Type::Function(Rc::new(function));
+    }
     let ty = registry.lookup(name);
     if ty != Type::Invalid {
         return ty;
@@ -1377,6 +1383,29 @@ fn rehydrate_registry_property_type(name: &str, registry: &TypeRegister) -> Type
         "element ref" => Type::ElementReference,
         "void" => Type::Void,
         _ => Type::Invalid,
+    })
+}
+
+fn rehydrate_registry_function_type(
+    name: &str,
+    kind: &str,
+    registry: &TypeRegister,
+) -> Option<Function> {
+    let signature = name.strip_prefix(kind)?.trim_start();
+    let (args, return_type) = signature.split_once("->")?;
+    let args = args.trim();
+    let args =
+        args.strip_prefix('(').and_then(|args| args.strip_suffix(')')).unwrap_or(args).trim();
+    let args = if args.is_empty() {
+        Vec::new()
+    } else {
+        args.split(',').map(|arg| rehydrate_registry_property_type(arg.trim(), registry)).collect()
+    };
+    let arg_names = std::iter::repeat_n(SmolStr::default(), args.len()).collect();
+    Some(Function {
+        return_type: rehydrate_registry_property_type(return_type.trim(), registry),
+        args,
+        arg_names,
     })
 }
 
