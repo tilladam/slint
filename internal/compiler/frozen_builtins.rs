@@ -28,7 +28,7 @@ use crate::namedreference::NamedReference;
 use crate::object_tree::{Component, Element, ElementRc, PropertyDeclaration, PropertyVisibility};
 use crate::typeregister::TypeRegister;
 
-pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 11;
+pub(crate) const FROZEN_BUILTIN_SCHEMA_VERSION: u32 = 12;
 
 mod generated_builtin_artifacts {
     include!(concat!(env!("OUT_DIR"), "/frozen_builtin_artifacts.rs"));
@@ -242,7 +242,13 @@ impl FrozenBuiltinLibrary {
         registry: &TypeRegister,
         component_roots: &HashMap<String, ElementRc>,
     ) {
-        let bindings = frozen_element
+        // Mirror `rehydrate_element_skeleton`: a repeated element's bindings and children come from
+        // the frozen sub-component content, while its model lives on `repeated`.
+        let content = match &frozen_element.repeated {
+            Some(repeated) => &repeated.sub_component_root,
+            None => frozen_element,
+        };
+        let bindings = content
             .bindings
             .iter()
             .filter_map(|binding| {
@@ -276,7 +282,16 @@ impl FrozenBuiltinLibrary {
             })
             .collect();
         element.borrow_mut().bindings = bindings;
-        for (frozen_child, child) in frozen_element.children.iter().zip(&element.borrow().children)
+        if let Some(repeated) = &frozen_element.repeated {
+            if let Some(model) =
+                Self::rehydrate_expression(&repeated.model, registry, component_roots)
+            {
+                if let Some(info) = element.borrow_mut().repeated.as_mut() {
+                    info.model = model;
+                }
+            }
+        }
+        for (frozen_child, child) in content.children.iter().zip(&element.borrow().children)
         {
             Self::rehydrate_element_bindings(frozen_child, child, registry, component_roots);
         }
@@ -598,7 +613,17 @@ impl FrozenBuiltinLibrary {
         registry: &TypeRegister,
         context: &FrozenBuiltinRehydrationContext,
     ) {
-        let children = frozen_element
+        // `if`/`for` elements were frozen in their post-repeater-pass shape: the repeater pass had
+        // moved the real content into an anonymous sub-component, captured here in
+        // `sub_component_root`. Rehydrate from that content directly and re-mark the element as
+        // repeated, reproducing the pre-repeater shape that the consumer's own pass pipeline (which
+        // runs `process_repeater_components` again) expects.
+        let content = match &frozen_element.repeated {
+            Some(repeated) => &repeated.sub_component_root,
+            None => frozen_element,
+        };
+
+        let children = content
             .children
             .iter()
             .map(|child| {
@@ -615,7 +640,7 @@ impl FrozenBuiltinLibrary {
             .collect();
 
         let mut property_declarations = std::collections::BTreeMap::new();
-        for property in &frozen_element.property_declarations {
+        for property in &content.property_declarations {
             property_declarations.insert(
                 SmolStr::new(property.name.as_str()),
                 PropertyDeclaration {
@@ -627,16 +652,26 @@ impl FrozenBuiltinLibrary {
         }
 
         let mut element = element.borrow_mut();
-        element.id = frozen_element.id.as_str().into();
+        element.id = content.id.as_str().into();
         element.base_type = Self::rehydrate_element_base_type(
-            &frozen_element.base_kind,
-            &frozen_element.base_type,
+            &content.base_kind,
+            &content.base_type,
             registry,
             context,
         );
         element.property_declarations = property_declarations;
         element.enclosing_component = enclosing_component;
         element.children = children;
+        if let Some(repeated) = &frozen_element.repeated {
+            // The model is filled in the bindings phase, once element references resolve.
+            element.repeated = Some(crate::object_tree::RepeatedElementInfo {
+                model: crate::expression_tree::Expression::Invalid,
+                model_data_id: SmolStr::new(repeated.model_data_id.as_str()),
+                index_id: SmolStr::new(repeated.index_id.as_str()),
+                is_conditional_element: repeated.is_conditional_element,
+                is_listview: None,
+            });
+        }
     }
 
     fn rehydrate_element_base_type(
@@ -857,6 +892,25 @@ pub(crate) struct FrozenBuiltinElement {
     pub(crate) bindings: Vec<FrozenBuiltinBinding>,
     pub(crate) change_callbacks: Vec<String>,
     pub(crate) children: Vec<FrozenBuiltinElement>,
+    /// Set for `if`/`for` (repeated) elements. Holds the model/condition and the wrapped
+    /// repeated sub-component's root element, which the repeater pass otherwise moves into an
+    /// anonymous component that is not reachable through `base_type`/`children`.
+    pub(crate) repeated: Option<Box<FrozenBuiltinRepeated>>,
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(
+    any(test, feature = "frozen-builtin-artifact-generation"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub(crate) struct FrozenBuiltinRepeated {
+    /// The model (for `for`) or the boolean condition (for `if`).
+    pub(crate) model: FrozenBuiltinExpression,
+    pub(crate) model_data_id: String,
+    pub(crate) index_id: String,
+    pub(crate) is_conditional_element: bool,
+    /// Root element of the anonymous repeated sub-component (the actual repeated content).
+    pub(crate) sub_component_root: FrozenBuiltinElement,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

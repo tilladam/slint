@@ -1663,6 +1663,33 @@ export component Test inherits Button {}"#;
             element.change_callbacks.keys().map(ToString::to_string).collect::<Vec<_>>();
         change_callbacks.sort();
 
+        // `if`/`for` elements: the repeater pass moved the actual content into an anonymous
+        // sub-component referenced through `base_type`, and the model/condition lives in
+        // `element.repeated`. Capture both so codegen can reconstruct the repeated content
+        // (ListView delegates are not yet supported and fall back to the empty representation).
+        let repeated = element.repeated.as_ref().and_then(|info| {
+            // Only conditional (`if`) elements are supported so far. `for`-loop models and ListView
+            // delegates still need their model/model-data expressions handled, so fall back to the
+            // (content-less) representation for them rather than emitting something codegen chokes
+            // on. TODO: support `for` models and ListView delegates.
+            if !info.is_conditional_element || info.is_listview.is_some() {
+                return None;
+            }
+            let langtype::ElementType::Component(sub_component) = &element.base_type else {
+                return None;
+            };
+            Some(Box::new(crate::frozen_builtins::FrozenBuiltinRepeated {
+                model: Self::freeze_builtin_expression_skeleton(&info.model)?,
+                model_data_id: info.model_data_id.to_string(),
+                index_id: info.index_id.to_string(),
+                is_conditional_element: info.is_conditional_element,
+                sub_component_root: Self::freeze_builtin_element_skeleton(
+                    &sub_component.root_element,
+                    component_keys,
+                ),
+            }))
+        });
+
         crate::frozen_builtins::FrozenBuiltinElement {
             id: element.id.to_string(),
             base_kind: crate::typeregister::element_type_kind(&element.base_type).into(),
@@ -1675,6 +1702,7 @@ export component Test inherits Button {}"#;
                 .iter()
                 .map(|child| Self::freeze_builtin_element_skeleton(child, component_keys))
                 .collect(),
+            repeated,
         }
     }
 
@@ -3274,6 +3302,92 @@ export component Bench inherits Window {
 
     std::fs::remove_file(&input).ok();
     std::fs::remove_file(&output).ok();
+}
+
+/// Models rust-analyzer's proc-macro server, which expands each `slint!` on a *fresh thread*. That
+/// defeats the thread-local `BUILTIN_SEMANTIC_CACHE` (Layer 1 snapshot cache), so only the
+/// process-global frozen artifact (Layer 2/3) can carry builtin loading across expansions. The
+/// same-thread regime is the contrast (ordinary single rustc process where Layer 1 stays hot).
+///
+/// Run both arms and compare:
+/// `RUN_SLOW_BENCHES=1 cargo test --release -p i-slint-compiler typeloader::bench_thread_per_expansion -- --nocapture --exact`
+/// `RUN_SLOW_BENCHES=1 cargo test --release -p i-slint-compiler --features frozen-builtin-artifacts typeloader::bench_thread_per_expansion -- --nocapture --exact`
+#[test]
+fn bench_thread_per_expansion() {
+    if std::env::var("RUN_SLOW_BENCHES").is_err() {
+        return;
+    }
+    let iters: u32 =
+        std::env::var("SLINT_BENCH_ITERS").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
+
+    // The builtin-load path that the caches gate: construct a fresh TypeLoader (where the Layer
+    // 1/2/3 restore happens) and import a handful of std-widgets (forces the std-widgets library
+    // load + elaboration). This is the caching-sensitive work a `slint!` expansion pays; it
+    // deliberately avoids the full compile pipeline's cache *store* (which also freezes).
+    let compile_once = || {
+        let mut compiler_config =
+            CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+        compiler_config.style = Some("fluent".into());
+        let mut diag = BuildDiagnostics::default();
+        let mut loader = TypeLoader::new(compiler_config, &mut diag);
+        assert!(!diag.has_errors(), "loader construction should not error");
+        let mut import_diags = BuildDiagnostics::default();
+        for widget in ["Button", "ComboBox", "GroupBox", "Slider"] {
+            let component = spin_on::spin_on(loader.import_component(
+                "std-widgets.slint",
+                widget,
+                &mut import_diags,
+            ));
+            std::hint::black_box(component);
+        }
+        assert!(!import_diags.has_errors(), "widget imports should not error");
+    };
+
+    let on_fresh_thread = |f: &(dyn Fn() + Sync)| {
+        std::thread::scope(|scope| scope.spawn(|| f()).join().unwrap());
+    };
+
+    // Truly-cold first expansion: process-global caches (Layer 2/3) are still empty, on a pristine
+    // thread. Closest to the first `slint!` right after the proc-macro server starts.
+    let cold_first = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let start = std::time::Instant::now();
+                compile_once();
+                start.elapsed().as_secs_f64() * 1000.0
+            })
+            .join()
+            .unwrap()
+    });
+
+    // Same-thread regime: Layer 1 (thread-local) stays hot after the first compile.
+    let same_thread = {
+        compile_once(); // warm Layer 1 on this thread
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            compile_once();
+        }
+        start.elapsed().as_secs_f64() * 1000.0 / iters as f64
+    };
+
+    // Thread-per-expansion regime (rust-analyzer model): every compile runs on a fresh thread, so
+    // Layer 1 is always cold and only the process-global frozen artifact can help. Process-global
+    // caches are already warm here, so this is the warmed-server steady state.
+    let thread_per = {
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            on_fresh_thread(&compile_once);
+        }
+        start.elapsed().as_secs_f64() * 1000.0 / iters as f64
+    };
+
+    eprintln!(
+        "\nthread-per-expansion model ({iters} iters, fluent, frozen artifacts {}):",
+        if crate::frozen_builtins::generated_artifact_count() > 0 { "ON" } else { "OFF" }
+    );
+    eprintln!("  cold first expansion           : {cold_first:7.2} ms");
+    eprintln!("  same-thread (Layer-1 hot)      : {same_thread:7.2} ms/expansion");
+    eprintln!("  thread-per-expansion (RA model): {thread_per:7.2} ms/expansion");
 }
 
 #[test]
