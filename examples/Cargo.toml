@@ -37,6 +37,7 @@ members = [
   'bevy/slint-hosts-bevy',
   'bevy/bevy-hosts-slint',
   'bevy/bevy-hosts-slint-gpu',
+  'skia-wgpu-color-oracle',
   'servo',
 ]
 

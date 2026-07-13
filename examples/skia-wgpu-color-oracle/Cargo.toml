@@ -1,0 +1,22 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "skia-wgpu-color-oracle"
+version = "1.18.0"
+authors = ["Slint Developers <info@slint.dev>"]
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Headless raw-readback oracle for the Skia+WGPU offscreen color path (regression harness for the Ganesh vs Raster color mismatch)"
+
+[[bin]]
+name = "skia-wgpu-color-oracle"
+path = "main.rs"
+
+[dependencies]
+slint = { path = "../../api/rs/slint", default-features = false, features = ["renderer-skia", "unstable-wgpu-29", "std", "compat-1-2"] }
+# No `wgsl`: this example never compiles a wgpu shader — Skia renders via raw Metal and the
+# sentinel is a fixed-function clear.
+wgpu-29 = { package = "wgpu", version = "29", default-features = false, features = ["metal"] }
+spin_on = "0.1.1"

@@ -16,6 +16,7 @@ unsafe fn wrap_metal_texture(
     gr_context: &mut skia_safe::gpu::DirectContext,
     metal_handle: mtl::Handle,
     color_type: skia_safe::ColorType,
+    color_space: Option<skia_safe::ColorSpace>,
 ) -> Option<skia_safe::Surface> {
     unsafe {
         let texture_info = mtl::TextureInfo::new(metal_handle);
@@ -26,7 +27,7 @@ unsafe fn wrap_metal_texture(
             &backend_render_target,
             skia_safe::gpu::SurfaceOrigin::TopLeft,
             color_type,
-            None,
+            color_space,
             None,
         )
     }
@@ -46,13 +47,41 @@ pub unsafe fn make_metal_surface(
         let handle =
             metal_texture.raw_handle() as *const ProtocolObject<dyn MTLTexture> as mtl::Handle;
         let size = texture.size();
-        let color_type = match texture.format() {
+        let mut color_type = match texture.format() {
             wgpu::TextureFormat::Bgra8Unorm => skia_safe::ColorType::BGRA8888,
             wgpu::TextureFormat::Rgba8Unorm => skia_safe::ColorType::RGBA8888,
             wgpu::TextureFormat::Rgba8UnormSrgb => skia_safe::ColorType::SRGBA8888,
             _ => return None,
         };
-        wrap_metal_texture(size.width as i32, size.height as i32, gr_context, handle, color_type)
+        // Reproduction hooks (this branch only): env-select the SkColorType / SkColorSpace passed
+        // to wrap_backend_render_target, to explore rendering into an sRGB target. SKIA_CS=linear
+        // (skia's srgb-linear space) treats the sRGB target as what it is from the shader's side —
+        // linear in, hardware sRGB-encode on store — and renders solids correctly.
+        let mut color_space: Option<skia_safe::ColorSpace> = None;
+        if let Ok(ct) = std::env::var("SKIA_CT") {
+            color_type = match ct.as_str() {
+                "srgba8888" => skia_safe::ColorType::SRGBA8888,
+                "rgba8888" => skia_safe::ColorType::RGBA8888,
+                "bgra8888" => skia_safe::ColorType::BGRA8888,
+                other => panic!("unknown SKIA_CT={other}"),
+            };
+        }
+        if let Ok(cs) = std::env::var("SKIA_CS") {
+            color_space = match cs.as_str() {
+                "none" => None,
+                "srgb" => Some(skia_safe::ColorSpace::new_srgb()),
+                "linear" => Some(skia_safe::ColorSpace::new_srgb_linear()),
+                other => panic!("unknown SKIA_CS={other}"),
+            };
+        }
+        wrap_metal_texture(
+            size.width as i32,
+            size.height as i32,
+            gr_context,
+            handle,
+            color_type,
+            color_space,
+        )
     }
 }
 

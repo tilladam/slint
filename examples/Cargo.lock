@@ -13918,6 +13918,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "skia-wgpu-color-oracle"
+version = "1.18.0"
+dependencies = [
+ "slint",
+ "spin_on",
+ "wgpu",
+]
+
+[[package]]
 name = "skrifa"
 version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
