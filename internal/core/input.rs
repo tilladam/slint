@@ -42,6 +42,9 @@ pub enum MouseEvent {
         click_count: u8,
         /// The touch ID if the event originated from touch input.
         touch_finger_id: i32,
+        /// True when this press is the click that activated the window
+        /// (macOS "first mouse"). Always false on other platforms.
+        is_activation_click: bool,
     },
     /// The mouse or finger was released
     Released {
@@ -53,6 +56,9 @@ pub enum MouseEvent {
         click_count: u8,
         /// The touch ID if the event originated from touch input.
         touch_finger_id: i32,
+        /// True when this release belongs to the click that activated the
+        /// window (macOS "first mouse"). Always false on other platforms.
+        is_activation_click: bool,
     },
     /// The position of the pointer has changed
     Moved {
@@ -125,6 +131,16 @@ impl MouseEvent {
     pub fn is_from_touch(&self) -> bool {
         // touch events carry the finger id + 1, events from a mouse carry 0
         self.touch_finger_id() != 0
+    }
+
+    /// Whether this press or release belongs to the click that activated the
+    /// window (macOS "first mouse"). Always false for other event kinds.
+    pub fn is_activation_click(&self) -> bool {
+        match self {
+            MouseEvent::Pressed { is_activation_click, .. } => *is_activation_click,
+            MouseEvent::Released { is_activation_click, .. } => *is_activation_click,
+            _ => false,
+        }
     }
 
     /// The position of the cursor for this event, if any
@@ -211,6 +227,7 @@ pub enum BackendMouseEvent {
         button: PointerEventButton,
         click_count: u8,
         touch_finger_id: i32,
+        is_activation_click: bool,
     },
     /// The mouse or finger was released
     Released {
@@ -218,6 +235,7 @@ pub enum BackendMouseEvent {
         button: PointerEventButton,
         click_count: u8,
         touch_finger_id: i32,
+        is_activation_click: bool,
     },
     /// The position of the pointer has changed
     Moved { position: LogicalPoint, touch_finger_id: i32 },
@@ -234,12 +252,32 @@ pub enum BackendMouseEvent {
 impl From<BackendMouseEvent> for MouseEvent {
     fn from(event: BackendMouseEvent) -> Self {
         match event {
-            BackendMouseEvent::Pressed { position, button, click_count, touch_finger_id } => {
-                Self::Pressed { position, button, click_count, touch_finger_id }
-            }
-            BackendMouseEvent::Released { position, button, click_count, touch_finger_id } => {
-                Self::Released { position, button, click_count, touch_finger_id }
-            }
+            BackendMouseEvent::Pressed {
+                position,
+                button,
+                click_count,
+                touch_finger_id,
+                is_activation_click,
+            } => Self::Pressed {
+                position,
+                button,
+                click_count,
+                touch_finger_id,
+                is_activation_click,
+            },
+            BackendMouseEvent::Released {
+                position,
+                button,
+                click_count,
+                touch_finger_id,
+                is_activation_click,
+            } => Self::Released {
+                position,
+                button,
+                click_count,
+                touch_finger_id,
+                is_activation_click,
+            },
             BackendMouseEvent::Moved { position, touch_finger_id } => {
                 Self::Moved { position, touch_finger_id }
             }
@@ -1354,7 +1392,23 @@ impl ClickState {
     pub fn check_repeat(&self, mouse_event: MouseEvent, ctx: &crate::SlintContext) -> MouseEvent {
         let click_interval = ctx.platform().click_interval();
         match mouse_event {
-            MouseEvent::Pressed { position, button, touch_finger_id, .. } => {
+            MouseEvent::Pressed {
+                position, button, touch_finger_id, is_activation_click, ..
+            } => {
+                // A window-activating click (macOS "first mouse") never joins a
+                // multi-click sequence: it is typically suppressed by the items,
+                // and counting it would turn the next actual click into a
+                // double-click. Also don't let the following click chain onto it.
+                if is_activation_click {
+                    self.reset();
+                    return MouseEvent::Pressed {
+                        position,
+                        button,
+                        click_count: 0,
+                        touch_finger_id,
+                        is_activation_click,
+                    };
+                }
                 let instant_now = crate::animations::Instant::now(ctx);
 
                 if let Some(click_count_time_stamp) = self.click_count_time_stamp.get() {
@@ -1376,14 +1430,18 @@ impl ClickState {
                     button,
                     click_count: self.click_count.get(),
                     touch_finger_id,
+                    is_activation_click,
                 };
             }
-            MouseEvent::Released { position, button, touch_finger_id, .. } => {
+            MouseEvent::Released {
+                position, button, touch_finger_id, is_activation_click, ..
+            } => {
                 return MouseEvent::Released {
                     position,
                     button,
-                    click_count: self.click_count.get(),
+                    click_count: if is_activation_click { 0 } else { self.click_count.get() },
                     touch_finger_id,
+                    is_activation_click,
                 };
             }
             _ => {}
@@ -2279,6 +2337,7 @@ impl TouchState {
                 button: PointerEventButton::Left,
                 click_count: 0,
                 touch_finger_id: id + 1,
+                is_activation_click: false,
             });
         } else if total == 2 {
             // Second finger: transition Idle → TwoFingersDown.
@@ -2306,6 +2365,7 @@ impl TouchState {
                 button: PointerEventButton::Left,
                 click_count: 0,
                 touch_finger_id: id + 1,
+                is_activation_click: false,
             });
         }
         // 3+ fingers: tracked in active_touches but ignored for gesture.
@@ -2423,6 +2483,7 @@ impl TouchState {
                         button: PointerEventButton::Left,
                         click_count: 0,
                         touch_finger_id: id + 1,
+                        is_activation_click: false,
                     });
                     events.push(MouseEvent::Exit);
                 }
@@ -2438,6 +2499,7 @@ impl TouchState {
                             button: PointerEventButton::Left,
                             click_count: 0,
                             touch_finger_id: remaining.id + 1,
+                            is_activation_click: false,
                         });
                     } else {
                         self.primary_touch_id = None;
@@ -2482,6 +2544,7 @@ impl TouchState {
                         button: PointerEventButton::Left,
                         click_count: 0,
                         touch_finger_id: rid + 1,
+                        is_activation_click: false,
                     });
                 } else {
                     events.push(MouseEvent::Exit);
