@@ -1,0 +1,25 @@
+name: WGPU Windows probe
+on:
+  push:
+    branches: [diagnose-femtovg-windows]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install 1.95 --profile minimal
+      - run: cargo +1.95 build --manifest-path wgpu-probe/Cargo.toml
+      - name: Probe each backend
+        shell: pwsh
+        env:
+          RUST_LOG: wgpu_core=trace,wgpu_hal=trace
+        run: |
+          foreach ($backend in @('all', 'dx12', 'vulkan', 'gl')) {
+            Write-Host "=== backend: $backend ==="
+            & ./wgpu-probe/target/debug/wgpu-probe.exe $backend
+            Write-Host "=== exit code: $LASTEXITCODE ==="
+          }
+          exit 0

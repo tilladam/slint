@@ -1,0 +1,11 @@
+[package]
+name = "wgpu-probe"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+wgpu = "=30.0.1"
+spin_on = "0.1"
+env_logger = "0.11"
