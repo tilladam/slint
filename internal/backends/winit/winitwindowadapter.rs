@@ -1527,7 +1527,14 @@ impl WinitWindowAdapter {
                     phase,
                 });
             }
-            WinitWindowEvent::PointerButton { device_id, state, position, button, .. } => {
+            WinitWindowEvent::PointerButton {
+                device_id,
+                state,
+                position,
+                button,
+                is_macos_activation_click,
+                ..
+            } => {
                 use winit::event::{ButtonSource as S, MouseButton as B};
 
                 let logical = physical_position_to_slint(*position, runtime_window.scale_factor());
@@ -1570,9 +1577,7 @@ impl WinitWindowAdapter {
                             button,
                             click_count: 0,
                             touch_finger_id: 0,
-                            // winit 0.30 has no per-event activation-click
-                            // information; wired up with the 0.31 upgrade.
-                            is_activation_click: false,
+                            is_activation_click: *is_macos_activation_click,
                         }
                     }
                     winit::event::ElementState::Released => {
@@ -1582,7 +1587,7 @@ impl WinitWindowAdapter {
                             button,
                             click_count: 0,
                             touch_finger_id: 0,
-                            is_activation_click: false,
+                            is_activation_click: *is_macos_activation_click,
                         }
                     }
                 };
